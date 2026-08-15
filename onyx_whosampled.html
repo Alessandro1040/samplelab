@@ -1,0 +1,2784 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Onyx · SampleLab Player</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#080808;
+  --surface:#111111;
+  --surface2:#1a1a1a;
+  --surface3:#222222;
+  --border:#252525;
+  --border2:#333333;
+  --text:#e8e8e8;
+  --text2:#a0a0a0;
+  --text3:#666666;
+  --accent:#c8f000;
+  --accent2:#7b5ea7;
+  --accent3:#2dd4bf;
+  --red:#ff4545;
+  --sidebar-w:230px;
+  --nowbar-h:90px;
+  --solid-color: #080808;
+}
+html,body{height:100%;overflow:hidden;}
+body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;}
+
+/* ─── LAYOUT ─── */
+.app{display:flex;flex-direction:column;height:100vh;}
+/* Topbar stile SampleLab: unica applicazione */
+.onyx-topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px;height:46px;flex-shrink:0;background:var(--surface);border-bottom:1px solid var(--border);z-index:50;}
+.ot-logo{font-family:'Space Mono',monospace;font-size:15px;font-weight:700;color:var(--accent);letter-spacing:-.5px;white-space:nowrap;}
+.ot-logo span{color:var(--text3);font-weight:400;}
+.ot-nav{display:flex;gap:2px;align-items:center;}
+.ot-tab{padding:8px 14px;font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;transition:all .15s;}
+.ot-tab:hover{color:var(--text);}
+.ot-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.main-area{display:flex;flex:1;overflow:hidden;padding:8px;gap:8px;}
+.sidebar{width:var(--sidebar-w);flex-shrink:0;background:var(--surface);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;}
+.content{flex:1;background:var(--surface);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;position:relative;}
+.nowbar{height:var(--nowbar-h);background:var(--surface);border-top:1px solid var(--border);padding:0 16px;display:flex;align-items:center;gap:12px;flex-shrink:0;margin:0 8px 8px;border-radius:12px;}
+body.embedded .onyx-topbar{display:none;}
+body.embedded .content-header{padding-top:14px;}
+
+/* ─── ONYX LOGO ─── */
+.sidebar-logo{padding:20px 20px 8px;display:flex;flex-direction:column;align-items:flex-start;margin-bottom:10px;}
+.logo-icon{
+  width:64px; height:64px;
+  background:linear-gradient(145deg, #2c2c2c, #0f0f0f);
+  border-radius:20px; border:1px solid #3a3a3a;
+  display:flex; align-items:center; justify-content:center;
+  position:relative; margin-bottom:6px;
+  box-shadow:0 4px 15px rgba(0,0,0,0.6);
+}
+.logo-gem{
+  width:30px; height:40px; background:#090909;
+  border-radius:50%; transform:rotate(-15deg);
+  position:relative; box-shadow:inset 0 -4px 8px rgba(0,0,0,0.9), 0 0 15px rgba(255,255,255,0.05);
+}
+.logo-gem::before{
+  content:''; position:absolute; top:10px; left:6px;
+  width:10px; height:12px; background:rgba(255,255,255,0.1);
+  border-radius:50%; transform:rotate(45deg);
+}
+.logo-gem::after{
+  content:''; position:absolute; bottom:8px; right:4px;
+  width:8px; height:10px; background:rgba(255,255,255,0.05);
+  border-radius:50%; transform:rotate(-20deg);
+}
+.logo-text{
+  font-family:'Space Grotesk', sans-serif; font-size:22px; font-weight:700;
+  color:var(--text); letter-spacing:-.5px;
+}
+.logo-text small{display:block;font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);font-weight:400;letter-spacing:.2em;text-transform:uppercase;margin-top:2px;}
+
+/* ─── BACKGROUND ─── */
+.bg-layer{position:absolute;inset:0;z-index:0;border-radius:12px;overflow:hidden;}
+.bg-layer img{width:100%;height:100%;object-fit:cover;filter:grayscale(1) brightness(0.4) contrast(1.2);}
+.bg-layer.solid{background:var(--solid-color);}
+.bg-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 30%, transparent 20%, rgba(0,0,0,0.85) 80%);
+  pointer-events: none;
+  z-index: 1;
+}
+.content-inner{position:relative;z-index:2;display:flex;flex-direction:column;height:100%;overflow:hidden;}
+
+/* ─── SIDEBAR ─── */
+.sidebar-nav{padding:8px;}
+.nav-item{display:flex;align-items:center;gap:14px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;color:var(--text3);transition:all .2s;}
+.nav-item:hover{color:var(--text);background:var(--surface2);}
+.nav-item.active{color:var(--accent);}
+.nav-item svg{width:20px;height:20px;flex-shrink:0;}
+.sidebar-divider{height:1px;background:var(--border);margin:8px 16px;}
+.library-header{padding:8px 20px;display:flex;align-items:center;justify-content:space-between;}
+.library-title{font-size:13px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;}
+.icon-btn{background:none;border:none;color:var(--text3);cursor:pointer;padding:4px;border-radius:4px;display:flex;align-items:center;transition:color .2s;}
+.icon-btn:hover{color:var(--accent);}
+.icon-btn svg{width:18px;height:18px;}
+.playlist-list{flex:1;overflow-y:auto;padding:0 8px 8px;}
+.playlist-list::-webkit-scrollbar{width:4px;}
+.playlist-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.pl-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .2s;}
+.pl-item:hover{background:var(--surface2);}
+.pl-item.active-pl{background:var(--surface3);}
+.pl-item-art{width:44px;height:44px;background:var(--surface3);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;overflow:hidden;}
+.pl-item-art img{width:100%;height:100%;object-fit:cover;}
+.pl-item-info{min-width:0;}
+.pl-item-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);}
+.pl-item-count{font-size:11px;color:var(--text3);margin-top:2px;}
+.pl-add-btn{width:100%;background:none;border:1px dashed var(--border);color:var(--text3);padding:8px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;margin:4px 12px;width:calc(100% - 24px);transition:all .2s;font-family:inherit;}
+.pl-add-btn:hover{border-color:var(--text2);color:var(--text);}
+
+/* ─── CONTENT HEADER ─── */
+.content-header{padding:20px 24px 0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.page-title-wrap{display:flex;align-items:center;gap:12px;}
+.page-title{font-size:26px;font-weight:800;letter-spacing:-0.5px;}
+.page-title-back{background:none;border:none;color:var(--text3);cursor:pointer;padding:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+.page-title-back:hover{color:var(--text);background:var(--surface2);}
+.page-title-back svg{width:22px;height:22px;}
+.header-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.action-btn{background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:7px 14px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .2s;}
+.action-btn:hover{background:var(--surface3);color:var(--text);border-color:var(--text3);}
+.action-btn.primary{background:var(--accent);color:#000;border-color:var(--accent);}
+.action-btn.primary:hover{background:#ddd;}
+.action-btn.success{background:var(--surface2);border:1px solid #6a6a6a;color:var(--text2);}
+.action-btn.download{border:1px solid var(--text2);background:var(--surface2); color:var(--text2);}
+.action-btn.download:hover{background:var(--surface3); color:var(--text); border-color:var(--text);}
+.action-btn.download.active{background:var(--surface3);border:1px solid var(--text);color:var(--text);}
+.action-btn.select-active{background:var(--surface3);color:var(--text);border-color:var(--text);}
+.action-btn.danger{background:var(--surface2);border:1px solid #a02a2a;color:var(--text2);}
+.action-btn.danger:hover{background:#2a0a0a;color:#f44;border-color:#f44;}
+.action-btn.analyze{transition: all 0.2s;}
+
+/* ─── BG PICKER ─── */
+.bg-picker{padding:12px 24px;display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.bg-label{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;white-space:nowrap;}
+.bg-opts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.bg-swatch{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .2s;flex-shrink:0;}
+.bg-swatch:hover,.bg-swatch.sel{border-color:var(--text);transform:scale(1.15);}
+.bg-swatch.img-swatch{background-size:cover;background-position:center;}
+.bg-upload-btn{background:var(--surface3);border:1px solid var(--border);color:var(--text2);padding:3px 10px;border-radius:20px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:500;white-space:nowrap;}
+.bg-upload-btn:hover{color:var(--text);border-color:var(--text2);}
+.bg-colorpicker-btn{background:var(--surface3);border:1px solid var(--border);color:var(--text2);padding:3px 10px;border-radius:20px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:500;white-space:nowrap;}
+.bg-colorpicker-btn:hover{color:var(--text);border-color:var(--text2);}
+
+/* ─── SEARCH BAR ─── */
+.search-bar{padding:12px 24px;flex-shrink:0;display:none;}
+.search-wrap{position:relative;max-width:400px;}
+.search-wrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--text3);}
+.search-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:8px 12px 8px 36px;font-size:13px;color:var(--text);font-family:inherit;outline:none;transition:border-color .2s;}
+.search-input:focus{border-color:var(--text2);}
+.search-input::placeholder{color:var(--text3);}
+
+/* ─── TRACKS TABLE ─── */
+.tracks-area{flex:1;overflow-y:auto;padding:0 24px 16px;}
+.tracks-area::-webkit-scrollbar{width:4px;}
+.tracks-area::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.tracks-header{display:grid;grid-template-columns:40px 30px 1fr 130px 70px 50px 40px;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);margin-bottom:4px;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.8px;align-items:center;}
+.tracks-header .th-sort{cursor:pointer;transition:color .2s;display:flex;align-items:center;gap:4px;}
+.tracks-header .th-sort:hover{color:var(--text);}
+.track-row{display:grid;grid-template-columns:40px 30px 1fr 130px 70px 50px 40px;gap:8px;padding:8px 12px;border-radius:8px;cursor:pointer;align-items:center;transition:background .15s;position:relative;}
+.track-row:hover{background:rgba(255,255,255,0.04);}
+.track-row.playing{background:rgba(255,255,255,0.03);}
+.track-num-cell{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;}
+.track-num{font-size:14px;color:var(--text3);text-align:center;font-weight:500;}
+.track-row.playing .track-num{color:var(--text);}
+.track-row:hover .track-num{display:none;}
+.track-row:hover .track-play-hover{display:flex!important;}
+.track-play-hover{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--text);z-index:2;}
+.track-play-hover svg{width:18px;height:18px;}
+.track-play-hover svg{width:18px;height:18px;}
+.track-main{display:flex;align-items:center;gap:12px;min-width:0;}
+.track-art{width:40px;height:40px;background:var(--surface3);border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.track-art img{width:100%;height:100%;object-fit:cover;}
+.track-art svg{width:18px;height:18px;color:var(--text3);}
+.track-text{min-width:0;}
+.track-name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);cursor:pointer;}
+.track-row.playing .track-name{color:var(--accent);}
+.track-name:hover{text-decoration:underline;}
+.track-artist-part{font-size:12px;color:var(--text3);margin-right:4px;cursor:pointer;transition:color .2s;display:inline-block;}
+.track-artist-part:hover{color:var(--text);text-decoration:underline;}
+.track-artist-sep{font-size:12px;color:var(--text3);margin-right:4px;}
+.track-album{font-size:12px;color:var(--text3);margin-top:2px;cursor:pointer;transition:color .2s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.track-album:hover{color:var(--text);text-decoration:underline;}
+.track-dur{font-size:12px;color:var(--text3);text-align:right;}
+.track-year{font-size:12px;color:var(--text3);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.track-opts-col{display:flex;justify-content:center;}
+.track-opts{background:none;border:none;color:var(--text3);cursor:pointer;padding:4px;border-radius:4px;opacity:0;transition:opacity .2s;}
+.track-row:hover .track-opts{opacity:1;}
+.track-opts:hover{color:var(--text);}
+.track-opts svg{width:16px;height:16px;}
+
+/* ─── CHECKBOX ─── */
+.track-check{width:16px;height:16px;accent-color:#fff;cursor:pointer;margin:0 auto;display:block;}
+
+/* ─── ANALYZE BUTTON ─── */
+.analyze-btn{background:none;border:1px solid transparent;color:var(--text2);cursor:pointer;padding:4px;border-radius:4px;transition:all .2s;font-size:11px;font-weight:600;font-family:inherit;white-space:nowrap;opacity:0;}
+.track-row:hover .analyze-btn{opacity:1;border-color:var(--border);}
+.analyze-btn:hover{background:var(--surface3);color:var(--text);border-color:var(--text3);}
+.analyze-btn.analyzing{opacity:1; border-color:var(--border); animation:pulseIcon 1.2s infinite;}
+.analyze-btn.error{opacity:1; border-color:#f44; color:#f44;}
+.analyze-status{position:absolute;right:52px;top:50%;transform:translateY(-50%);max-width:430px;text-align:right;font-size:8.5px;line-height:1.3;color:var(--accent2);font-family:'Space Mono',monospace;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+@keyframes pulseIcon {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.header-analyze-btn{background:none;border:1px solid var(--border);color:var(--text2);padding:7px 14px;border-radius:20px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .2s;}
+.header-analyze-btn:hover{background:var(--surface3);color:var(--text);border-color:var(--text3);}
+
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--text3);}
+.empty-state svg{width:48px;height:48px;opacity:.3;}
+.empty-state p{font-size:14px;}
+
+/* ─── CONTEXT MENU ─── */
+.ctx-menu{position:fixed;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:4px;z-index:9999;min-width:180px;box-shadow:0 8px 24px rgba(0,0,0,.8);}
+.ctx-item{padding:10px 16px;font-size:13px;cursor:pointer;border-radius:6px;color:var(--text);transition:background .15s;}
+.ctx-item:hover{background:var(--surface3);}
+.ctx-item.danger{color:var(--red);}
+.ctx-sep{height:1px;background:var(--border2);margin:4px 0;}
+
+/* ─── LYRICS PANEL ─── */
+.lyrics-panel{position:absolute;right:0;top:0;bottom:0;width:380px;background:rgba(10,10,10,.95);backdrop-filter:blur(20px);z-index:10;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .35s cubic-bezier(.4,0,.2,1);border-radius:0 12px 12px 0;border-left:1px solid var(--border);}
+.lyrics-panel.open{transform:translateX(0);}
+.lyrics-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;}
+.lyrics-title{font-size:14px;font-weight:700;color:var(--text);}
+.lyrics-body{flex:1;overflow-y:auto;padding:20px;}
+.lyrics-body::-webkit-scrollbar{width:4px;}
+.lyrics-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.lyrics-text{font-size:15px;line-height:2;color:var(--text2);white-space:pre-wrap;word-break:break-word;}
+.lyrics-empty{text-align:center;color:var(--text3);font-size:13px;margin-top:40px;}
+.lyrics-upload-area{padding:16px 20px;border-top:1px solid var(--border);flex-shrink:0;}
+.lyrics-upload-btn{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:8px;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;font-weight:500;transition:all .2s;}
+.lyrics-upload-btn:hover{color:var(--text);border-color:var(--text2);}
+
+/* ─── NOW BAR ─── */
+.nowbar-left{display:flex;align-items:center;gap:12px;width:260px;flex-shrink:0;}
+.nowbar-art{width:56px;height:56px;background:var(--surface2);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.nowbar-art img{width:100%;height:100%;object-fit:cover;}
+.nowbar-art svg{width:22px;height:22px;color:var(--text3);}
+.nowbar-info{min-width:0;}
+.nowbar-track{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);cursor:pointer;}
+.nowbar-track:hover{text-decoration:underline;}
+.nowbar-artist{font-size:11px;color:var(--text3);margin-top:2px;cursor:pointer;transition:color .2s;}
+.nowbar-artist:hover{color:var(--text);text-decoration:underline;}
+.nowbar-center{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;}
+.controls{display:flex;align-items:center;gap:16px;}
+.ctrl-btn{background:none;border:none;color:var(--text3);cursor:pointer;padding:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+.ctrl-btn:hover{color:var(--text);}
+.ctrl-btn svg{width:20px;height:20px;}
+.ctrl-btn.large svg{width:26px;height:26px;}
+.ctrl-btn.play{width:40px;height:40px;background:var(--accent);color:#080808;border-radius:50%;}
+.ctrl-btn.play:hover{opacity:.88;transform:scale(1.05);}
+.ctrl-btn.play svg{width:20px;height:20px;}
+.ctrl-btn.active{color:var(--text);}
+.progress-row{width:100%;display:flex;align-items:center;gap:10px;}
+.time-label{font-size:11px;color:var(--text3);width:36px;flex-shrink:0;}
+.time-label.right{text-align:right;}
+.prog-track{flex:1;height:4px;background:var(--surface3);border-radius:2px;cursor:pointer;position:relative;}
+.prog-fill{height:100%;background:var(--text);border-radius:2px;position:relative;pointer-events:none;}
+.prog-fill::after{content:'';position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:12px;height:12px;background:var(--text);border-radius:50%;opacity:0;transition:opacity .2s;}
+.prog-track:hover .prog-fill::after{opacity:1;}
+.nowbar-right{display:flex;align-items:center;gap:10px;width:260px;justify-content:flex-end;flex-shrink:0;}
+.vol-row{display:flex;align-items:center;gap:8px;}
+.vol-slider{width:90px;-webkit-appearance:none;appearance:none;height:4px;background:var(--surface3);border-radius:2px;outline:none;}
+.vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;background:var(--text);border-radius:50%;cursor:pointer;}
+.vol-slider::-moz-range-thumb{width:12px;height:12px;background:var(--text);border-radius:50%;border:none;cursor:pointer;}
+
+/* ─── MODAL ─── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .25s;}
+.modal-overlay.open{opacity:1;pointer-events:all;}
+.modal{background:#222;border-radius:12px;padding:28px;width:420px;max-width:90vw;max-height:90vh;overflow-y:auto;}
+.modal h2{font-size:18px;font-weight:700;margin-bottom:15px;}
+.modal-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--text);font-family:inherit;outline:none;margin-bottom:12px;}
+.modal-input:focus{border-color:var(--text2);}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px;}
+.modal-btn{padding:9px 20px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;border:none;transition:all .2s;}
+.modal-btn.cancel{background:var(--surface3);color:var(--text2);}
+.modal-btn.cancel:hover{color:var(--text);}
+.modal-btn.confirm{background:var(--text);color:#000;}
+.modal-btn.confirm:hover{background:#ddd;}
+.modal-btn.danger{background:#d32f2f;color:#fff;}
+.modal-btn.danger:hover{background:#b71c1c;}
+
+/* ─── ASSIGN PLAYLIST MODAL ─── */
+.pl-list-modal{max-height:200px;overflow-y:auto;margin-bottom:12px;}
+.pl-radio-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .15s;}
+.pl-radio-item:hover{background:var(--surface3);}
+.pl-radio-item input{accent-color:var(--text);}
+
+/* ─── MINI EQUALIZER ─── */
+.eq-bars{display:flex;align-items:flex-end;gap:2px;height:14px;opacity:0;transition:opacity .3s;}
+.eq-bars.playing{opacity:1;}
+.eq-bar{width:3px;background:var(--text);border-radius:1px;animation:eq .8s ease-in-out infinite;}
+.eq-bar:nth-child(1){height:40%;animation-delay:0s;}
+.eq-bar:nth-child(2){height:100%;animation-delay:.15s;}
+.eq-bar:nth-child(3){height:60%;animation-delay:.3s;}
+@keyframes eq{0%,100%{transform:scaleY(.5);}50%{transform:scaleY(1);}}
+
+/* Scrollbar global */
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+
+/* Hidden inputs */
+.hidden{display:none!important;}
+
+/* ─── MODIFICA 1: CSS AGGIUNTIVO PER MODAL AVANZATO ─── */
+.sample-edit-row { display:grid; grid-template-columns:1fr 1fr 60px 30px; gap:6px; margin-bottom:6px; align-items:center; }
+.sample-edit-row input { background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:6px 10px; color:var(--text); font-size:12px; font-family:inherit; width:100%; outline:none; }
+.sample-edit-row input:focus { border-color:var(--text2); }
+.sample-edit-row button { background:none; border:none; color:var(--text3); cursor:pointer; font-size:16px; display:flex; align-items:center; justify-content:center; height:100%; }
+.sample-edit-row button:hover { color:#f44; }
+#editTrackModal .modal { width:600px; max-height:85vh; display:flex; flex-direction:column; }
+#editTrackModal .modal-scroll { overflow-y:auto; flex:1; padding-right:4px; }
+.edit-section-label { margin:12px 0 6px; font-size:12px; font-weight:600; color:var(--text3); display:flex; justify-content:space-between; align-items:center; }
+.edit-add-btn { background:var(--surface3); border:1px solid var(--border); color:var(--text2); padding:3px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-family:inherit; transition:all .2s; }
+.edit-add-btn:hover { color:var(--text); border-color:var(--text2); }
+.edit-urls { margin-top:8px; font-size:11px; color:var(--text3); word-break:break-all; }
+</style>
+</head>
+<body>
+<script>if(window.self!==window.top)document.body.classList.add('embedded');</script>
+<div class="app">
+  <!-- TOPBAR stile SampleLab (unica applicazione) -->
+  <div class="onyx-topbar" id="onyxTopbar">
+    <div class="ot-logo">Sample<span>Lab</span> <span style="color:var(--text3)">·</span> Onyx</div>
+    <div class="ot-nav" id="otNav">
+      <button class="ot-tab" onclick="onyxGo('scraper')">🔍 Trova Campioni</button>
+      <button class="ot-tab" onclick="onyxGo('database')">🗄️ Database</button>
+      <button class="ot-tab active" onclick="onyxGo('player')">🎧 Player</button>
+    </div>
+  </div>
+  <!-- MAIN AREA -->
+  <div class="main-area">
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-icon">
+            <div class="logo-gem"></div>
+        </div>
+        <div class="logo-text">Onyx<small>SampleLab Player</small></div>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-item active" onclick="showView('home')">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+          Home
+        </div>
+        <div class="nav-item" onclick="showView('search')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          Cerca
+        </div>
+      </nav>
+      <div class="sidebar-divider"></div>
+      <div class="library-header">
+        <span class="library-title">Libreria</span>
+        <button class="icon-btn" onclick="openNewPlaylistModal()" title="Nuova playlist">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <div class="playlist-list" id="sidebarPlaylists"></div>
+      <button class="pl-add-btn" onclick="openNewPlaylistModal()">+ Nuova playlist</button>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content" id="contentArea">
+      <!-- Background layer -->
+      <div class="bg-layer" id="bgLayer">
+        <img id="bgImg" src="" alt="" style="display:none;">
+      </div>
+
+      <div class="content-inner">
+        <!-- Header -->
+        <div class="content-header">
+          <div class="page-title-wrap">
+            <button class="page-title-back" id="pageTitleBack" onclick="clearFilters()" style="display:none;">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            </button>
+            <div class="page-title" id="pageTitle">La tua musica</div>
+          </div>
+          <div class="header-actions">
+            <button class="action-btn" onclick="openLyrics()" id="lyricsToggle">🎵 Testo</button>
+            <button class="action-btn" id="toggleSelectBtn" onclick="toggleSelectionMode()">☑ Seleziona</button>
+            <button class="action-btn download" id="downloadBtn" onclick="downloadSelected()" style="display:none;">⬇️ Scarica (<span id="selCount">0</span>)</button>
+            <button class="action-btn danger" id="deleteSelectedBtn" onclick="deleteSelectedTracks()" style="display:none;">🗑 Rimuovi selezionati</button>
+            <button class="action-btn success" onclick="selectAllTracks()" style="border-color:var(--text3);">✅ Seleziona tutti</button>
+            <button class="action-btn success" onclick="clearSelection()" style="border-color:var(--text3);">❌ Deseleziona</button>
+            <button class="action-btn" onclick="openBatchRenameModal()">🔄 Rinomina</button>
+            <button class="action-btn analyze" id="analyzeAllBtn" onclick="analyzeAllTracks()">🔍 Analizza tutto</button>
+            <button class="action-btn primary" onclick="document.getElementById('addFilesInput').click()">+ Aggiungi brani</button>
+            <button class="action-btn success" onclick="document.getElementById('addFolderInput').click()">📂 Carica cartella</button>
+          </div>
+        </div>
+
+        <!-- BG Picker -->
+        <div class="bg-picker">
+          <span class="bg-label">Sfondo</span>
+          <div class="bg-opts" id="bgOpts">
+            <div class="bg-swatch" style="background:#0a0a0a;border-color:#555;" title="Nero" onclick="setBg('#0a0a0a')" data-bg="#0a0a0a"></div>
+            <div class="bg-swatch" style="background:#1a1a1a;" title="Grigio Scuro" onclick="setBg('#1a1a1a')" data-bg="#1a1a1a"></div>
+            <div class="bg-swatch" style="background:#333333;" title="Carbone" onclick="setBg('#333333')" data-bg="#333333"></div>
+            <div class="bg-swatch" style="background:#555555;" title="Grigio Medio" onclick="setBg('#555555')" data-bg="#555555"></div>
+            <div class="bg-swatch" style="background:#888888;" title="Grigio Chiaro" onclick="setBg('#888888')" data-bg="#888888"></div>
+            <div class="bg-swatch" style="background:#dddddd;" title="Bianco Sporco" onclick="setBg('#dddddd')" data-bg="#dddddd"></div>
+            <button class="bg-upload-btn" onclick="document.getElementById('bgUploadInput').click()">📷 Carica</button>
+            <button class="bg-colorpicker-btn" onclick="document.getElementById('bgColorPicker').click()">🎨</button>
+            <input type="color" id="bgColorPicker" class="hidden" value="#0a0a0a" onchange="setBg(this.value)">
+          </div>
+        </div>
+
+        <!-- Search bar (visible in search view) -->
+        <div class="search-bar" id="searchBar">
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input class="search-input" id="searchInput" placeholder="Cerca brani, artisti..." oninput="filterTracks()">
+          </div>
+        </div>
+
+        <!-- Tracks area -->
+        <div class="tracks-area" id="tracksArea">
+          <div class="tracks-header">
+            <div style="text-align:center;">#</div>
+            <div style="text-align:center; visibility: hidden;" id="masterCheckContainer"><input type="checkbox" id="masterCheckbox" class="track-check" onchange="toggleMasterCheckbox()"></div>
+            <div class="th-sort" onclick="sortBy('name')">TITOLO <span id="sortArrowName">▾</span></div>
+            <div class="th-sort" onclick="sortBy('release_date')">DATA <span id="sortArrowReleaseDate">▾</span></div>
+            <div class="th-sort" onclick="sortBy('dur')">DURATA <span id="sortArrowDur">▾</span></div>
+            <div style="text-align:center;">ANALISI</div>
+            <div></div>
+          </div>
+          <div id="tracksList"></div>
+        </div>
+      </div>
+
+      <!-- Lyrics Panel -->
+      <div class="lyrics-panel" id="lyricsPanel">
+        <div class="lyrics-header">
+          <span class="lyrics-title">Testo & Info</span>
+          <button class="icon-btn" onclick="closeLyrics()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="lyrics-body">
+          <div id="lyricsContent"></div>
+        </div>
+        <div class="lyrics-upload-area">
+          <button class="lyrics-upload-btn" onclick="triggerLyricsUpload()">📄 Carica testo (.txt) per questo brano</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NOW BAR -->
+  <div class="nowbar">
+    <div class="nowbar-left">
+      <div class="nowbar-art" id="nowArt">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+      </div>
+      <div class="nowbar-info">
+        <div class="nowbar-track" id="nowTrack" onclick="nowbarOpenAlbum()" title="Apri l'album di questa canzone">—</div>
+        <div class="nowbar-artist" id="nowArtist" onclick="nowbarOpenArtist()" title="Tutte le canzoni di questo artista">Seleziona un brano</div>
+      </div>
+      <div class="eq-bars" id="eqBars">
+        <div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div>
+      </div>
+    </div>
+
+    <div class="nowbar-center">
+      <div class="controls">
+        <button class="ctrl-btn" id="shuffleBtn" onclick="toggleShuffle()" title="Shuffle">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+        </button>
+        <button class="ctrl-btn large" onclick="prevTrack()" title="Precedente">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+        </button>
+        <button class="ctrl-btn play" id="playBtn" onclick="togglePlay()" title="Play/Pausa">
+          <svg viewBox="0 0 24 24" fill="currentColor" id="playIcon"><path d="M8 5v14l11-7z"/></svg>
+          <svg viewBox="0 0 24 24" fill="currentColor" id="pauseIcon" style="display:none"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+        </button>
+        <button class="ctrl-btn large" onclick="nextTrack()" title="Successivo">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+        <button class="ctrl-btn" id="repeatBtn" onclick="toggleRepeat()" title="Ripeti">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+        </button>
+      </div>
+      <div class="progress-row">
+        <span class="time-label" id="curTime">0:00</span>
+        <div class="prog-track" id="progTrack">
+          <div class="prog-fill" id="progFill" style="width:0%"></div>
+        </div>
+        <span class="time-label right" id="durTime">0:00</span>
+      </div>
+    </div>
+
+    <div class="nowbar-right">
+      <button class="ctrl-btn" onclick="openLyrics()" title="Testo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+      </button>
+      <div class="vol-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:var(--text3)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        <input type="range" class="vol-slider" id="volSlider" min="0" max="100" value="70" oninput="setVol(this.value)">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modals -->
+<div class="modal-overlay" id="newPlModal">
+  <div class="modal">
+    <h2>Nuova Playlist</h2>
+    <input class="modal-input" id="newPlName" placeholder="Nome playlist..." maxlength="60">
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="closeModal('newPlModal')">Annulla</button>
+      <button class="modal-btn confirm" onclick="createPlaylist()">Crea</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="assignPlModal">
+  <div class="modal">
+    <h2>Aggiungi a Playlist</h2>
+    <div class="pl-list-modal" id="assignPlList"></div>
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="closeModal('assignPlModal')">Annulla</button>
+      <button class="modal-btn confirm" onclick="confirmAssignPlaylist()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="renamePlModal">
+  <div class="modal">
+    <h2>Rinomina Playlist</h2>
+    <input class="modal-input" id="renamePlInput" placeholder="Nuovo nome...">
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="closeModal('renamePlModal')">Annulla</button>
+      <button class="modal-btn confirm" onclick="confirmRenamePlaylist()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="batchRenameModal">
+  <div class="modal">
+    <h2>Rinomina Massiva (Case Sensitive)</h2>
+    <p style="font-size:13px; color:var(--text2); margin-bottom:15px;">Cerca una parola o pattern Regex e sostituiscila in TUTTI i brani. Le modifiche avvengono su Artista e Titolo.</p>
+    <input class="modal-input" id="batchFind" placeholder="Cosa cercare...">
+    <input class="modal-input" id="batchReplace" placeholder="Con cosa sostituire...">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:12px;color:var(--text2);">
+      <input type="checkbox" id="batchIsRegex" style="accent-color:#fff;"> 
+      <label for="batchIsRegex">Usa Regex (Espressioni Regolari)</label>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="closeModal('batchRenameModal')">Annulla</button>
+      <button class="modal-btn danger" onclick="confirmBatchRename()">🔄 Applica a tutti</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── MODIFICA 2: EXTEND editTrackModal ─── -->
+<div class="modal-overlay" id="editTrackModal">
+  <div class="modal">
+    <h2>Modifica Info Brano</h2>
+    <div class="modal-scroll">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <input class="modal-input" id="editTrackName" placeholder="Titolo">
+        <input class="modal-input" id="editTrackArtist" placeholder="Artista">
+      </div>
+      <input class="modal-input" id="editTrackAlbum" placeholder="Album">
+      <input class="modal-input" id="editTrackYear" placeholder="Anno (es. 2022)">
+      
+      <div class="edit-section-label">TESTO CANZONE</div>
+      <textarea class="modal-input" id="editTrackLyrics" placeholder="Incolla il testo della canzone..." style="min-height:120px; resize:vertical; font-family:inherit;"></textarea>
+      
+      <div class="edit-section-label">
+        <span>🎵 CAMPIONA DA (Sample Sources)</span>
+        <button type="button" class="edit-add-btn" onclick="addSampleSourceRow()">+ Aggiungi</button>
+      </div>
+      <div id="editSampleSourcesList"></div>
+      
+      <div class="edit-section-label">
+        <span>🎵 CAMPIONATO IN (Sample Usages)</span>
+        <button type="button" class="edit-add-btn" onclick="addSampleUsageRow()">+ Aggiungi</button>
+      </div>
+      <div id="editSampleUsagesList"></div>
+      
+      <div class="edit-urls" id="editTrackUrls"></div>
+    </div>
+    <div class="modal-actions" style="margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+      <button class="modal-btn cancel" onclick="closeModal('editTrackModal')">Annulla</button>
+      <button class="modal-btn confirm" onclick="confirmEditTrack()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context Menu -->
+<div class="ctx-menu hidden" id="ctxMenu"></div>
+
+<!-- Hidden Inputs -->
+<input type="file" id="addFilesInput" accept="audio/*" multiple class="hidden" onchange="handleAudioFiles(this.files)">
+<input type="file" id="addFolderInput" webkitdirectory multiple class="hidden" onchange="handleAudioFiles(this.files)">
+<input type="file" id="bgUploadInput" accept="image/*" class="hidden" onchange="handleBgUpload(this.files[0])">
+<input type="file" id="lyricsInput" accept=".txt,text/plain" class="hidden" onchange="handleLyricsUpload(this.files[0])">
+<audio id="audioEl"></audio>
+
+<script>
+// ──────────────────────────────────────────────
+//  STATE
+// ──────────────────────────────────────────────
+const DB_NAME = "onyx_db", DB_VER = 2;
+let db;
+let tracks = [];        // {id, name, artist, album, year, dur, playlists:[], lyrics:'', sampleSources:[], sampleUsages:[], analyzed:'none', geniusUrl:'', whosampledUrl:''}
+let playlists = [];     // {id, name}
+let audioBlobs = {};    // id -> objectURL
+let currentIdx = -1;
+let currentTrackId = null;
+let isPlaying = false;
+let shuffle = false, repeat = false;
+let shuffleOrder = [];
+let currentView = "home";
+let currentPlFilter = null;
+let currentArtistFilter = null;
+let currentAlbumFilter = null;
+let lyricsOpen = false;
+let contextTrackId = null;
+let assignPlTrackId = null;
+let renamePlId = null;
+let editTrackId = null;
+let bgMode = "#0a0a0a";
+let customBgDataUrl = null;
+
+// Selection and Sorting State
+let selectionMode = false;
+let selectedIds = new Set();
+let sortState = { field: 'name', asc: true };
+let isAnalyzingAll = false;
+let whosampledCache = {};
+
+// ──────────────────────────────────────────────
+//  INDEXEDDB
+// ──────────────────────────────────────────────
+function initDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains("tracks")) d.createObjectStore("tracks", {keyPath:"id"});
+      if (!d.objectStoreNames.contains("blobs"))  d.createObjectStore("blobs",  {keyPath:"id"});
+      if (!d.objectStoreNames.contains("playlists")) d.createObjectStore("playlists", {keyPath:"id"});
+      if (!d.objectStoreNames.contains("settings")) d.createObjectStore("settings", {keyPath:"key"});
+    };
+    req.onsuccess = e => { db = e.target.result; res(); };
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+function dbPut(store, obj) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, "readwrite");
+    const req = tx.objectStore(store).put(obj);
+    req.onsuccess = () => res();
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+function dbGet(store, key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, "readonly");
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = e => res(e.target.result);
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+function dbGetAll(store) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, "readonly");
+    const req = tx.objectStore(store).getAll();
+    req.onsuccess = e => res(e.target.result);
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+function dbDelete(store, key) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, "readwrite");
+    const req = tx.objectStore(store).delete(key);
+    req.onsuccess = () => res();
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+// ──────────────────────────────────────────────
+//  TOGGLE SELECTION MODE
+// ──────────────────────────────────────────────
+function toggleSelectionMode() {
+  selectionMode = !selectionMode;
+  const btn = document.getElementById("toggleSelectBtn");
+  btn.classList.toggle("select-active", selectionMode);
+  btn.textContent = selectionMode ? "☑ Esci selezione" : "☑ Seleziona";
+  
+  const masterContainer = document.getElementById("masterCheckContainer");
+  masterContainer.style.visibility = selectionMode ? "visible" : "hidden";
+  
+  if (!selectionMode) {
+    clearSelection();
+  }
+  renderTracks();
+}
+
+// ──────────────────────────────────────────────
+//  LOAD SAVED DATA
+// ──────────────────────────────────────────────
+async function loadAll() {
+  tracks    = (await dbGetAll("tracks"))    || [];
+  playlists = (await dbGetAll("playlists")) || [];
+  const blobs = (await dbGetAll("blobs"))   || [];
+  audioBlobs = {};
+  for (const b of blobs) {
+    audioBlobs[b.id] = URL.createObjectURL(b.blob);
+  }
+  const bgSetting = await dbGet("settings", "bg");
+  if (bgSetting) {
+    bgMode = bgSetting.mode;
+    customBgDataUrl = bgSetting.custom || null;
+    applyBg(bgMode, false);
+  } else {
+    applyBg('#0a0a0a', false);
+  }
+  renderSidebar();
+  renderTracks();
+}
+
+// ──────────────────────────────────────────────
+//  BACKGROUND
+// ──────────────────────────────────────────────
+function setBg(mode) {
+  bgMode = mode;
+  document.querySelectorAll(".bg-swatch").forEach(s => s.classList.remove("sel"));
+  const sw = document.querySelector(`.bg-swatch[data-bg="${mode}"]`);
+  if (sw) sw.classList.add("sel");
+  applyBg(mode, true);
+  document.getElementById("bgColorPicker").value = mode;
+}
+
+function applyBg(mode, save) {
+  const layer = document.getElementById("bgLayer");
+  const img   = document.getElementById("bgImg");
+  document.documentElement.style.setProperty('--solid-color', mode);
+  
+  if (mode === "custom" && customBgDataUrl) {
+    layer.className = "bg-layer";
+    img.style.display = "";
+    img.src = customBgDataUrl;
+  } else if (mode.startsWith("#")) {
+    layer.className = "bg-layer solid";
+    img.style.display = "none";
+  }
+  document.querySelectorAll(".bg-swatch").forEach(s => {
+    s.classList.toggle("sel", s.dataset.bg === mode);
+  });
+  if (save) dbPut("settings", {key:"bg", mode, custom: customBgDataUrl});
+}
+
+function handleBgUpload(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    customBgDataUrl = e.target.result;
+    bgMode = "custom";
+    applyBg("custom", true);
+    let csw = document.querySelector(".bg-swatch[data-bg='custom']");
+    if (!csw) {
+      csw = document.createElement("div");
+      csw.className = "bg-swatch img-swatch";
+      csw.dataset.bg = "custom";
+      csw.title = "Sfondo personalizzato";
+      csw.onclick = () => setBg("custom");
+      const opts = document.getElementById("bgOpts");
+      opts.insertBefore(csw, opts.children[1]);
+    }
+    csw.style.backgroundImage = `url('${customBgDataUrl}')`;
+    document.querySelectorAll(".bg-swatch").forEach(s => s.classList.toggle("sel", s.dataset.bg === "custom"));
+  };
+  reader.readAsDataURL(file);
+}
+
+// ──────────────────────────────────────────────
+//  UTILITY: NORMALIZE FILENAME
+// ──────────────────────────────────────────────
+function normalizeName(str) {
+  return str.toLowerCase()
+    .replace(/\(\d+\)/g, '')   // remove (1), (2), etc
+    .replace(/_\d+/g, '')       // remove _1, _2, etc
+    .replace(/ - copy/g, '')    // remove " - copy"
+    .replace(/\s+/g, ' ')       // normalize whitespace
+    .trim();
+}
+
+// ──────────────────────────────────────────────
+//  METADATI REALI (tag ID3 / MP4 / Vorbis) nel file
+// ──────────────────────────────────────────────
+// Legge i tag scritti dentro il file audio (quelli che l'app Musica di macOS
+// salva: titolo, artista, album, anno, compositore, BPM, ecc.). Se presenti
+// prevalgono sulla ricostruzione dal nome file.
+function readAudioTags(file){
+  return new Promise((resolve)=>{
+    if(typeof jsmediatags === 'undefined' || !file) return resolve(null);
+    try{
+      jsmediatags.read(file, {
+        onSuccess: (data)=>{
+          try{
+            const t = (data && data.tags) || {};
+            const clean = v => {
+              if(v===undefined||v===null) return '';
+              if(Array.isArray(v)) return v.filter(x=>x!==undefined&&x!==null&&String(x).trim()!=='').map(x=>String(x).trim()).join(', ');
+              return String(v).trim();
+            };
+            const genre = (typeof t.genre === 'string') ? t.genre.trim() : (t.genre && (t.genre.data || t.genre.name)) || '';
+            const comment = (t.comment && typeof t.comment === 'object') ? clean(t.comment.text) : clean(t.comment);
+            const composer = clean(t.composer || (t.TCOM && t.TCOM.data) || '');
+            const bpm = (t.TBPM && t.TBPM.data) ? clean(t.TBPM.data) : '';
+            const key = (t.TKEY && t.TKEY.data) ? clean(t.TKEY.data) : '';
+            resolve({
+              title: clean(t.title),
+              artist: clean(t.artist),
+              album: clean(t.album),
+              album_artist: clean(t.albumartist || t.albumArtist || ''),
+              year: clean(t.year),
+              composer: composer,
+              genre: String(genre),
+              comment: String(comment),
+              bpm: bpm,
+              key: key,
+              track: clean(t.track)
+            });
+          }catch(_){ resolve(null); }
+        },
+        onError: ()=>resolve(null)
+      });
+    }catch(_){ resolve(null); }
+  });
+}
+
+// ──────────────────────────────────────────────
+//  AUDIO FILES & DEDUPLICATION
+// ──────────────────────────────────────────────
+let isProcessing = false;
+
+function handleAudioFiles(files) {
+  if (isProcessing) { alert("Caricamento in corso. Attendere..."); return; }
+  isProcessing = true;
+  
+  const existingNames = new Set(tracks.map(t => t._origName));
+  let toProcess = [];
+  const duplicateRescans = [];
+
+  for (const file of files) {
+    const rawName = file.name.replace(/\.[^/.]+$/, "");
+    if (existingNames.has(rawName)) {
+      // Già presente: lo annotiamo per rileggere i metadati reali dal file
+      const dup = tracks.find(t => t._origName === rawName);
+      if (dup) duplicateRescans.push({file, track: dup});
+      continue;
+    }
+
+    const id = "t_" + Date.now() + "_" + Math.random().toString(36).slice(2,7);
+    let name = rawName, artist = "Brano locale";
+    let year = "";
+    let album = "Album sconosciuto";
+    
+    // Try to extract Year from filename: (2020), [2020], - 2020
+    const yearMatch = rawName.match(/[\(\[](\d{4})[\)\]]|[- ](\d{4})[- ]/);
+    if (yearMatch) {
+       year = yearMatch[1] || yearMatch[2];
+    }
+
+    // Try to extract Album from folder path (if uploaded as folder)
+    if (file.webkitRelativePath) {
+      const parts = file.webkitRelativePath.split('/');
+      if (parts.length > 1) {
+        album = parts[parts.length - 2];
+      }
+    }
+
+    const dash = rawName.indexOf(" - ");
+    if (dash > 0) { 
+      artist = rawName.slice(0, dash).trim(); 
+      name = rawName.slice(dash+3).trim(); 
+      name = name.replace(/[\(\[]\d{4}[\)\]]/, '').trim();
+    }
+    
+    toProcess.push({id, name, artist, album, year, file, rawName});
+    existingNames.add(rawName);
+  }
+
+  if (toProcess.length === 0 && duplicateRescans.length === 0) {
+    alert("Tutti i file selezionati sono già presenti nella libreria.");
+    isProcessing = false;
+    return;
+  }
+
+  async function processNext() {
+    if (toProcess.length === 0) {
+      isProcessing = false;
+      document.getElementById("addFilesInput").value = "";
+      document.getElementById("addFolderInput").value = "";
+      
+      // Rilegge i metadati reali dei file già presenti (aggiorna i tag)
+      for (const d of duplicateRescans) {
+        const tagData = await readAudioTags(d.file);
+        if (!tagData) continue;
+        const t = d.track;
+        const prevName = t.name, prevArtist = t.artist;
+        let changed = false;
+        if (tagData.title) { t.name = tagData.title; changed = true; }
+        if (tagData.artist) { t.artist = tagData.artist; changed = true; }
+        if (tagData.album) { t.album = tagData.album; changed = true; }
+        if (tagData.year) { t.year = tagData.year; changed = true; }
+        t.album_artist = t.album_artist || tagData.album_artist || "";
+        t.composer = t.composer || tagData.composer || "";
+        t.genre = t.genre || tagData.genre || "";
+        t.bpm = t.bpm || tagData.bpm || "";
+        t.musical_key = t.musical_key || tagData.key || "";
+        t.track_number = t.track_number || tagData.track || "";
+        t.comment = t.comment || tagData.comment || "";
+        if (changed) {
+          try { await dbPut('tracks', t); } catch(_) {}
+          notifyDbTrackUpdated(t, prevName, prevArtist);
+        }
+      }
+      if (duplicateRescans.length) { renderSidebar(); renderTracks(); }
+
+      // Run deduplication and smart parsing on the newly added tracks
+      await runSmartPostProcessing();
+      
+      renderSidebar();
+      renderTracks();
+      return;
+    }
+    
+    const item = toProcess.shift();
+    // ─── MODIFICA 10: DEFAULT FIELDS ───
+    // Legge i metadati REALI scritti dentro il file (tag ID3/MP4/Vorbis):
+    // se presenti prevalgono sulla ricostruzione dal nome file.
+    const tagData = await readAudioTags(item.file);
+    if (tagData) {
+      if (tagData.title) item.name = tagData.title;
+      if (tagData.artist) item.artist = tagData.artist;
+      if (tagData.album) item.album = tagData.album;
+      if (tagData.year) item.year = tagData.year;
+      item.album_artist = tagData.album_artist || "";
+      item.composer = tagData.composer || "";
+      item.genre = tagData.genre || "";
+      item.bpm = tagData.bpm || "";
+      item.musical_key = tagData.key || "";
+      item.track_number = tagData.track || "";
+      item.comment = tagData.comment || "";
+    }
+    const track = {
+      id: item.id,
+      name: item.name,
+      artist: item.artist,
+      album: item.album,
+      album_artist: item.album_artist || "",
+      year: item.year,
+      composer: item.composer || "",
+      genre: item.genre || "",
+      bpm: item.bpm || "",
+      musical_key: item.musical_key || "",
+      track_number: item.track_number || "",
+      comment: item.comment || "",
+      dur: 0,
+      playlists: [],
+      lyrics: "",
+      sampleSources: [],
+      sampleUsages: [],
+      analyzed: "none",
+      geniusUrl: "",
+      whosampledUrl: "",
+      _origName: item.rawName
+    };
+    tracks.push(track);
+    
+    try {
+      await dbPut("blobs", {id: item.id, blob: item.file});
+      audioBlobs[item.id] = URL.createObjectURL(item.file);
+      
+      const tmp = new Audio(audioBlobs[item.id]);
+      const dur = await new Promise((resolve) => {
+        tmp.addEventListener("loadedmetadata", () => resolve(tmp.duration));
+        tmp.addEventListener("error", () => resolve(0));
+      });
+      track.dur = dur;
+      await dbPut("tracks", track);
+      
+    } catch (e) {
+      console.error("Errore importazione", e);
+      tracks.pop();
+    }
+    
+    if (toProcess.length % 20 === 0 || toProcess.length === 0) {
+      renderTracks();
+      renderSidebar();
+    }
+    setTimeout(processNext, 10);
+  }
+  
+  processNext();
+}
+
+// ──────────────────────────────────────────────
+//  POST-PROCESSING: DEDUPLICATION & SMART PARSING
+// ──────────────────────────────────────────────
+async function runSmartPostProcessing() {
+  let removedCount = 0;
+  const normalizedMap = {};
+
+  // 1. Find duplicates based on normalized names
+  for (let i = 0; i < tracks.length; i++) {
+    const t = tracks[i];
+    const norm = normalizeName(`${t.artist} - ${t.name}`);
+    if (!normalizedMap[norm]) {
+      normalizedMap[norm] = [];
+    }
+    normalizedMap[norm].push(i);
+  }
+
+  const duplicateGroups = Object.values(normalizedMap).filter(g => g.length > 1);
+
+  for (const group of duplicateGroups) {
+    const candidates = group.map(idx => tracks[idx]);
+    // Find the "cleanest" candidate (no numbers, no copy)
+    let keepIdx = group[0];
+    let keepTrack = candidates[0];
+    
+    // Simple heuristic: pick the one with the shortest name (less clutter)
+    for (const idx of group) {
+      if (tracks[idx]._origName.length < keepTrack._origName.length) {
+        keepIdx = idx;
+        keepTrack = tracks[idx];
+      }
+    }
+
+    // Compare audio
+    for (const idx of group) {
+      if (idx === keepIdx) continue;
+      const candidateTrack = tracks[idx];
+      try {
+        const isDuplicate = await compareAudioCandidates(keepTrack, candidateTrack);
+        if (isDuplicate) {
+          console.log(`Deduplicating: "${candidateTrack.name}" removed (duplicate of "${keepTrack.name}")`);
+          await removeTrackById(candidateTrack.id, true);
+          removedCount++;
+        }
+      } catch (e) {
+        console.warn("Audio comparison failed, skipping dedupe for:", candidateTrack.name);
+      }
+    }
+  }
+
+  if (removedCount > 0) {
+    alert(`🧹 Deduplicazione completata: ${removedCount} brani duplicati rimossi.`);
+  }
+
+  // 2. Smart parsing for generic artists
+  for (const track of tracks) {
+    if (track.artist === "Brano locale" || track.artist === "Artista sconosciuto") {
+      fetchGeniusMetadata(track);
+    }
+  }
+}
+
+async function compareAudioCandidates(trackA, trackB) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const blobA = await dbGet("blobs", trackA.id);
+  const blobB = await dbGet("blobs", trackB.id);
+  if (!blobA || !blobB) return false;
+
+  const bufferA = await ctx.decodeAudioData(await blobA.blob.arrayBuffer());
+  const bufferB = await ctx.decodeAudioData(await blobB.blob.arrayBuffer());
+
+  // 1. Check duration
+  if (Math.abs(bufferA.duration - bufferB.duration) > 2.0) return false;
+
+  // 2. Sample 50 points
+  const samplesA = sampleBuffer(bufferA, 50);
+  const samplesB = sampleBuffer(bufferB, 50);
+
+  // 3. Calculate mean absolute difference
+  let sumDiff = 0;
+  for (let i = 0; i < samplesA.length; i++) {
+    sumDiff += Math.abs(samplesA[i] - samplesB[i]);
+  }
+  const meanDiff = sumDiff / samplesA.length;
+
+  // 4. Compare threshold
+  return meanDiff < 0.05;
+}
+
+function sampleBuffer(buffer, n) {
+  const channel = buffer.getChannelData(0);
+  const step = Math.floor(channel.length / n);
+  const samples = [];
+  for (let i = 0; i < n; i++) {
+    const idx = Math.min(i * step, channel.length - 1);
+    samples.push(channel[idx]);
+  }
+  return samples;
+}
+
+async function fetchGeniusMetadata(track) {
+  const query = encodeURIComponent(track.name);
+  try {
+    const url = `https://api.allorigins.win/raw?url=https://genius.com/api/search/multi?q=${query}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.response && data.response.sections) {
+      const hits = data.response.sections.find(s => s.type === "song");
+      if (hits && hits.hits.length > 0) {
+        const result = hits.hits[0].result;
+        const prevName = track.name, prevArtist = track.artist;
+        track.name = result.title || track.name;
+        track.artist = result.primary_artist.name || track.artist;
+        await dbPut("tracks", track);
+        renderTracks();
+        if (currentTrackId === track.id) renderNowBar(track);
+        notifyDbTrackUpdated(track, prevName, prevArtist);
+      }
+    }
+  } catch (e) {
+    console.log("Smart parsing failed for:", track.name, e);
+  }
+}
+
+async function removeTrackById(trackId, isSilent = false, skipNotify = false) {
+  const idx = tracks.findIndex(t => t.id === trackId);
+  if (idx < 0) return;
+  const t = tracks[idx];
+  if (!skipNotify) notifyDbTrackDelete(t);
+  if (audioBlobs[trackId]) { URL.revokeObjectURL(audioBlobs[trackId]); delete audioBlobs[trackId]; }
+  await dbDelete("blobs",  trackId);
+  await dbDelete("tracks", trackId);
+  tracks.splice(idx, 1);
+  selectedIds.delete(trackId);
+  if (trackId === currentTrackId) currentTrackId = null;
+  if (currentIdx >= visibleTracks().length) currentIdx = visibleTracks().length - 1;
+  if (!isSilent) { updateDownloadBtn(); renderSidebar(); renderTracks(); }
+}
+
+// ──────────────────────────────────────────────
+//  BATCH RENAME (Case Sensitive + Regex)
+// ──────────────────────────────────────────────
+function openBatchRenameModal() {
+  document.getElementById("batchFind").value = "";
+  document.getElementById("batchReplace").value = "";
+  document.getElementById("batchIsRegex").checked = false;
+  openModal("batchRenameModal");
+}
+
+async function confirmBatchRename() {
+  const findStr = document.getElementById("batchFind").value;
+  const replaceStr = document.getElementById("batchReplace").value;
+  const isRegex = document.getElementById("batchIsRegex").checked;
+
+  if (!findStr) return alert("Inserisci cosa cercare.");
+  
+  let count = 0;
+  let regex;
+  
+  try {
+    if (isRegex) {
+      regex = new RegExp(findStr, 'g');
+    } else {
+      regex = new RegExp(findStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    }
+  } catch(e) {
+    return alert("Espressione Regolare non valida!");
+  }
+
+  for (const track of tracks) {
+    const prevName = track.name, prevArtist = track.artist;
+    let changed = false;
+    // NB: `replace` con regex globale riparte sempre dall'inizio (a differenza
+    // di `regex.test()`, che è stateful e sposterebbe lastIndex tra un brano
+    // e l'altro). Confrontiamo il risultato per capire se c'è stato un cambio.
+    const newName = track.name.replace(regex, replaceStr);
+    if (newName !== track.name) { track.name = newName; changed = true; }
+    const newArtist = track.artist.replace(regex, replaceStr);
+    if (newArtist !== track.artist) { track.artist = newArtist; changed = true; }
+    if (changed) {
+      await dbPut("tracks", track);
+      count++;
+      notifyDbTrackUpdated(track, prevName, prevArtist);
+    }
+  }
+
+  closeModal("batchRenameModal");
+  renderTracks();
+  renderSidebar();
+  if(currentTrackId){
+    const cur = tracks.find(x=>x.id===currentTrackId);
+    if(cur) renderNowBar(cur);
+  }
+  alert(`✅ Rinomina completata! ${count} brani modificati.`);
+}
+
+// ──────────────────────────────────────────────
+//  SELECTION & SORTING
+// ──────────────────────────────────────────────
+function toggleMasterCheckbox() {
+  const master = document.getElementById("masterCheckbox");
+  const visible = visibleTracks();
+  if (master.checked) {
+    visible.forEach(t => selectedIds.add(t.id));
+  } else {
+    visible.forEach(t => selectedIds.delete(t.id));
+  }
+  updateDownloadBtn();
+  updateDeleteSelectedBtn();
+  renderTracks();
+}
+
+function selectAllTracks() {
+  tracks.forEach(t => selectedIds.add(t.id));
+  updateDownloadBtn();
+  updateDeleteSelectedBtn();
+  renderTracks();
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.getElementById("masterCheckbox").checked = false;
+  updateDownloadBtn();
+  updateDeleteSelectedBtn();
+  renderTracks();
+}
+
+function toggleTrackSelection(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  updateDownloadBtn();
+  updateDeleteSelectedBtn();
+  renderTracks();
+}
+
+function updateDownloadBtn() {
+  const btn = document.getElementById("downloadBtn");
+  const count = document.getElementById("selCount");
+  const size = selectedIds.size;
+  count.textContent = size;
+  if (size > 0) {
+    btn.style.display = "inline-flex";
+    btn.classList.add("active");
+  } else {
+    btn.style.display = "none";
+    btn.classList.remove("active");
+  }
+}
+
+function updateDeleteSelectedBtn() {
+  const btn = document.getElementById("deleteSelectedBtn");
+  const size = selectedIds.size;
+  if (size > 0) {
+    btn.style.display = "inline-flex";
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+function sortBy(field) {
+  if (sortState.field === field) {
+    sortState.asc = !sortState.asc;
+  } else {
+    sortState.field = field;
+    sortState.asc = true;
+  }
+  updateSortArrows();
+  renderTracks();
+}
+
+function updateSortArrows() {
+  const arrows = ['name', 'release_date', 'dur'];
+  arrows.forEach(f => {
+    const el = document.getElementById(`sortArrow${f.charAt(0).toUpperCase() + f.slice(1)}`);
+    if (el) {
+      if (sortState.field === f) {
+        el.textContent = sortState.asc ? '▾' : '▴';
+      } else {
+        el.textContent = '▾';
+      }
+    }
+  });
+}
+
+function getSortedList(list) {
+  const f = sortState.field;
+  return list.sort((a, b) => {
+    let va, vb;
+    if (f === 'dur') {
+      va = a.dur || 0; vb = b.dur || 0;
+    } else if (f === 'playlist') {
+      const pa = a.playlists.length ? playlists.find(p=>p.id===a.playlists[0])?.name || '' : '';
+      const pb = b.playlists.length ? playlists.find(p=>p.id===b.playlists[0])?.name || '' : '';
+      va = pa; vb = pb;
+    } else if (f === 'release_date') {
+      va = relDateNum(a.release_date || ''); vb = relDateNum(b.release_date || '');
+    } else if (f === 'year') {
+      va = a.year || '0'; vb = b.year || '0';
+    } else {
+      va = String(a[f] || '').toLowerCase();
+      vb = String(b[f] || '').toLowerCase();
+    }
+    if (va < vb) return sortState.asc ? -1 : 1;
+    if (va > vb) return sortState.asc ? 1 : -1;
+    return 0;
+  });
+}
+
+// ──────────────────────────────────────────────
+//  DATA RILASCIO (formato italiano, es. "5 Settembre 2004")
+// ──────────────────────────────────────────────
+const MONTHS_IT = {january:"Gennaio",february:"Febbraio",march:"Marzo",april:"Aprile",may:"Maggio",june:"Giugno",july:"Luglio",august:"Agosto",september:"Settembre",october:"Ottobre",november:"Novembre",december:"Dicembre"};
+const MONTHS_IT_NUM = {"1":"Gennaio","2":"Febbraio","3":"Marzo","4":"Aprile","5":"Maggio","6":"Giugno","7":"Luglio","8":"Agosto","9":"Settembre","10":"Ottobre","11":"Novembre","12":"Dicembre"};
+function monthNum(name){
+  const it = {gennaio:1,febbraio:2,marzo:3,aprile:4,maggio:5,giugno:6,luglio:7,agosto:8,settembre:9,ottobre:10,novembre:11,dicembre:12};
+  const en = {january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+  return it[name.toLowerCase()] || en[name.toLowerCase()] || 0;
+}
+function formatReleaseDate(d){
+  if(!d) return "—";
+  d = String(d).trim();
+  if(!d) return "—";
+  let m;
+  // "May 23, 2000" (formato Genius) → "23 Maggio 2000"
+  m = d.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if(m && MONTHS_IT[m[1].toLowerCase()]) return `${m[2]} ${MONTHS_IT[m[1].toLowerCase()]} ${m[3]}`;
+  // "23 May 2000" → "23 Maggio 2000"
+  m = d.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if(m && MONTHS_IT[m[2].toLowerCase()]) return `${m[1]} ${MONTHS_IT[m[2].toLowerCase()]} ${m[3]}`;
+  // "May 2000" → "Maggio 2000"
+  m = d.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if(m && MONTHS_IT[m[1].toLowerCase()]) return `${MONTHS_IT[m[1].toLowerCase()]} ${m[2]}`;
+  // "2004-09-05" → "5 Settembre 2004"
+  m = d.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m && MONTHS_IT_NUM[String(parseInt(m[2],10))]) return `${parseInt(m[3],10)} ${MONTHS_IT_NUM[String(parseInt(m[2],10))]} ${m[1]}`;
+  // Già in italiano ("5 Settembre 2004") → lascia com'è
+  m = d.match(/^(\d{1,2})\s+([A-Z][a-zà-ù]+)\s+(\d{4})$/);
+  if(m) return d;
+  // Fallback: anno
+  m = d.match(/(\d{4})/);
+  return m ? m[1] : d;
+}
+function relDateNum(s){
+  if(!s) return 0;
+  s = String(s).trim();
+  let m = s.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if(m) return parseInt(m[3],10)*10000 + monthNum(m[1])*100 + parseInt(m[2],10);
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return parseInt(m[1],10)*10000 + parseInt(m[2],10)*100 + parseInt(m[3],10);
+  m = s.match(/(\d{4})/);
+  return m ? parseInt(m[1],10)*10000 : 0;
+}
+
+// ──────────────────────────────────────────────
+//  MULTI-ARTIST RENDER HELPER
+// ──────────────────────────────────────────────
+function renderArtistChips(artistString) {
+  if (!artistString) return '';
+  // Split by / , ; | + & feat. ft. and "with" (case insensitive).
+  // Lo slash "/" vale come separatore SOLO se ha spazi attorno
+  // (es. "Eminem / D12"): così "AC/DC" non viene spezzato.
+  const parts = artistString.split(/\s*(\s+\/\s*|\s*\/\s+|,|;|\||\+|&|feat\.|ft\.|\bwith\b)\s*/gi);
+  return parts.map((part, index) => {
+    part = part.trim();
+    if (!part) return '';
+    const isSeparator = /^(\/|,|;|\||\+|&|feat\.|ft\.|with)$/i.test(part);
+    if (isSeparator) {
+      return `<span class="track-artist-sep">${part}</span>`;
+    }
+    return `<span class="track-artist-part" onclick="event.stopPropagation(); setArtistFilter('${escHtml(part)}')">${escHtml(part)}</span>`;
+  }).join('');
+}
+
+// ──────────────────────────────────────────────
+//  FILTER LOGIC (Artist, Album, Playlist)
+// ──────────────────────────────────────────────
+function setArtistFilter(artistName) {
+  currentArtistFilter = artistName;
+  clearAlbumFilter();
+  if (currentView !== "home") showView('home');
+  updateHeaderUI();
+  renderSidebar();
+  renderTracks();
+}
+
+function clearFilters() {
+  if (currentArtistFilter) currentArtistFilter = null;
+  if (currentAlbumFilter) currentAlbumFilter = null;
+  updateHeaderUI();
+  renderSidebar();
+  renderTracks();
+}
+
+function setAlbumFilter(albumName) {
+  currentAlbumFilter = albumName;
+  clearArtistFilter();
+  if (currentView !== "home") showView('home');
+  updateHeaderUI();
+  renderSidebar();
+  renderTracks();
+}
+
+function clearArtistFilter() {
+  currentArtistFilter = null;
+  updateHeaderUI();
+  renderSidebar();
+  renderTracks();
+}
+
+function clearAlbumFilter() {
+  currentAlbumFilter = null;
+  updateHeaderUI();
+  renderSidebar();
+  renderTracks();
+}
+
+function updateHeaderUI() {
+  const backBtn = document.getElementById("pageTitleBack");
+  const titleEl = document.getElementById("pageTitle");
+  
+  if (currentArtistFilter) {
+    backBtn.style.display = "flex";
+    titleEl.textContent = `Artista: ${currentArtistFilter}`;
+  } else if (currentAlbumFilter) {
+    backBtn.style.display = "flex";
+    titleEl.textContent = `Album: ${currentAlbumFilter}`;
+  } else {
+    backBtn.style.display = "none";
+    if (currentView === "home") {
+      titleEl.textContent = currentPlFilter ? (playlists.find(p=>p.id===currentPlFilter)||{name:"Playlist"}).name : "Onyx, la tua musica";
+    } else if (currentView === "search") {
+      titleEl.textContent = "Cerca";
+    }
+  }
+}
+
+function visibleTracks() {
+  let list = [...tracks];
+  
+  // 1. Hierarchy of filters: Artist > Album > Playlist
+  if (currentArtistFilter) {
+    list = list.filter(t => t.artist.toLowerCase().includes(currentArtistFilter.toLowerCase()));
+  } else if (currentAlbumFilter) {
+    list = list.filter(t => t.album.toLowerCase() === currentAlbumFilter.toLowerCase());
+  } else if (currentPlFilter) {
+    list = list.filter(t => t.playlists && t.playlists.includes(currentPlFilter));
+  }
+  
+  // 2. Search filter applies on top
+  if (currentView === "search") {
+    const q = document.getElementById("searchInput").value.toLowerCase();
+    if (q) list = list.filter(t => t.name.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q));
+  }
+  return getSortedList(list);
+}
+
+// ──────────────────────────────────────────────
+//  BULK DELETE SELECTED TRACKS
+// ──────────────────────────────────────────────
+async function deleteSelectedTracks() {
+  if (selectedIds.size === 0) return alert("Nessuna canzone selezionata.");
+  
+  if (!confirm(`⚠️ Sei sicuro di voler rimuovere definitivamente ${selectedIds.size} brano/i selezionato/i?`)) {
+    return;
+  }
+
+  const idsToDelete = Array.from(selectedIds);
+  document.getElementById("downloadBtn").style.display = "none";
+  document.getElementById("deleteSelectedBtn").style.display = "none";
+
+  for (const id of idsToDelete) {
+    await removeTrackById(id, true);
+  }
+  
+  selectedIds.clear();
+  updateDownloadBtn();
+  updateDeleteSelectedBtn();
+  renderSidebar();
+  renderTracks();
+  alert(`✅ ${idsToDelete.length} brani rimossi con successo.`);
+}
+
+// ──────────────────────────────────────────────
+//  DOWNLOAD SELECTED (ZIP + File Picker)
+// ──────────────────────────────────────────────
+async function downloadSelected() {
+  if (selectedIds.size === 0) return alert("Nessuna canzone selezionata.");
+  
+  const zip = new JSZip();
+  const folder = zip.folder("Onyx_Export");
+  let processed = 0;
+
+  for (const id of selectedIds) {
+    const track = tracks.find(t => t.id === id);
+    if (!track) continue;
+
+    let blob = null;
+    const obj = await dbGet("blobs", id);
+    if (obj && obj.blob) blob = obj.blob;
+    // Se non c'è blob (canzone aggiunta dal database) o se il brano è
+    // caricato sul server, usa la versione con i metadati scritti nei tag.
+    if (track.localFile) {
+      try {
+        const r = await fetch('/download-file/' + encodeURIComponent(track.localFile));
+        if (r.ok) blob = await r.blob();
+      } catch (_) {}
+    }
+    if (blob) {
+      const ext = (String(track.localFile || '').split('.').pop() || blob.type.split('/')[1] || 'mp3').replace(/[^a-z0-9]/gi, '') || 'mp3';
+      const fileName = `${track.artist} - ${track.name}.${ext}`.replace(/[^a-zA-Z0-9 \-_.]/g, '');
+      folder.file(fileName, blob);
+      processed++;
+    }
+  }
+
+  if (processed === 0) return alert("Impossibile recuperare i file audio. Riprova.");
+  
+  const content = await zip.generateAsync({type: "blob"});
+  
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: 'Onyx_Export.zip',
+        types: [{
+          description: 'Zip Archive',
+          accept: { 'application/zip': ['.zip'] }
+        }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      alert(`✅ Download completato! ${processed} canzoni esportate.`);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Onyx_Export.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        alert(`✅ Download avviato. ${processed} canzoni esportate.`);
+      }
+    }
+  } else {
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Onyx_Export.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    alert(`✅ Download avviato. ${processed} canzoni esportate.`);
+  }
+}
+
+// ──────────────────────────────────────────────
+//  PLAYLISTS
+// ──────────────────────────────────────────────
+function openNewPlaylistModal() {
+  document.getElementById("newPlName").value = "";
+  openModal("newPlModal");
+  setTimeout(() => document.getElementById("newPlName").focus(), 50);
+}
+
+async function createPlaylist() {
+  const name = document.getElementById("newPlName").value.trim();
+  if (!name) return;
+  const pl = {id: "pl_" + Date.now(), name};
+  playlists.push(pl);
+  await dbPut("playlists", pl);
+  closeModal("newPlModal");
+  renderSidebar();
+}
+
+function openRenamePlaylist(plId) {
+  renamePlId = plId;
+  const pl = playlists.find(p => p.id === plId);
+  if (!pl) return;
+  document.getElementById("renamePlInput").value = pl.name;
+  openModal("renamePlModal");
+  setTimeout(() => document.getElementById("renamePlInput").focus(), 50);
+}
+
+async function confirmRenamePlaylist() {
+  const name = document.getElementById("renamePlInput").value.trim();
+  if (!name || !renamePlId) return;
+  const pl = playlists.find(p => p.id === renamePlId);
+  if (pl) { pl.name = name; await dbPut("playlists", pl); }
+  closeModal("renamePlModal");
+  renderSidebar();
+  renderTracks();
+}
+
+async function deletePlaylist(plId) {
+  playlists = playlists.filter(p => p.id !== plId);
+  await dbDelete("playlists", plId);
+  for (const t of tracks) {
+    if (t.playlists.includes(plId)) {
+      t.playlists = t.playlists.filter(p => p !== plId);
+      await dbPut("tracks", t);
+    }
+  }
+  if (currentPlFilter === plId) { currentPlFilter = null; }
+  renderSidebar();
+  renderTracks();
+}
+
+function openAssignPlaylist(trackId) {
+  assignPlTrackId = trackId;
+  const track = tracks.find(t => t.id === trackId);
+  const list = document.getElementById("assignPlList");
+  if (!playlists.length) {
+    list.innerHTML = `<p style="color:var(--text3);font-size:13px;padding:8px 12px;">Nessuna playlist. Creane una prima.</p>`;
+  } else {
+    list.innerHTML = playlists.map(pl => `
+      <label class="pl-radio-item">
+        <input type="checkbox" value="${pl.id}" ${track && track.playlists.includes(pl.id) ? "checked" : ""}>
+        <span style="font-size:13px;color:var(--text);">${escHtml(pl.name)}</span>
+      </label>
+    `).join("");
+  }
+  openModal("assignPlModal");
+}
+
+async function confirmAssignPlaylist() {
+  if (!assignPlTrackId) return;
+  const track = tracks.find(t => t.id === assignPlTrackId);
+  if (!track) return;
+  const checkboxes = document.querySelectorAll("#assignPlList input[type=checkbox]");
+  track.playlists = [];
+  checkboxes.forEach(cb => { if (cb.checked) track.playlists.push(cb.value); });
+  await dbPut("tracks", track);
+  closeModal("assignPlModal");
+  renderTracks();
+}
+
+// ──────────────────────────────────────────────
+//  EDIT TRACK INFO (MODIFICA 5 + MODIFICA 4)
+// ──────────────────────────────────────────────
+let _tempSamples = { sources: [], usages: [] };
+
+function renderSampleList(containerId, items, type) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = (items || []).map((item, idx) => `
+    <div class="sample-edit-row">
+      <input type="text" placeholder="Artista" value="${escHtml(item.artist)}" onchange="updateSampleItem('${type}', ${idx}, 'artist', this.value)">
+      <input type="text" placeholder="Titolo" value="${escHtml(item.title)}" onchange="updateSampleItem('${type}', ${idx}, 'title', this.value)">
+      <input type="text" placeholder="Anno" value="${escHtml(item.year)}" onchange="updateSampleItem('${type}', ${idx}, 'year', this.value)" style="text-align:center;">
+      <button onclick="removeSampleItem('${type}', ${idx})" title="Rimuovi">×</button>
+    </div>
+  `).join("");
+  if ((items || []).length === 0) {
+    container.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:4px 0;">Nessun dato. Clicca "Analizza" o usa "+ Aggiungi".</div>`;
+  }
+}
+
+function updateSampleItem(type, idx, field, value) {
+  _tempSamples[type][idx][field] = value;
+}
+
+function removeSampleItem(type, idx) {
+  _tempSamples[type].splice(idx, 1);
+  renderSampleList(type === 'sources' ? 'editSampleSourcesList' : 'editSampleUsagesList', _tempSamples[type], type);
+}
+
+function addSampleSourceRow() {
+  _tempSamples.sources.push({artist:"",title:"",year:""});
+  renderSampleList('editSampleSourcesList', _tempSamples.sources, 'sources');
+}
+
+function addSampleUsageRow() {
+  _tempSamples.usages.push({artist:"",title:"",year:""});
+  renderSampleList('editSampleUsagesList', _tempSamples.usages, 'usages');
+}
+
+function openEditTrackModal(trackId) {
+  editTrackId = trackId;
+  const track = tracks.find(t => t.id === trackId);
+  if (!track) return;
+  document.getElementById("editTrackName").value = track.name || "";
+  document.getElementById("editTrackArtist").value = track.artist || "";
+  document.getElementById("editTrackAlbum").value = track.album || "";
+  document.getElementById("editTrackYear").value = track.year || "";
+  document.getElementById("editTrackLyrics").value = track.lyrics || "";
+  
+  _tempSamples.sources = JSON.parse(JSON.stringify(track.sampleSources || []));
+  _tempSamples.usages = JSON.parse(JSON.stringify(track.sampleUsages || []));
+  renderSampleList('editSampleSourcesList', _tempSamples.sources, 'sources');
+  renderSampleList('editSampleUsagesList', _tempSamples.usages, 'usages');
+  
+  let urlHtml = "";
+  if (track.geniusUrl) urlHtml += `<div>🔗 Genius: <a href="${escHtml(track.geniusUrl)}" target="_blank" style="color:var(--text2);">${escHtml(track.geniusUrl)}</a></div>`;
+  if (track.whosampledUrl) urlHtml += `<div>🔗 WhoSampled: <a href="${escHtml(track.whosampledUrl)}" target="_blank" style="color:var(--text2);">${escHtml(track.whosampledUrl)}</a></div>`;
+  document.getElementById("editTrackUrls").innerHTML = urlHtml;
+  
+  openModal("editTrackModal");
+  setTimeout(() => document.getElementById("editTrackName").focus(), 50);
+}
+
+async function confirmEditTrack() {
+  if (!editTrackId) return;
+  const track = tracks.find(t => t.id === editTrackId);
+  if (!track) return;
+  const prevName = track.name, prevArtist = track.artist;
+  track.name = document.getElementById("editTrackName").value.trim() || track.name;
+  track.artist = document.getElementById("editTrackArtist").value.trim() || track.artist;
+  track.album = document.getElementById("editTrackAlbum").value.trim() || track.album;
+  track.year = document.getElementById("editTrackYear").value.trim();
+  track.lyrics = document.getElementById("editTrackLyrics").value;
+  track.sampleSources = JSON.parse(JSON.stringify(_tempSamples.sources)).filter(s => s.artist.trim() || s.title.trim());
+  track.sampleUsages = JSON.parse(JSON.stringify(_tempSamples.usages)).filter(s => s.artist.trim() || s.title.trim());
+  await dbPut("tracks", track);
+  closeModal("editTrackModal");
+  if (currentTrackId === editTrackId) renderNowBar(track);
+  renderTracks();
+  if (lyricsOpen) renderLyrics();
+  notifyDbTrackUpdated(track, prevName, prevArtist);
+}
+
+// ──────────────────────────────────────────────
+//  LYRICS
+// ──────────────────────────────────────────────
+function openLyrics() {
+  lyricsOpen = true;
+  document.getElementById("lyricsPanel").classList.add("open");
+  renderLyrics();
+}
+
+function closeLyrics() {
+  lyricsOpen = false;
+  document.getElementById("lyricsPanel").classList.remove("open");
+}
+
+// ─── MODIFICA 9: AGGIORNA RENDERING LYRICS ───
+function renderLyrics() {
+  const el = document.getElementById("lyricsContent");
+  let html = '';
+  
+  if (!currentTrackId) {
+    html = `<div class="lyrics-empty">Nessun brano in riproduzione</div>`;
+  } else {
+    const track = tracks.find(x => x.id === currentTrackId);
+    if (!track) { html = `<div class="lyrics-empty">—</div>`; } 
+    else {
+      if (track.lyrics && track.lyrics.trim()) {
+        html += `<div class="lyrics-text">${escHtml(track.lyrics)}</div>`;
+      }
+      
+      if (track.sampleSources && track.sampleSources.length > 0) {
+        html += `<div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border);">`;
+        html += `<div style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:8px;">🎵 Campiona da (Sources)</div>`;
+        html += `<div style="font-size:13px; line-height:1.8; color:var(--text2);">`;
+        track.sampleSources.forEach(s => {
+          const y = s.year ? ` <span style="color:var(--text3);">(${escHtml(s.year)})</span>` : '';
+          html += `<div>• ${escHtml(s.artist)} — ${escHtml(s.title)}${y}</div>`;
+        });
+        html += `</div></div>`;
+      }
+      
+      if (track.sampleUsages && track.sampleUsages.length > 0) {
+        html += `<div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--border);">`;
+        html += `<div style="font-size:13px; font-weight:700; color:var(--text); margin-bottom:8px;">🎵 Campionato in (Usages)</div>`;
+        html += `<div style="font-size:13px; line-height:1.8; color:var(--text2);">`;
+        track.sampleUsages.forEach(s => {
+          const y = s.year ? ` <span style="color:var(--text3);">(${escHtml(s.year)})</span>` : '';
+          html += `<div>• ${escHtml(s.artist)} — ${escHtml(s.title)}${y}</div>`;
+        });
+        html += `</div></div>`;
+      }
+      
+      if (!track.lyrics?.trim() && !track.sampleSources?.length && !track.sampleUsages?.length) {
+        html = `<div class="lyrics-empty">Nessun dato per questo brano.<br><br>Clicca 🔍 Analizza per cercare su Genius e WhoSampled,<br>o ✏️ Modifica info per inserire i dati manualmente.</div>`;
+      }
+      
+      html += `<div style="margin-top:20px; text-align:center;"><button class="lyrics-upload-btn" onclick="openEditTrackModal('${track.id}')">✏️ Modifica tutte le informazioni</button></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+function triggerLyricsUpload() {
+  if (currentIdx < 0) return;
+  document.getElementById("lyricsInput").click();
+}
+
+async function handleLyricsUpload(file) {
+  if (!file || !currentTrackId) return;
+  const text = await file.text();
+  const track = tracks.find(x => x.id === currentTrackId);
+  if (!track) return;
+  track.lyrics = text;
+  await dbPut("tracks", track);
+  renderLyrics();
+  document.getElementById("lyricsInput").value = "";
+}
+
+// ──────────────────────────────────────────────
+//  MODIFICA 3: FUNZIONI DI UTILITÀ FUZZY
+// ──────────────────────────────────────────────
+function levenshteinDistance(a, b) {
+  const m = [], al = a.length, bl = b.length;
+  if (al === 0) return bl; if (bl === 0) return al;
+  for (let i = 0; i <= bl; i++) m[i] = [i];
+  for (let j = 0; j <= al; j++) m[0][j] = j;
+  for (let i = 1; i <= bl; i++) {
+    for (let j = 1; j <= al; j++) {
+      m[i][j] = b[i-1] === a[j-1] ? m[i-1][j-1] : Math.min(m[i-1][j-1]+1, m[i][j-1]+1, m[i-1][j]+1);
+    }
+  }
+  return m[bl][al];
+}
+function stringSimilarity(a, b) {
+  const s1 = String(a||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const s2 = String(b||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const len = Math.max(s1.length, s2.length);
+  if (!len) return 1;
+  return 1 - levenshteinDistance(s1, s2) / len;
+}
+function normalizeForSearch(str) {
+  return String(str||"").toLowerCase().replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim();
+}
+
+// ──────────────────────────────────────────────
+//  MODIFICA 6: ANALYZE (riscritta con Fuzzy Matching e Scraping avanzato)
+// ──────────────────────────────────────────────
+async function analyzeTrack(trackId) {
+  // ══════════════════════════════════════════════════════════
+  // "Analizza" nel player = STESSA IDENTICA operazione del
+  // pulsante "Verifica" del database: chiama /db/songs/<id>/verify
+  // (Genius: titolo, artista, TESTO pulito, produttori... + BPM/Key
+  //  + URL YouTube/WhoSampled/Tunebat). Il testo arriva già filtrato
+  //  dal server (_clean_lyrics): niente "8 Contributors", titolo, ecc.
+  // ══════════════════════════════════════════════════════════
+  const track = tracks.find(t => t.id === trackId);
+  if (!track) return;
+
+  // Riga di stato sotto l'icona ⏳: aggiorna DOM e oggetto traccia
+  const setStatus = (txt) => {
+    track.analyzeStatus = txt;
+    const el = document.getElementById('anastat-' + trackId);
+    if (el) el.textContent = txt;
+  };
+
+  let pollTimer = null;
+  try {
+    track.analyzed = "loading";
+    track.analyzeStatus = "⏳ Preparazione…";
+    await dbPut("tracks", track);
+    renderTracks();
+
+    const prevName = track.name, prevArtist = track.artist;
+
+    // Trova l'id del brano nel database principale
+    let dbId = track.dbSongId || '';
+    if (!dbId) {
+      setStatus('⏳ Cerco brano nel database…');
+      try {
+        const list = await fetch('/db/songs').then(r => r.json());
+        if (Array.isArray(list)) {
+          const s = list.find(x =>
+            (track.localFile && x.local_file === track.localFile) ||
+            (x.title === track.name && x.artist === track.artist));
+          if (s) dbId = s.id;
+        }
+      } catch (_) {}
+    }
+
+    // Brano locale non ancora nel database → lo registriamo prima
+    if (!dbId) {
+      if (!track.name || !track.artist) {
+        if (!isAnalyzingAll) alert('Brano senza titolo/artista: impossibile analizzare.');
+        track.analyzed = "none"; delete track.analyzeStatus;
+        await dbPut("tracks", track); renderTracks();
+        return;
+      }
+      setStatus('⏳ Registro brano nel database…');
+      try {
+        const res = await fetch('/db/from_onyx', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: track.name, artist: track.artist, album: track.album || '',
+            album_artist: track.album_artist || '', composer: track.composer || '',
+            genre: track.genre || '', year: track.year || '',
+            bpm: track.bpm ? parseFloat(track.bpm) : null,
+            musical_key: track.musical_key || '', lyrics: track.lyrics || '',
+            duration: track.dur || 0, local_file: track.localFile || ''
+          })
+        }).then(r => r.json());
+        if (res && res.id) { dbId = res.id; track.dbSongId = res.id; await dbPut('tracks', track); }
+      } catch (e) { console.error('Onyx→DB create failed', e); }
+    }
+
+    if (!dbId) {
+      if (!isAnalyzingAll) alert('Impossibile associare il brano al database per la verifica.');
+      track.analyzed = "none"; delete track.analyzeStatus;
+      await dbPut("tracks", track); renderTracks();
+      return;
+    }
+
+    // ⏳ Polling dello stato live della verifica (stessa identica verifica del DB)
+    setStatus('⏳ [1/6] Ricerca canzone su Genius…');
+    let pollCount = 0;
+    pollTimer = setInterval(async () => {
+      pollCount++;
+      // Timeout di sicurezza: max 120 iterazioni (~3 minuti) così il timer non
+      // resta attivo per sempre se il server non risponde mai con active:false.
+      if (pollCount > 120) { clearInterval(pollTimer); pollTimer = null; return; }
+      try {
+        const st = await fetch(`/db/songs/${dbId}/verify_status`).then(r => r.json());
+        if (st && st.active) setStatus(`⏳ [${st.step}/${st.total}] ${st.status}`);
+        if (st && !st.active && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      } catch (_) {}
+    }, 1500);
+
+    // ══ CHIAMA LA STESSA FUNZIONE DI "VERIFICA" ══
+    const res = await fetch(`/db/songs/${dbId}/verify`, { method: 'POST' }).then(r => r.json());
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (!res.song) {
+      if (!isAnalyzingAll) alert('❌ ' + (res.error || 'Errore durante la verifica'));
+      track.analyzed = "none"; delete track.analyzeStatus;
+      await dbPut("tracks", track); renderTracks();
+      return;
+    }
+
+    const s = res.song;
+    if (s.title) track.name = s.title;
+    if (s.artist) track.artist = s.artist;
+    if (s.album) track.album = s.album;
+    if (s.album_artist) track.album_artist = s.album_artist;
+    if (s.year) track.year = s.year;
+    if (s.composer) track.composer = s.composer;
+    if (s.genre) track.genre = s.genre;
+    if (s.bpm) track.bpm = s.bpm;
+    if (s.musical_key) track.musical_key = s.musical_key;
+    if (s.lyrics) track.lyrics = s.lyrics;
+    if (s.genius_url) track.geniusUrl = s.genius_url;
+    if (s.whosampled_url) track.whosampledUrl = s.whosampled_url;
+    if (s.youtube_url) track.youtubeUrl = s.youtube_url;
+    if (s.release_date) track.release_date = s.release_date;
+    track.analyzed = (s.lyrics || s.genius_url || s.whosampled_url) ? "done" : "empty";
+    delete track.analyzeStatus;
+
+    // Campioni trovati su WhoSampled: il server li salva nella tabella
+    // sample_relations (NON tornano in /db/songs/<id>/verify). Li carichiamo
+    // da /db/songs/<id> → relations_as_derivative = fonti campionate (sources),
+    // relations_as_source = brani che campionano questa traccia (usages).
+    try {
+      const full = await fetch(`/db/songs/${dbId}`).then(r => r.json());
+      if (full) {
+        if (Array.isArray(full.relations_as_derivative) && full.relations_as_derivative.length) {
+          track.sampleSources = full.relations_as_derivative
+            .filter(r => r.source_title && r.source_artist)
+            .map(r => ({ artist: r.source_artist, title: r.source_title, year: r.source_year || '' }));
+        }
+        if (Array.isArray(full.relations_as_source) && full.relations_as_source.length) {
+          track.sampleUsages = full.relations_as_source
+            .filter(r => r.derivative_title && r.derivative_artist)
+            .map(r => ({ artist: r.derivative_artist, title: r.derivative_title, year: r.derivative_year || '' }));
+        }
+      }
+    } catch (e) { console.error('Onyx: caricamento campioni fallito', e); }
+
+    await dbPut('tracks', track);
+    if (currentTrackId === trackId) renderLyrics();
+    renderTracks();
+    notifyDbTrackUpdated(track, prevName, prevArtist);
+
+    const foundLyrics = !!(s.lyrics && s.lyrics.trim());
+    const foundGenius = !!(s.genius_url);
+    const msgs = (res.messages || []).filter(m => /✅|⚠️|Testo|Titolo|Genius|BPM|Chiave|URL/.test(m));
+    console.log('Onyx: verifica completata per', track.name, '—', (res.messages || []).join(' | '));
+    if (foundLyrics) {
+      // Mostra subito il testo (pannello lyrics del player)
+      openLyrics();
+    } else if (!foundGenius) {
+      if (!isAnalyzingAll) alert('⚠️ Genius non ha trovato corrispondenze per "' + prevName + '" di ' + prevArtist + '.');
+    } else {
+      if (!isAnalyzingAll) alert('🔎 Verifica completata:\n' + (msgs.slice(0, 6).join('\n') || 'Nessun nuovo dato trovato.'));
+    }
+  } catch (e) {
+    console.error('Verify failed', e);
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (!isAnalyzingAll) alert('❌ Errore durante la verifica: ' + e.message);
+    track.analyzed = "none"; delete track.analyzeStatus;
+    try { await dbPut("tracks", track); } catch (_) {}
+    renderTracks();
+  }
+}
+
+// ──────────────────────────────────────────────
+//  MODIFICA 7: ANALYZE ALL TRACKS (con progresso)
+// ──────────────────────────────────────────────
+async function analyzeAllTracks() {
+  if (isAnalyzingAll) return;
+  const toAnalyze = tracks.filter(t => t.analyzed !== "done");
+  if (toAnalyze.length === 0) { alert("Tutti i brani sono già stati analizzati."); return; }
+
+  isAnalyzingAll = true;
+  const btn = document.getElementById("analyzeAllBtn");
+  const total = toAnalyze.length;
+  let done = 0;
+  let errors = 0;
+
+  btn.textContent = `🔍 0/${total}...`;
+  btn.classList.add("active");
+
+  for (const track of toAnalyze) {
+    try {
+      await analyzeTrack(track.id);
+    } catch (e) {
+      console.error('analyzeAllTracks: errore su', track.name, e);
+      errors++;
+    }
+    done++;
+    btn.textContent = `🔍 ${done}/${total}...`;
+    // Delay per evitare rate limit
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
+  if (errors > 0) alert(`⚠️ ${errors} brani non analizzati correttamente su ${total}.`);
+
+  btn.textContent = `✅ Fatto (${done})`;
+  setTimeout(() => { btn.textContent = `🔍 Analizza tutto`; btn.classList.remove("active"); isAnalyzingAll = false; }, 3000);
+}
+
+// ──────────────────────────────────────────────
+//  RENDERING
+// ──────────────────────────────────────────────
+function renderSidebar() {
+  const el = document.getElementById("sidebarPlaylists");
+  let html = `
+    <div class="pl-item ${currentPlFilter === null ? "active-pl" : ""}" onclick="setPlFilter(null)">
+      <div class="pl-item-art">🎵</div>
+      <div class="pl-item-info">
+        <div class="pl-item-name">Tutti i brani</div>
+        <div class="pl-item-count">${tracks.length} brani</div>
+      </div>
+    </div>
+  `;
+  playlists.forEach(pl => {
+    const count = tracks.filter(t => t.playlists && t.playlists.includes(pl.id)).length;
+    html += `
+      <div class="pl-item ${currentPlFilter === pl.id ? "active-pl" : ""}"
+           onclick="setPlFilter('${pl.id}')"
+           oncontextmenu="showPlCtxMenu(event,'${pl.id}')">
+        <div class="pl-item-art">📁</div>
+        <div class="pl-item-info">
+          <div class="pl-item-name">${escHtml(pl.name)}</div>
+          <div class="pl-item-count">${count} brani</div>
+        </div>
+      </div>
+    `;
+  });
+  el.innerHTML = html;
+}
+
+function setPlFilter(plId) {
+  currentPlFilter = plId;
+  if (currentArtistFilter) clearArtistFilter();
+  if (currentAlbumFilter) clearAlbumFilter();
+  updateHeaderUI();
+  renderSidebar();
+  renderTracks();
+}
+
+function renderTracks() {
+  const list = visibleTracks();
+  const el = document.getElementById("tracksList");
+  
+  const master = document.getElementById("masterCheckbox");
+  if (selectionMode && list.length > 0 && list.every(t => selectedIds.has(t.id))) {
+    master.checked = true;
+  } else {
+    master.checked = false;
+  }
+
+  if (!list.length) {
+    el.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+      <p>${tracks.length === 0 ? "Nessun brano. Clicca \"+ Aggiungi brani\" per iniziare." : "Nessun brano in questa playlist."}</p>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = list.map((t, i) => {
+    const isActive = (t.id === currentTrackId);
+    const isSelected = selectedIds.has(t.id);
+    const checkboxVisibility = selectionMode ? 'visible' : 'hidden';
+    
+    // Analyze status icon
+    let analyzeIcon = '🔍';
+    let analyzeClass = '';
+    let analyzeStatus = '';
+    if (t.analyzed === 'loading') { analyzeIcon = '⏳'; analyzeClass = 'analyzing'; analyzeStatus = `<div class="analyze-status" id="anastat-${t.id}">${escHtml(t.analyzeStatus || '⏳ Avvio verifica…')}</div>`; }
+    else if (t.analyzed === 'done') { analyzeIcon = '✅'; }
+    else if (t.analyzed === 'empty') { analyzeIcon = '❌'; }
+    else if (t.analyzed === 'error') { analyzeIcon = '⚠️'; analyzeClass = 'error'; }
+
+    // Dynamic Hover Play/Pause Button
+    let playHoverBtn = `<div class="track-play-hover" onclick="playTrack(${i})"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>`;
+    if (isActive && isPlaying) {
+      playHoverBtn = `<div class="track-play-hover" onclick="togglePlay()"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg></div>`;
+    }
+
+    return `
+      <div class="track-row ${isActive ? "playing" : ""}" ondblclick="playTrack(${i})" oncontextmenu="showTrackCtxMenu(event,'${t.id}')">
+        <div class="track-num-cell">
+          <div class="track-num">${isActive ? `<div class="eq-bars ${isPlaying ? "playing" : ""}" style="display:flex"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>` : i+1}</div>
+          ${playHoverBtn}
+        </div>
+        <div style="text-align:center; visibility: ${checkboxVisibility};"><input type="checkbox" class="track-check" ${isSelected ? "checked" : ""} onclick="event.stopPropagation(); toggleTrackSelection('${t.id}')"></div>
+        <div class="track-main">
+          <div class="track-art">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </div>
+          <div class="track-text">
+            <div class="track-name" onclick="event.stopPropagation(); setAlbumFilter('${escHtml(t.album)}')" title="Apri l'album di questa canzone">${escHtml(t.name)}</div>
+            <div class="track-artist-chips">${renderArtistChips(t.artist)}</div>
+            <div class="track-album" onclick="event.stopPropagation(); setAlbumFilter('${escHtml(t.album)}')">${escHtml(t.album)}</div>
+          </div>
+        </div>
+        <div class="track-year" title="${escHtml(t.release_date||'')}">${formatReleaseDate(t.release_date)}</div>
+        <div class="track-dur">${fmtTime(t.dur)}</div>
+        <div style="text-align:center;">
+           <button class="analyze-btn ${analyzeClass}" onclick="event.stopPropagation(); analyzeTrack('${t.id}')">${analyzeIcon}</button>
+           ${analyzeStatus}
+        </div>
+        <div class="track-opts-col">
+          <button class="track-opts" onclick="event.stopPropagation(); showTrackCtxMenu(event,'${t.id}')" title="Opzioni">
+            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+// ──────────────────────────────────────────────
+//  PLAYBACK
+// ──────────────────────────────────────────────
+const audio = document.getElementById("audioEl");
+
+// Stato condiviso: notifica la pagina parent (postMessage) e lo salva
+// nel database (/playback/state) così play/pausa sopravvive tra le pagine.
+let lastStatePost = 0, lastDbSave = 0;
+function getPlaybackState(){
+  const t = currentTrackId ? tracks.find(x => x.id === currentTrackId) : null;
+  return {
+    title: t ? (t.name||'') : '',
+    artist: t ? (t.artist||'') : '',
+    album: t ? (t.album||'') : '',
+    local_file: t ? (t.localFile || t._origName || '') : '',
+    is_playing: isPlaying && currentIdx >= 0,
+    position: audio.currentTime || 0,
+    duration: audio.duration || (t ? (t.dur||0) : 0) || 0,
+    volume: Math.round((audio.volume!=null ? audio.volume : 0.7) * 100),
+    shuffle: !!shuffle,
+    repeat: !!repeat
+  };
+}
+function pushPlaybackState(force){
+  const now = Date.now();
+  if(!force && now - lastStatePost < 800) return;
+  lastStatePost = now;
+  const s = getPlaybackState();
+  try{ if(window.self !== window.top) window.parent.postMessage({action:'playerState', state:s}, '*'); }catch(_){}
+  if(force || now - lastDbSave > 4000){
+    lastDbSave = now;
+    try{ fetch('/playback/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(s)}); }catch(_){}
+  }
+}
+
+function playTrack(idx) {
+  const list = visibleTracks();
+  if (idx < 0 || idx >= list.length) return;
+  currentIdx = idx;
+  const t = list[idx];
+  currentTrackId = t.id;
+  const url = audioBlobs[t.id] || (t.localFile ? '/stream/' + encodeURIComponent(t.localFile) : null);
+  if (!url) return;
+  audio.src = url;
+  audio.play().then(() => {
+    isPlaying = true;
+    updatePlayUI();
+    renderTracks();
+    renderNowBar(t);
+    if (lyricsOpen) renderLyrics();
+    pushPlaybackState(true);
+  }).catch(err => { console.error(err); pushPlaybackState(true); });
+}
+
+function togglePlay() {
+  if (currentTrackId) {
+    const li = visibleTracks();
+    const i = li.findIndex(t=>t.id===currentTrackId);
+    if (i >= 0) currentIdx = i;
+  }
+  if (currentIdx < 0) { if (visibleTracks().length) playTrack(0); return; }
+  if (isPlaying) { audio.pause(); isPlaying = false; updatePlayUI(); renderTracks(); pushPlaybackState(true); }
+  else { audio.play().then(()=>{ isPlaying=true; updatePlayUI(); renderTracks(); pushPlaybackState(true); }).catch(console.error); }
+}
+
+function nextTrack() {
+  const list = visibleTracks();
+  if (!list.length) return;
+  if (currentTrackId) {
+    const i = list.findIndex(t=>t.id===currentTrackId);
+    if (i >= 0) currentIdx = i;
+  }
+  if (shuffle) {
+    buildShuffleOrder(list.length);
+    const pos = shuffleOrder.indexOf(currentIdx);
+    const next = shuffleOrder[(pos+1) % shuffleOrder.length];
+    playTrack(next);
+  } else {
+    playTrack((currentIdx+1) % list.length);
+  }
+}
+
+function prevTrack() {
+  const list = visibleTracks();
+  if (!list.length) return;
+  if (currentTrackId) {
+    const i = list.findIndex(t=>t.id===currentTrackId);
+    if (i >= 0) currentIdx = i;
+  }
+  if (audio.currentTime > 3) { audio.currentTime = 0; pushPlaybackState(true); return; }
+  playTrack((currentIdx - 1 + list.length) % list.length);
+}
+
+function stopPlayback(){
+  audio.pause();
+  isPlaying = false;
+  try{ if(audio.duration) audio.currentTime = 0; }catch(_){}
+  updatePlayUI();
+  renderTracks();
+  pushPlaybackState(true);
+}
+
+function toggleShuffle() {
+  shuffle = !shuffle;
+  document.getElementById("shuffleBtn").classList.toggle("active", shuffle);
+  if (shuffle) buildShuffleOrder(visibleTracks().length);
+  pushPlaybackState(true);
+}
+
+function toggleRepeat() {
+  repeat = !repeat;
+  document.getElementById("repeatBtn").classList.toggle("active", repeat);
+  pushPlaybackState(true);
+}
+
+function buildShuffleOrder(len) {
+  shuffleOrder = Array.from({length:len},(_,i)=>i).sort(()=>Math.random()-.5);
+}
+
+function updatePlayUI() {
+  document.getElementById("playIcon").style.display  = isPlaying ? "none" : "";
+  document.getElementById("pauseIcon").style.display = isPlaying ? "" : "none";
+  document.getElementById("eqBars").classList.toggle("playing", isPlaying);
+}
+
+function renderNowBar(t) {
+  document.getElementById("nowTrack").textContent  = t.name;
+  document.getElementById("nowArtist").textContent = t.artist;
+}
+
+// Click sul titolo nella barra in basso del player → apre l'album di appartenenza.
+function nowbarOpenAlbum(){
+  const t = currentTrackId ? tracks.find(x => x.id === currentTrackId) : null;
+  if(!t || !t.album) return;
+  setAlbumFilter(t.album);
+}
+// Click sull'artista nella barra in basso del player → tutte le canzoni dell'artista.
+function nowbarOpenArtist(){
+  const t = currentTrackId ? tracks.find(x => x.id === currentTrackId) : null;
+  if(!t || !t.artist) return;
+  setArtistFilter(t.artist);
+}
+
+audio.addEventListener("play",  () => pushPlaybackState(true));
+audio.addEventListener("pause", () => pushPlaybackState(true));
+audio.addEventListener("timeupdate", () => {
+  if (!audio.duration) return;
+  const pct = (audio.currentTime / audio.duration) * 100;
+  document.getElementById("progFill").style.width = pct + "%";
+  document.getElementById("curTime").textContent = fmtTime(audio.currentTime);
+  document.getElementById("durTime").textContent = fmtTime(audio.duration);
+  pushPlaybackState(false);
+});
+
+audio.addEventListener("ended", () => {
+  if (repeat) { audio.currentTime = 0; audio.play(); }
+  else nextTrack();
+});
+
+document.getElementById("progTrack").addEventListener("click", e => {
+  if (!audio.duration) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  audio.currentTime = ((e.clientX - r.left) / r.width) * audio.duration;
+  pushPlaybackState(true);
+});
+
+function setVol(v) {
+  audio.volume = v/100;
+  pushPlaybackState(true);
+}
+setVol(70);
+
+// Ripristina l'ultimo brano salvato nel database (se ancora in libreria)
+async function restorePlaybackState(){
+  try{
+    const {state} = await fetch('/playback/state').then(r=>r.json());
+    if(!state || (!state.title && !state.artist && !state.local_file)){ pushPlaybackState(true); return; }
+    if(state.volume !== undefined && state.volume !== null){
+      audio.volume = Math.max(0, Math.min(1, parseFloat(state.volume)/100 || 0.7));
+      document.getElementById("volSlider").value = Math.round(parseFloat(state.volume));
+    }
+    const norm = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+    let t = null;
+    if(state.local_file){
+      const ln = norm(String(state.local_file).replace(/\.[^.]+$/,''));
+      t = tracks.find(x => x._origName && ln && norm(x._origName).includes(ln)) ||
+          tracks.find(x => x.localFile && norm(x.localFile).includes(ln));
+    }
+    if(!t) t = tracks.find(x => norm(x.name)===norm(state.title) && norm(x.artist)===norm(state.artist));
+    if(!t && state.title) t = tracks.find(x => norm(x.name).includes(norm(state.title)));
+    if(!t){ pushPlaybackState(true); return; }
+    const idx = visibleTracks().findIndex(x=>x.id===t.id);
+    if(idx < 0){ pushPlaybackState(true); return; }
+    currentIdx = idx;
+    currentTrackId = t.id;
+    const url = audioBlobs[t.id] || (t.localFile ? '/stream/' + encodeURIComponent(t.localFile) : null);
+    if(!url){ currentTrackId=null; currentIdx=-1; pushPlaybackState(true); return; }
+    const pos = Math.max(0, parseFloat(state.position) || 0);
+    audio.src = url;
+    audio.addEventListener("loadedmetadata", function h(){
+      audio.removeEventListener("loadedmetadata", h);
+      try{ audio.currentTime = Math.min(pos, audio.duration||0); }catch(_){}
+      renderNowBar(t);
+      renderTracks();
+      updatePlayUI();
+      pushPlaybackState(true);
+      if(state.is_playing){
+        audio.play().then(()=>{ isPlaying=true; updatePlayUI(); renderTracks(); pushPlaybackState(true); })
+                 .catch(()=>{ isPlaying=false; updatePlayUI(); pushPlaybackState(true); });
+      } else {
+        isPlaying = false;
+        updatePlayUI();
+        pushPlaybackState(true);
+      }
+    });
+  }catch(_){}
+}
+
+// ──────────────────────────────────────────────
+//  VIEWS
+// ──────────────────────────────────────────────
+function showView(v) {
+  currentView = v;
+  const searchBar = document.getElementById("searchBar");
+  if (v === "search") {
+    searchBar.style.display = "block";
+  } else {
+    searchBar.style.display = "none";
+  }
+  document.querySelectorAll(".nav-item").forEach((el,i)=>el.classList.toggle("active", (i===0&&v==="home")||(i===1&&v==="search")));
+  
+  if (v === "search" && (currentArtistFilter || currentAlbumFilter)) {
+    clearFilters();
+  }
+
+  updateHeaderUI();
+  renderTracks();
+}
+
+function filterTracks() { renderTracks(); }
+
+// ──────────────────────────────────────────────
+//  MODIFICA 8: CONTEXT MENU (Aggiunta Modifica info avanzata)
+// ──────────────────────────────────────────────
+function showTrackCtxMenu(e, trackId) {
+  e.preventDefault();
+  e.stopPropagation();
+  contextTrackId = trackId;
+  const track = tracks.find(t => t.id === trackId);
+  if (!track) return;
+  showCtxMenu(e.clientX, e.clientY, [
+    {label: "▶ Riproduci", fn: () => { const i = visibleTracks().findIndex(t=>t.id===trackId); if(i>=0) playTrack(i); }},
+    {label: "📁 Aggiungi a playlist", fn: () => openAssignPlaylist(trackId)},
+    {label: "🔍 Analizza singolo", fn: () => analyzeTrack(trackId)},
+    {label: "✏️ Modifica info avanzata", fn: () => openEditTrackModal(trackId)},
+    {sep: true},
+    {label: "🗑 Rimuovi brano", fn: () => removeTrackById(trackId, false), danger: true},
+  ]);
+}
+
+function showPlCtxMenu(e, plId) {
+  e.preventDefault();
+  showCtxMenu(e.clientX, e.clientY, [
+    {label: "✏️ Rinomina", fn: () => openRenamePlaylist(plId)},
+    {sep: true},
+    {label: "🗑 Elimina playlist", fn: () => deletePlaylist(plId), danger: true},
+  ]);
+}
+
+function showCtxMenu(x, y, items) {
+  const menu = document.getElementById("ctxMenu");
+  menu.innerHTML = items.map(item => {
+    if (item.sep) return `<div class="ctx-sep"></div>`;
+    return `<div class="ctx-item ${item.danger?"danger":""}" data-fn="${escHtml(item.label)}">${escHtml(item.label)}</div>`;
+  }).join("");
+  menu._items = items;
+  menu.querySelectorAll(".ctx-item").forEach((el, i) => {
+    const realItems = items.filter(it=>!it.sep);
+    el.addEventListener("click", () => { realItems[i].fn(); hideCtxMenu(); });
+  });
+  menu.classList.remove("hidden");
+  menu.style.left = x + "px";
+  menu.style.top  = y + "px";
+  requestAnimationFrame(() => {
+    const r = menu.getBoundingClientRect();
+    if (r.right > window.innerWidth)  menu.style.left = (x - r.width)  + "px";
+    if (r.bottom > window.innerHeight) menu.style.top = (y - r.height) + "px";
+  });
+}
+
+function hideCtxMenu() { document.getElementById("ctxMenu").classList.add("hidden"); }
+document.addEventListener("click", hideCtxMenu);
+document.addEventListener("keydown", e => { if (e.key === "Escape") { hideCtxMenu(); closeAllModals(); closeLyrics(); } });
+
+// ──────────────────────────────────────────────
+//  MODALS
+// ──────────────────────────────────────────────
+function openModal(id) { document.getElementById(id).classList.add("open"); }
+function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+function closeAllModals() { document.querySelectorAll(".modal-overlay").forEach(m=>m.classList.remove("open")); }
+document.querySelectorAll(".modal-overlay").forEach(m => m.addEventListener("click", e => { if(e.target===m) m.classList.remove("open"); }));
+document.getElementById("newPlName").addEventListener("keydown", e => { if(e.key==="Enter") createPlaylist(); });
+document.getElementById("renamePlInput").addEventListener("keydown", e => { if(e.key==="Enter") confirmRenamePlaylist(); });
+
+// ──────────────────────────────────────────────
+//  KEYBOARD SHORTCUTS
+// ──────────────────────────────────────────────
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "Space")       { e.preventDefault(); togglePlay(); }
+  if (e.code === "ArrowRight" && e.ctrlKey) { audio.currentTime = Math.min(audio.currentTime+10, audio.duration||0); }
+  if (e.code === "ArrowLeft"  && e.ctrlKey) { audio.currentTime = Math.max(audio.currentTime-10, 0); }
+  if (e.code === "ArrowRight" && !e.ctrlKey && !e.shiftKey) nextTrack();
+  if (e.code === "ArrowLeft"  && !e.ctrlKey && !e.shiftKey) prevTrack();
+});
+
+// ──────────────────────────────────────────────
+//  UTILS
+// ──────────────────────────────────────────────
+function fmtTime(s) {
+  if (!s || isNaN(s)) return "0:00";
+  const m = Math.floor(s/60), sec = Math.floor(s%60);
+  return m + ":" + String(sec).padStart(2,"0");
+}
+
+function escHtml(str) {
+  return String(str||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+// ──────────────────────────────────────────────
+//  INIT
+// ──────────────────────────────────────────────
+let appReady = false;
+function whenReady(){
+  return appReady ? Promise.resolve() : new Promise(res=>{
+    const iv = setInterval(()=>{ if(appReady){ clearInterval(iv); res(); } }, 50);
+  });
+}
+initDB().then(async () => { await loadAll(); restorePlaybackState(); appReady = true; }).catch(console.error);
+
+// Navigazione topbar: dentro l'iframe cambia il tab del parent,
+// da solo apre l'app SampleLab.
+function onyxGo(tab){
+  if(window.self !== window.top){
+    try{ window.parent.postMessage({action:'switchTab', tab}, '*'); }catch(_){}
+  } else {
+    window.location.href = '/' + (tab==='player' ? '' : '?tab='+tab);
+  }
+}
+if(window.self !== window.top){
+  const nav = document.getElementById('otNav');
+  if(nav) nav.style.display = 'none';
+}
+</script>
+<script>
+// ════════════════════════════════════════════════════════════
+// BRIDGE SampleLab ↔ Database (aggiunto senza toccare l'app)
+// 1) I brani aggiunti/caricati nel player vengono sincronizzati
+//    automaticamente nel database del server (e nei suoi file).
+// 2) Il player riceve dal pannello Database i brani da importare
+//    (postMessage: importFromDb / importManyFromDb).
+// ════════════════════════════════════════════════════════════
+const _onyxOrigHandleAudioFiles = handleAudioFiles;
+handleAudioFiles = function(files){
+  const nBefore = tracks.length;
+  _onyxOrigHandleAudioFiles(files);
+  const iv = setInterval(()=>{
+    if(!isProcessing){
+      clearInterval(iv);
+      syncOnyxTracksToDb(nBefore);
+    }
+  }, 400);
+};
+
+async function syncOnyxTracksToDb(nBefore){
+  const added = tracks.slice(nBefore);
+  for(const t of added){
+    try{
+      const blob = await (await fetch(audioBlobs[t.id])).blob();
+      const ext = String(t._origName||'audio').split('.').pop() || 'mp3';
+      const serverName = 'onyx_' + t.id + '.' + ext;
+      const fd = new FormData(); fd.append('file', blob, serverName);
+      await fetch('/upload_file', {method:'POST', body: fd});
+      t.localFile = serverName;
+      await dbPut('tracks', t);
+      const res = await fetch('/db/from_onyx', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({title: t.name, artist: t.artist, album: t.album,
+                              album_artist: t.album_artist||'', composer: t.composer||'',
+                              genre: t.genre||'', year: t.year, track_number: t.track_number||'',
+                              bpm: t.bpm?parseFloat(t.bpm):null, musical_key: t.musical_key||'',
+                              comment: t.comment||'', lyrics: t.lyrics||'',
+                              duration: t.dur, local_file: serverName})
+      }).then(r=>r.json());
+      if(res && res.id){ t.dbSongId = res.id; await dbPut('tracks', t); }
+    }catch(e){ console.error('Onyx→DB sync failed', e); }
+  }
+  if(added.length){
+    console.log(`Onyx: ${added.length} brani sincronizzati nel database`);
+    try{ window.parent.postMessage({action:'dbChanged'}, '*'); }catch(_){}
+  }
+}
+
+async function importDbTrackToOnyx(track, doPlay){
+  await whenReady();
+  const dup = tracks.find(t =>
+    String(t.name||'').toLowerCase() === String(track.title||track.local_file||'').toLowerCase() &&
+    String(t.artist||'').toLowerCase() === String(track.artist||'').toLowerCase());
+  if(dup){
+    if(track.local_file) { dup.localFile = track.local_file; await dbPut('tracks', dup); }
+    if(track.dbSongId) { dup.dbSongId = track.dbSongId; await dbPut('tracks', dup); }
+    if(doPlay){ const i=visibleTracks().findIndex(t=>t.id===dup.id); if(i>=0) playTrack(i); }
+    return;
+  }
+  const id = 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  const res = await fetch(track.url);
+  if(!res.ok) throw new Error('URL non valido: '+track.url);
+  const blob = await res.blob();
+  await dbPut('blobs', {id, blob});
+  const objUrl = URL.createObjectURL(blob);
+  audioBlobs[id] = objUrl;
+  const dur = await new Promise(resolve=>{ const a=new Audio(objUrl); a.addEventListener('loadedmetadata',()=>resolve(a.duration)); a.addEventListener('error',()=>resolve(0)); });
+  const tr = { id, name: track.title || track.local_file || 'audio', artist: track.artist || 'Brano locale',
+               album: track.album || '', album_artist: track.album_artist || '', year: track.year || '',
+               release_date: track.release_date || '',
+               composer: track.composer || '', genre: track.genre || '', track_number: track.track_number || '',
+               bpm: track.bpm || '', musical_key: track.musical_key || '', comment: track.comment || '',
+               dur, playlists: [],
+               lyrics: track.lyrics || '', sampleSources: [], sampleUsages: [], analyzed: 'none',
+               geniusUrl: '', whosampledUrl: '', _origName: (track.title || 'audio'),
+               dbSongId: track.dbSongId || '', localFile: track.local_file || '' };
+  tracks.push(tr);
+  await dbPut('tracks', tr);
+  renderSidebar(); renderTracks();
+  if(doPlay){ const i = visibleTracks().findIndex(t=>t.id===id); if(i>=0) playTrack(i); }
+}
+
+// ── SYNC AUTOMATICO DB → PLAYER ─────────────────────────────
+// La pagina principale invia i dati aggiornati del database. Questa funzione:
+//  1) aggiorna i brani già presenti (per dbSongId / localFile / titolo+artista);
+//  2) AGGIUNGE al player le canzoni del database non ancora presenti
+//     (riprodotte in streaming dal server, senza scaricare il file);
+//  3) RIMUOVE dal player i brani che erano sincronizzati ma non esistono più
+//     nel database (es. dopo la pulizia o una cancellazione dal tab Database).
+async function applyDbSync(songs){
+  if(!Array.isArray(songs)) return;
+  await whenReady();
+  const norm = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  let changed = false;
+  for(const s of songs){
+    if(!s || !s.id) continue;
+    let t = tracks.find(x => x.dbSongId === s.id);
+    if(!t && s.local_file) t = tracks.find(x => x.localFile === s.local_file);
+    if(!t && s.title && s.artist){
+      t = tracks.find(x => norm(x.name)===norm(s.title) && norm(x.artist)===norm(s.artist));
+    }
+    if(!t){
+      // Nuova canzone dal database → la aggiungiamo al player (streaming dal server)
+      if(s.local_file){
+        const id = 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+        const tr = {
+          id, name: s.title || s.local_file || 'audio', artist: s.artist || 'Brano locale',
+          album: s.album || '', album_artist: s.album_artist || '', year: s.year || '',
+          release_date: s.release_date || '',
+          composer: s.composer || '', genre: s.genre || '', track_number: s.track_number || '',
+          bpm: s.bpm || '', musical_key: s.musical_key || '', comment: s.comment || '',
+          dur: s.duration || 0, playlists: [], lyrics: s.lyrics || '',
+          sampleSources: [], sampleUsages: [], analyzed: s.analyzed_status || 'none',
+          geniusUrl: s.genius_url || '', whosampledUrl: s.whosampled_url || '',
+          _origName: (s.title || 'audio'), dbSongId: s.id, localFile: s.local_file
+        };
+        tracks.push(tr);
+        try{ await dbPut('tracks', tr); }catch(_){}
+        changed = true;
+      }
+      continue;
+    }
+    const prev = { name:t.name, artist:t.artist, album:t.album||'', album_artist:t.album_artist||'',
+                  year:t.year||'', release_date:t.release_date||'', composer:t.composer||'', genre:t.genre||'', track_number:t.track_number||'',
+                  bpm:t.bpm||'', musical_key:t.musical_key||'', comment:t.comment||'',
+                  lyrics:t.lyrics||'', dur:t.dur||0 };
+    if(s.title) t.name = s.title;
+    if(s.artist) t.artist = s.artist;
+    if(s.album !== undefined && s.album !== null && s.album !== '') t.album = s.album;
+    if(s.album_artist !== undefined && s.album_artist !== null && s.album_artist !== '') t.album_artist = s.album_artist;
+    if(s.year) t.year = s.year;
+    if(s.release_date !== undefined && s.release_date !== null && s.release_date !== '') t.release_date = s.release_date;
+    if(s.composer !== undefined && s.composer !== null && s.composer !== '') t.composer = s.composer;
+    if(s.genre !== undefined && s.genre !== null && s.genre !== '') t.genre = s.genre;
+    if(s.track_number !== undefined && s.track_number !== null && s.track_number !== '') t.track_number = s.track_number;
+    if(s.bpm !== undefined && s.bpm !== null && s.bpm !== '') t.bpm = s.bpm;
+    if(s.musical_key !== undefined && s.musical_key !== null && s.musical_key !== '') t.musical_key = s.musical_key;
+    if(s.comment !== undefined && s.comment !== null && s.comment !== '') t.comment = s.comment;
+    if(s.lyrics) t.lyrics = s.lyrics;
+    if(s.duration) t.dur = s.duration;
+    if(!t.dbSongId) t.dbSongId = s.id;
+    if(prev.name!==t.name || prev.artist!==t.artist || prev.album!==(t.album||'') ||
+       prev.album_artist!==(t.album_artist||'') || String(prev.year)!==String(t.year||'') ||
+       prev.composer!==(t.composer||'') || prev.genre!==(t.genre||'') ||
+       prev.track_number!==(t.track_number||'') || String(prev.bpm)!==String(t.bpm||'') ||
+       prev.musical_key!==(t.musical_key||'') || prev.comment!==(t.comment||'') ||
+       prev.lyrics!==(t.lyrics||'') || prev.dur!==(t.dur||0)){
+      await dbPut('tracks', t);
+      changed = true;
+    }
+  }
+  // Rimuove i brani sincronizzati che non sono più nel database
+  // (solo se la lista del DB non è vuota, per evitare svuotamenti accidentali
+  // se per un errore transitorio arrivasse una lista vuota).
+  if(songs.length > 0){
+    for(let i = tracks.length - 1; i >= 0; i--){
+      const t = tracks[i];
+      if(!t.dbSongId && !t.localFile) continue;
+      const still = (t.dbSongId && songs.some(s => s && s.id === t.dbSongId)) ||
+                    (t.localFile && songs.some(s => s && s.local_file === t.localFile));
+      if(!still){
+        if (audioBlobs[t.id]) { URL.revokeObjectURL(audioBlobs[t.id]); delete audioBlobs[t.id]; }
+        try{ await dbDelete("blobs", t.id); }catch(_){}
+        try{ await dbDelete("tracks", t.id); }catch(_){}
+        tracks.splice(i, 1);
+        selectedIds.delete(t.id);
+        if (t.id === currentTrackId) currentTrackId = null;
+        changed = true;
+      }
+    }
+  }
+  if(changed){
+    renderTracks();
+    if(currentTrackId){
+      const cur = tracks.find(x=>x.id===currentTrackId);
+      if(cur) renderNowBar(cur);
+    }
+    const lp = document.getElementById('lyricsPanel');
+    if(lp && lp.classList.contains('open')) renderLyrics();
+  }
+}
+
+// Avvisa la pagina principale che un brano è stato RIMOSSO dal player,
+// così il database e il file sul server vengono eliminati.
+function notifyDbTrackDelete(t){
+  if(!t || window.self === window.top) return;
+  try{
+    window.parent.postMessage({action:'dbTrackDelete', track:{
+      dbSongId: t.dbSongId || '',
+      local_file: t.localFile || '',
+      title: t.name || '',
+      artist: t.artist || ''
+    }}, '*');
+  }catch(_){}
+}
+
+// Avvisa la pagina principale (database) che un brano del player è stato
+// modificato, così aggiorna il database. Evita loop: viene chiamata solo
+// su modifiche fatte LOCALMENTE nel player (non durante il sync dal DB).
+// prevName/prevArtist = valori PRIMA della modifica (per ritrovare il brano
+// nel database anche quando è stato appena rinominato).
+function notifyDbTrackUpdated(t, prevName, prevArtist){
+  if(!t || window.self === window.top) return;
+  try{
+    window.parent.postMessage({action:'dbTrackUpdated', track:{
+      dbSongId: t.dbSongId || '',
+      prev_title: prevName || '',
+      prev_artist: prevArtist || '',
+      local_file: t.localFile || '',
+      title: t.name || '',
+      artist: t.artist || '',
+      album: t.album || '',
+      album_artist: t.album_artist || '',
+      year: t.year || '',
+      composer: t.composer || '',
+      genre: t.genre || '',
+      track_number: t.track_number || '',
+      bpm: t.bpm ? parseFloat(t.bpm) : null,
+      musical_key: t.musical_key || '',
+      comment: t.comment || '',
+      lyrics: t.lyrics || '',
+      duration: t.dur || 0
+    }}, '*');
+  }catch(_){}
+}
+
+window.addEventListener('message', async e => {
+  const d = e.data || {};
+  if(d.action === 'importFromDb' && d.track){
+    try{ await importDbTrackToOnyx(d.track, true); }catch(err){ console.error(err); }
+  }
+  else if(d.action === 'syncSongsFromDb' && Array.isArray(d.songs)){
+    try{ await applyDbSync(d.songs); }catch(err){ console.error(err); }
+  }
+  else if(d.action === 'importManyFromDb' && Array.isArray(d.tracks)){
+    let ok=0;
+    for(const t of d.tracks){ try{ await importDbTrackToOnyx(t, false); ok++; }catch(err){} }
+    renderSidebar(); renderTracks();
+    console.log(`Onyx: importati ${ok} brani dal database`);
+  }
+  else if(d.action === 'playTrackFromDb' && d.track){
+    try{ await importDbTrackToOnyx(d.track, true); }catch(err){ console.error(err); }
+  }
+  else if(d.action === 'togglePlay'){ togglePlay(); }
+  else if(d.action === 'pause'){ if(isPlaying){ audio.pause(); isPlaying=false; updatePlayUI(); renderTracks(); pushPlaybackState(true); } }
+  else if(d.action === 'nextTrack'){ nextTrack(); }
+  else if(d.action === 'prevTrack'){ prevTrack(); }
+  else if(d.action === 'stop'){ stopPlayback(); }
+  else if(d.action === 'seekTo' && typeof d.time === 'number'){
+    if(audio.duration) audio.currentTime = Math.max(0, Math.min(d.time, audio.duration));
+    pushPlaybackState(true);
+  }
+  else if(d.action === 'setVolume' && typeof d.volume === 'number'){
+    const v = Math.max(0, Math.min(100, Math.round(d.volume)));
+    audio.volume = v/100;
+    const sl = document.getElementById('volSlider'); if(sl) sl.value = v;
+    pushPlaybackState(true);
+  }
+  else if(d.action === 'requestState'){ pushPlaybackState(true); }
+  else if(d.action === 'setArtistFilter' && d.artist){ setArtistFilter(d.artist); }
+  else if(d.action === 'setAlbumFilter' && d.album){ setAlbumFilter(d.album); }
+  else if(d.action === 'toggleShuffle'){ toggleShuffle(); pushPlaybackState(true); }
+  else if(d.action === 'toggleRepeat'){ toggleRepeat(); pushPlaybackState(true); }
+  else if(d.action === 'openLyrics'){ openLyrics(); }
+});
+</script>
+</body>
+</html>

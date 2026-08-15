@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SampleLab (2) — Esplora</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+:root{--bg:#080808;--surface:#111111;--surface2:#1a1a1a;--border:#252525;--border2:#333333;--text:#e8e8e8;--muted:#666666;--dim:#444444;--accent:#c8f000;--accent2:#7b5ea7;--accent3:#2dd4bf;--red:#ff4545}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Space Grotesk',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:70px}
+a{color:var(--accent)}
+header{display:flex;align-items:center;gap:16px;padding:20px 32px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100;flex-wrap:wrap}
+.logo{font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent);text-decoration:none;letter-spacing:-.5px}
+.logo span{color:var(--muted);font-weight:400}
+.breadcrumb{font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60vw}
+.breadcrumb .sep{color:var(--dim);margin:0 6px}
+.back-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 14px;cursor:pointer;text-decoration:none;transition:border-color .15s;margin-left:auto;white-space:nowrap}
+.back-btn:hover{border-color:var(--accent);color:var(--accent)}
+.wrap{padding:24px 32px;max-width:1200px}
+.page-type{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.page-sub{font-size:26px;font-weight:700;margin-bottom:6px;word-break:break-word}
+.count-badge{display:inline-block;background:var(--surface);border:1px solid var(--border2);border-radius:20px;padding:4px 12px;font-family:'Space Mono',monospace;font-size:11px;color:var(--accent);margin-bottom:18px}
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.toolbar label{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+select,input[type=text]{background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:13px;border-radius:8px;padding:8px 12px;outline:none}
+select:focus,input[type=text]:focus{border-color:var(--accent)}
+.sort-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:12px;border-radius:8px;padding:8px 14px;cursor:pointer;transition:all .15s}
+.sort-btn:hover{border-color:var(--accent);color:var(--accent)}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--surface2);padding:10px 12px;text-align:left;font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(255,255,255,.02)}
+.song-title{color:var(--text);text-decoration:none;font-weight:600}
+a.song-title:hover{color:var(--accent)}
+.artist-link{color:var(--accent3);text-decoration:none;font-weight:500}
+.artist-link:hover{text-decoration:underline}
+.album-link{color:var(--muted);text-decoration:none}
+.album-link:hover{color:var(--accent3)}
+.play-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center;transition:all .15s}
+.play-btn:hover{border-color:var(--accent);color:var(--accent)}
+.play-btn.playing{background:var(--accent);color:#080808;border-color:var(--accent)}
+.mono{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)}
+.empty{text-align:center;padding:48px;color:var(--muted);font-family:'Space Mono',monospace;font-size:13px}
+.hint{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.6}
+.hint b{color:var(--accent3);font-weight:600}
+.audio-dock{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:12px 32px;display:none;align-items:center;gap:14px;z-index:200}
+.audio-dock.visible{display:flex}
+.dock-info{font-size:13px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px}
+#aud{width:320px;max-width:40vw;height:36px}
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/">SampleLab <span>(2)</span></a>
+  <div class="breadcrumb"><span id="bc-type">Esplora</span><span class="sep">/</span><span id="bc-value"></span></div>
+  <a class="back-btn" href="/">← Torna alla app</a>
+</header>
+<div class="wrap">
+  <div class="page-type" id="page-type"></div>
+  <div class="page-sub" id="page-sub"></div>
+  <div class="count-badge" id="count-badge"></div>
+
+  <div class="toolbar" id="toolbar">
+    <label>Ordina per</label>
+    <select id="sort-by">
+      <option value="year">Anno</option>
+      <option value="title">Titolo</option>
+      <option value="artist">Artista</option>
+      <option value="album">Album</option>
+      <option value="bpm">BPM</option>
+      <option value="musical_key">Chiave</option>
+      <option value="duration">Durata</option>
+      <option value="track_number">N° traccia</option>
+    </select>
+    <button class="sort-btn" id="sort-dir" onclick="toggleSortDir()">↑ Crescente</button>
+    <input type="text" id="quick-filter" placeholder="Filtra in questa lista…" oninput="applyRender()" style="flex:1;min-width:160px">
+  </div>
+
+  <div class="table-wrap" id="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Play</th><th>Titolo</th><th>Artista</th><th>Album</th><th>Anno</th><th>BPM</th><th>Chiave</th><th>Durata</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="empty" id="empty-box" style="display:none">Nessun brano trovato nel database.</div>
+  <div class="hint" id="hint">💡 <b>Clicca sul titolo</b> di una canzone per andare al suo album · <b>clicca sull'artista</b> per vedere tutte le sue canzoni · usa <b>Ordina per</b> per organizzare la lista (anno, titolo, BPM…).</div>
+</div>
+
+<div class="audio-dock" id="audio-dock">
+  <span class="dock-info" id="dock-info"></span>
+  <audio id="aud" controls></audio>
+  <button class="dock-close" onclick="closeDock()" title="Chiudi player">✕</button>
+</div>
+
+<script>
+(function(){
+'use strict';
+const params=new URLSearchParams(location.search);
+const artistParam=(params.get('artist')||'').trim();
+const albumParam=(params.get('album')||'').trim();
+const isArtist=!!artistParam;
+const isAlbum=!!albumParam;
+
+let allSongs=[];
+let sortBy='year', sortDir='asc';
+let playingId=null;
+
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function escA(s){return String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+function fmtTime(sec){if(sec==null||isNaN(sec))return'—';const m=Math.floor(sec/60);return m+':'+String(Math.floor(sec%60)).padStart(2,'0')}
+function artistHref(a){return a?'browse.html?artist='+encodeURIComponent(a):''}
+function albumHref(a){return a?'browse.html?album='+encodeURIComponent(a):''}
+// Multi-artista: ogni artista diventa un link cliccabile separato.
+// Separatori: / , ; | + & feat. ft. with. Lo slash "/" vale solo con spazi
+// attorno (es. "Eminem / D12"), così "AC/DC" non viene spezzato.
+function artistChipsHtml(artist){
+  const parts=String(artist||'').split(/\s*(?:\s+\/\s*|\s*\/\s+|,|;|\||\+|&|feat\.?|ft\.?|\bwith\b)\s*/gi).map(a=>a.trim()).filter(Boolean);
+  if(!parts.length) return '<span class="mono">—</span>';
+  return parts.map(a=>`<a class="artist-link" href="${artistHref(a)}" title="Tutte le canzoni di ${esc(a)}">${esc(a)}</a>`).join(' <span class="mono">·</span> ');
+}
+
+function toggleSortDir(){
+  sortDir=sortDir==='asc'?'desc':'asc';
+  document.getElementById('sort-dir').textContent=sortDir==='asc'?'↑ Crescente':'↓ Decrescente';
+  applyRender();
+}
+document.getElementById('sort-by').addEventListener('change',e=>{sortBy=e.target.value;applyRender()});
+
+function sortVal(s){
+  switch(sortBy){
+    case 'year':        {const y=parseInt(s.year,10);return (y>0)?y:Infinity;}
+    case 'bpm':         return (s.bpm==null||s.bpm==='')?Infinity:Number(s.bpm);
+    case 'duration':    return (s.duration==null||s.duration==='')?Infinity:Number(s.duration);
+    case 'track_number':{const t=String(s.track_number??'').match(/\d+/);return t?parseInt(t[0],10):Infinity;}
+function applyRender(){
+  const q=(document.getElementById('quick-filter').value||'').toLowerCase();
+  const list=allSongs.filter(s=>!q||(s.title||'').toLowerCase().includes(q)||(s.artist||'').toLowerCase().includes(q)||(s.album||'').toLowerCase().includes(q));
+  list.sort((a,b)=>{
+    const va=sortVal(a),vb=sortVal(b);
+    let c;
+    if(va===Infinity&&vb===Infinity)c=0;
+    else if(va===Infinity)c=1;
+    else if(vb===Infinity)c=-1;
+    else c=(va<vb?-1:va>vb?1:0);
+    if(c===0){const ta=String(a.title??'').toLowerCase(),tb=String(b.title??'').toLowerCase();c=ta<tb?-1:ta>tb?1:0;}
+    return sortDir==='asc'?c:-c;
+  });
+  const tbody=document.getElementById('tbody');
+  const empty=document.getElementById('empty-box');
+  if(!list.length){tbody.innerHTML='';empty.style.display='block';return}
+  empty.style.display='none';
+  tbody.innerHTML=list.map(s=>{
+    const isPlay=playingId===s.id;
+    return `<tr data-id="${esc(s.id)}">
+      <td>${s.local_file?`<button class="play-btn ${isPlay?'playing':''}" onclick="togglePlay('${esc(s.id)}','${escA(s.local_file)}')" title="Play / Pausa">${isPlay?'❚❚':'▶'}</button>`:'<span class="mono">—</span>'}</td>
+      <td>${s.album?`<a class="song-title" href="${albumHref(s.album)}" title="Vai all'album di questa canzone">${esc(s.title||s.local_file||'—')}</a>`:`<span class="song-title">${esc(s.title||s.local_file||'—')}</span>`}</td>
+      <td>${artistChipsHtml(s.artist)}</td>
+      <td>${s.album?`<a class="album-link" href="${albumHref(s.album)}" title="Vai all'album">${esc(s.album)}</a>`:'<span class="mono">—</span>'}</td>
+      <td class="mono">${s.year||'—'}</td>
+      <td class="mono">${s.bpm||'—'}</td>
+      <td class="mono">${esc(s.musical_key||'—')}</td>
+      <td class="mono">${fmtTime(s.duration)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function togglePlay(id,file){
+  const aud=document.getElementById('aud');
+  const dock=document.getElementById('audio-dock');
+  if(playingId===id){
+    if(aud.paused){aud.play();}else{aud.pause();}
+  }else{
+    playingId=id;
+    dock.classList.add('visible');
+    document.getElementById('dock-info').textContent='▶ '+file;
+    aud.src='/stream/'+encodeURIComponent(file);
+    aud.play();
+  }
+  document.querySelectorAll('.play-btn').forEach(b=>{
+    const tr=b.closest('tr');
+    const on=tr&&tr.dataset.id===playingId;
+    b.classList.toggle('playing',on);
+    b.textContent=on?'❚❚':'▶';
+  });
+}
+function closeDock(){
+  const aud=document.getElementById('aud');
+  aud.pause();aud.removeAttribute('src');
+  document.getElementById('audio-dock').classList.remove('visible');
+  playingId=null;
+  document.querySelectorAll('.play-btn').forEach(b=>{b.classList.remove('playing');b.textContent='▶'});
+}
+
+(async function init(){
+  const bcType=document.getElementById('bc-type');
+  const pageType=document.getElementById('page-type');
+  const pageSub=document.getElementById('page-sub');
+  const bcVal=document.getElementById('bc-value');
+  let url='/db/songs';
+  if(isArtist){
+    url+='?artist='+encodeURIComponent(artistParam);
+    pageType.textContent='🎤 Artista';
+    pageSub.textContent=artistParam;
+    bcType.textContent='Artista';bcVal.textContent=artistParam;
+    sortBy='year';
+  }else if(isAlbum){
+    url+='?album='+encodeURIComponent(albumParam);
+    pageType.textContent='💿 Album';
+    pageSub.textContent=albumParam;
+    bcType.textContent='Album';bcVal.textContent=albumParam;
+    sortBy='track_number';
+  }else{
+    pageType.textContent='🔍 Esplora';
+    pageSub.textContent='Apri un artista o un album dalla tabella Database della app';
+    bcVal.textContent='—';
+    document.getElementById('table-wrap').style.display='none';
+    document.getElementById('toolbar').style.display='none';
+    document.getElementById('hint').style.display='none';
+    return;
+  }
+  document.getElementById('sort-by').value=sortBy;
+  try{
+    allSongs=await fetch(url).then(r=>r.json());
+  }catch(e){ allSongs=[]; }
+  document.title='SampleLab (2) — '+pageSub.textContent;
+  document.getElementById('count-badge').textContent=allSongs.length+' brani nel database';
+  applyRender();
+})();
+})();
+</script>
+</body>
+</html>
+

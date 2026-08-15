@@ -1,0 +1,28 @@
+# ── Dati / file audio scaricati (troppo grandi per GitHub) ──────────────
+downloads/
+stems/
+.trash/
+.snapshots/
+
+# ── Cache Python e file di sistema ───────────────────────────────────────
+__pycache__/
+*.pyc
+.DS_Store
+
+# ── File temporanei di download ──────────────────────────────────────────
+*.part
+*.ytdl
+*.f*.mp4
+*.f*.m4a
+
+# ── File temporanei del database ─────────────────────────────────────────
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ── Cookie di sessione ───────────────────────────────────────────────────
+# Il file COMPLETO (con la sessione del browser) resta SOLO sul Mac: è usato
+# dall'app per i download. Nella repo c'è solo la versione snellita
+# (anti-403, senza dati di account). Non caricare mai il file completo.
+cookies.txt
+
