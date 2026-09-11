@@ -456,6 +456,12 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
 .pair-editor-actions{display:flex;align-items:center;gap:12px;margin-top:12px}
 .dbe-status{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent3)}
 
+/* Selettore versione YouTube (esplicita vs censurata) */
+.ver-chip{font-family:'Space Mono',monospace;font-size:11px;padding:6px 12px;border-radius:20px;border:1px solid var(--border2);background:var(--surface);color:var(--text3);cursor:pointer;transition:all .15s;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ver-chip:hover{border-color:var(--accent);color:var(--text)}
+.ver-chip.active{border-color:var(--accent);background:var(--accent);color:#080808;font-weight:700}
+.ver-chip:active{transform:scale(.97)}
+
 </style>
 <base target="_blank">
 <base target="_blank">
@@ -3072,7 +3078,7 @@ function fmtSize(b){if(!b)return"";return b>1e6?(b/1e6).toFixed(1)+" MB":(b/1e3)
 // ════════════════════════════════════════════════════════════
 // SCRAPER — identico a scraper_index.html
 // ════════════════════════════════════════════════════════════
-let pollTimer=null, mainYtUrlX="", mainQueryX="", mainTitleX="", mainArtistX="";
+let pollTimer=null, mainYtUrlX="", mainQueryX="", mainTitleX="", mainArtistX="", lastResultX=null, mainChoicesX=[], mainToken=0;
 let suggestionData=null, originalArtist="", originalTitle="";
 const players={}, downloadCache={};
 
@@ -3136,6 +3142,7 @@ function renderResults(data){
   const el=document.getElementById("results");
   document.getElementById("section-nav").style.display="flex";
   mainYtUrlX=data.main_yt_url||mainQueryX; mainTitleX=data.title||""; mainArtistX=data.artist||"";
+  lastResultX=data; mainChoicesX=(data.main_yt_choices||[]).filter(c=>c&&c.url);
   let html=`<div id="sec-main"><div class="main-card">
     <div class="main-card-header">
       <div>
@@ -3148,7 +3155,11 @@ function renderResults(data){
       ${data.ws_url?`<a href="${data.ws_url}" target="_blank" class="ws-badge">WhoSampled ↗</a>`:""}
     </div>
     <div id="player-main-wrap">${playerLoadingHTML("Caricamento audio...")}</div>
-    ${data.main_yt_url?`<div class="yt-link-row"><a href="${escA(data.main_yt_url)}" target="_blank" class="yt-link">▶ YouTube ↗</a></div>`:""}
+    ${mainChoicesX.length>1?`<div class="ver-row" id="ver-row" style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px 0;align-items:center">
+      <span style="font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.06em">VERSIONE:</span>
+      ${mainChoicesX.map((c,i)=>`<button class="ver-chip${i===0?' active':''}" onclick="chooseMainVersion(${i},this)" title="${esc(c.title)}">${c.explicit?'🔞':(c.clean?'🚫':'🎬')} ${esc(shortVersionLabel(c.title))}</button>`).join('')}
+    </div>`:""}
+    ${data.main_yt_url?`<div class="yt-link-row"><a id="main-yt-link" href="${escA(data.main_yt_url)}" target="_blank" class="yt-link">▶ YouTube ↗</a></div>`:""}
   </div></div>`;
 
   // CONTAINS
@@ -3215,7 +3226,7 @@ function renderResults(data){
   </div>`;
 
   el.innerHTML=html; fetchDatasetStats();
-  loadPlayerAudio("main",mainYtUrlX,"player-main-wrap",0,data.main_yt_title||data.title);
+  loadPlayerAudio("main",mainYtUrlX,"player-main-wrap",0,data.main_yt_title||data.title,false,++mainToken);
   data.contains.forEach((item,i)=>{
     const yq=item.yt_url||`${item.artist} ${item.title}`;
     loadSampleXEditor(`xed-c-yi-${i}`,yq,item.timestamp_yi,item.title);
@@ -3231,6 +3242,33 @@ function renderResults(data){
     loadSampleXEditor(`xed-cb-yi-${i}`,yq,item.timestamp_yi,item.title);
     if(mainYtUrlX) loadSampleXEditor(`xed-cb-x-${i}`,mainYtUrlX,item.timestamp_x,data.title);
   });
+}
+
+function shortVersionLabel(t){
+  let s=String(t||"");
+  const m=s.match(/^\s*[^-–—:]+\s*[-–—:]\s+(.+)$/);
+  if(m) s=m[1].trim();
+  return s.length>48? s.slice(0,46)+"…": s;
+}
+function chooseMainVersion(i,btn){
+  const c=mainChoicesX[i]; if(!c||!c.url) return;
+  mainYtUrlX=c.url;
+  document.querySelectorAll("#ver-row .ver-chip").forEach(b=>b.classList.remove("active"));
+  if(btn) btn.classList.add("active");
+  const lk=document.getElementById("main-yt-link");
+  if(lk) lk.href=c.url;
+  // ferma il vecchio player principale ed evita che un download in sospeso della
+  // versione precedente sovrascriva il nuovo player (race condition)
+  const oldP=players["main"];
+  if(oldP){try{oldP.audio.pause(); oldP.audio.src="";}catch(e){}}
+  const mw=document.getElementById("player-main-wrap");
+  if(mw) mw.innerHTML=playerLoadingHTML("Caricamento versione selezionata...");
+  loadPlayerAudio("main",mainYtUrlX,"player-main-wrap",0,mainTitleX||(lastResultX&&lastResultX.title)||"",false,++mainToken);
+  if(lastResultX){
+    lastResultX.contains.forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-c-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX); });
+    lastResultX.sampled_in.forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-s-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX); });
+    (lastResultX.covered_by||[]).forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-cb-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX); });
+  }
 }
 
 function renderPairCard(item,i,section,mainTitle,mainArtist,mainYtUrl){
@@ -3309,42 +3347,55 @@ function playerLoadingHTML(msg){return`<div class="player-loading"><div class="s
 function playerUnavailableHTML(){return`<div class="player-loading" style="justify-content:center;color:var(--dim)">Non disponibile</div>`}
 
 // ── AUDIO CACHE ───────────────────────────────────────────────────────────────
-function loadPlayerAudio(key,query,containerId,startSec,label,isXCopy){
+function isStaleByToken(containerId,token){
+  if(token==null) return false;
+  const el=document.getElementById(containerId);
+  return !!(el && el.dataset.token && el.dataset.token!==String(token));
+}
+function loadPlayerAudio(key,query,containerId,startSec,label,isXCopy,token){
   const cacheKey=(isXCopy?mainYtUrlX:query).trim();
-  if(downloadCache[cacheKey]?.status==="done"){buildPlayer(key,containerId,downloadCache[cacheKey].filename,startSec||0,label);return}
-  if(downloadCache[cacheKey]?.status==="pending"){downloadCache[cacheKey].callbacks.push({key,containerId,startSec:startSec||0,label});return}
+  const el=document.getElementById(containerId);
+  if(el&&token!=null) el.dataset.token=token;
+  if(downloadCache[cacheKey]?.status==="done"){
+    if(!isStaleByToken(containerId,token)) buildPlayer(key,containerId,downloadCache[cacheKey].filename,startSec||0,label);
+    return;
+  }
+  if(downloadCache[cacheKey]?.status==="pending"){downloadCache[cacheKey].callbacks.push({key,containerId,startSec:startSec||0,label,token});return}
   downloadCache[cacheKey]={status:"pending",filename:null,callbacks:[]};
   fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3"})})
   .then(r=>r.json()).then(({job_id,error})=>{
-    if(error){downloadCache[cacheKey].status="error";setContainerError(containerId,error);return}
-    pollDownloadJob(cacheKey,job_id,key,containerId,startSec||0,label);
-  }).catch(e=>{downloadCache[cacheKey].status="error";setContainerError(containerId,e.message)});
+    if(error){downloadCache[cacheKey].status="error";if(!isStaleByToken(containerId,token))setContainerError(containerId,error);return}
+    pollDownloadJob(cacheKey,job_id,key,containerId,startSec||0,label,token);
+  }).catch(e=>{downloadCache[cacheKey].status="error";if(!isStaleByToken(containerId,token))setContainerError(containerId,e.message)});
 }
 
-function pollDownloadJob(cacheKey,job_id,key,containerId,startSec,label){
+function pollDownloadJob(cacheKey,job_id,key,containerId,startSec,label,token){
   const deadline=Date.now()+180000; // max 3 min: evita "Caricamento..." infinito
   const t=setInterval(()=>{
     fetch(`/status/${job_id}`).then(r=>r.json()).then(job=>{
       if(job.status==="done"){
         clearInterval(t);
         const fn=job.filename;
-        if(!fn){downloadCache[cacheKey].status="error";setContainerError(containerId);return}
+        if(!fn){downloadCache[cacheKey].status="error";if(!isStaleByToken(containerId,token))setContainerError(containerId);return}
         downloadCache[cacheKey].status="done"; downloadCache[cacheKey].filename=fn;
-        buildPlayer(key,containerId,fn,startSec,label);
-        (downloadCache[cacheKey].callbacks||[]).forEach(cb=>{
-          if(cb.fn) cb.fn(fn);
-          else buildPlayer(cb.key,cb.containerId,fn,cb.startSec,cb.label);
-        });
+        if(!isStaleByToken(containerId,token)){
+          buildPlayer(key,containerId,fn,startSec,label);
+          (downloadCache[cacheKey].callbacks||[]).forEach(cb=>{
+            if(cb.fn){ if(!isStaleByToken(cb.containerId,cb.token)) cb.fn(fn); }
+            else if(!isStaleByToken(cb.containerId,cb.token)) buildPlayer(cb.key,cb.containerId,fn,cb.startSec,cb.label);
+          });
+        }
         downloadCache[cacheKey].callbacks=[];
       }else if(job.status==="error"){
-        clearInterval(t); downloadCache[cacheKey].status="error"; setContainerError(containerId,job.error);
-        (downloadCache[cacheKey].callbacks||[]).forEach(cb=>setContainerError(cb.containerId,job.error));
+        clearInterval(t); downloadCache[cacheKey].status="error";
+        if(!isStaleByToken(containerId,token)) setContainerError(containerId,job.error);
+        (downloadCache[cacheKey].callbacks||[]).forEach(cb=>{ if(!isStaleByToken(cb.containerId,cb.token)) setContainerError(cb.containerId,job.error); });
         downloadCache[cacheKey].callbacks=[];
       }else if(Date.now()>deadline){
         clearInterval(t); downloadCache[cacheKey].status="error";
         const msg="Timeout download (3 min)";
-        setContainerError(containerId,msg);
-        (downloadCache[cacheKey].callbacks||[]).forEach(cb=>setContainerError(cb.containerId,msg));
+        if(!isStaleByToken(containerId,token)) setContainerError(containerId,msg);
+        (downloadCache[cacheKey].callbacks||[]).forEach(cb=>{ if(!isStaleByToken(cb.containerId,cb.token)) setContainerError(cb.containerId,msg); });
         downloadCache[cacheKey].callbacks=[];
       }
     }).catch(()=>{});

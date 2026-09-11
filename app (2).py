@@ -965,15 +965,22 @@ def clean_filename(name):
 def is_youtube_url(s):
     return "youtube.com/watch" in s or "youtu.be/" in s
 
-def yt_search_first(query, expected_title="", expected_artist=""):
-    from difflib import SequenceMatcher
-    import re
+# ── VERSIONI ESPLICITE vs CENSURATE ─────────────────────────────────────────
+_EXPLICIT_RE = re.compile(
+    r'[\(\[]\s*(?:explicit|uncensored|unedited|uncut)\s*[\)\]]'
+    r'|\b(?:explicit|uncensored|unedited|uncut|nsfw)\b'
+    r'|\bdirty\s+version\b|\bdirty\s+edit\b',
+    re.IGNORECASE)
 
-    ydl_opts = {"quiet": True, "extract_flat": True, "noplaylist": True,
-                "remote_components": ["ejs:github"]}
+_CLEAN_RE = re.compile(
+    r'[\(\[]\s*(?:clean|censored)\s*[\)\]]'
+    r'|\b(?:censored|clean\s+version|clean\s+edit|radio\s+edit|edited\s+version)\b'
+    r'|\bno\s+swears?\b|\bwithout\s+cursing\b|\bsfw\b',
+    re.IGNORECASE)
 
-    # La ricerca YouTube può essere lenta: la eseguiamo in un thread con timeout
-    # (max ~25s) così la verifica non resta mai bloccata su questo passo.
+def _yt_fetch_entries(query):
+    """Esegue ytsearch20 e restituisce le entry (con timeout ~25s)."""
+    ydl_opts = {"quiet": True, "extract_flat": True, "noplaylist": True}
     info_box = [None]; exc_box = [None]
     def _do_yt_search():
         try:
@@ -986,12 +993,63 @@ def yt_search_first(query, expected_title="", expected_artist=""):
     t.join(25)
     if t.is_alive():
         print("[yt_search] TIMEOUT dopo 25s")
-        return None, None
+        return []
     if exc_box[0]:
         print(f"[yt_search] errore: {exc_box[0]}")
-        return None, None
+        return []
     info = info_box[0]
-    entries = info.get("entries", []) if info else []
+    return info.get("entries", []) if info else []
+
+def _rank_yt_entries(entries, expected_title="", expected_artist=""):
+    """Classifica le entry YouTube per pertinenza, preferendo le versioni
+    esplicite/uncensored e penalizzando quelle censurate. Restituisce una lista
+    di dict ordinata per score decrescente."""
+    from difflib import SequenceMatcher
+    et = normalize(expected_title) if expected_title else ""
+    ea = normalize(expected_artist) if expected_artist else ""
+    ranked = []
+    for e in entries:
+        raw_title = e.get("title", "")
+        vt = normalize(raw_title)
+        duration = e.get("duration", 0)
+        if duration and (duration < 20 or duration > 1200):
+            print(f"[yt_search]  '{raw_title}' -> durata {duration}s, scartato")
+            continue
+        score = SequenceMatcher(None, et, vt).ratio()
+        if ea and ea in vt:
+            score += 0.15
+        lower = raw_title.lower()
+        if "feat" in lower or "featuring" in lower or "with" in lower:
+            score += 0.10
+        channel = e.get("channel", "").lower()
+        if ea and (ea in normalize(channel) or "official" in channel):
+            score += 0.20
+        for w in ["cover", "remix", "live", "acoustic", "instrumental", "karaoke",
+                  "8-bit", "8bit", "reaction", "review", "slowed", "reverb", "nightcore"]:
+            if w in lower:
+                score -= 0.25
+                break
+        if re.search(r'\bpart\s*2\b|\bpt\.?\s*2\b|\bii\b|\b2\.0\b', lower) and not re.search(r'\b2\b', et):
+            score -= 0.30
+        # versione esplicita/uncensored: bonus · versione censurata: penalità
+        explicit = bool(_EXPLICIT_RE.search(raw_title))
+        clean = bool(_CLEAN_RE.search(raw_title))
+        if explicit:
+            score += 0.20
+        if clean:
+            score -= 0.25
+        ranked.append({
+            "url": e.get("webpage_url") or e.get("url"),
+            "title": raw_title,
+            "score": round(score, 3),
+            "explicit": explicit,
+            "clean": clean,
+        })
+    ranked.sort(key=lambda r: r["score"], reverse=True)
+    return ranked
+
+def yt_search_first(query, expected_title="", expected_artist=""):
+    entries = _yt_fetch_entries(query)
     if not entries:
         return None, None
 
@@ -1000,63 +1058,85 @@ def yt_search_first(query, expected_title="", expected_artist=""):
         return e.get("webpage_url") or e.get("url"), e.get("title", "")
 
     et = normalize(expected_title)
-    ea = normalize(expected_artist) if expected_artist else ""
-
     # Match esatto
     for e in entries:
-        vt = normalize(e.get("title", ""))
-        if vt == et:
+        if normalize(e.get("title", "")) == et:
             print(f"[yt_search]  MATCH ESATTO: {e.get('title')}")
             return e.get("webpage_url") or e.get("url"), e.get("title", "")
 
-    best = None
-    best_score = -1.0
+    ranked = _rank_yt_entries(entries, expected_title, expected_artist)
+    for r in ranked:
+        tag = (" [ESPLICITA]" if r["explicit"] else "") + (" [CENSURATA]" if r["clean"] else "")
+        print(f"[yt_search]  '{r['title']}' -> score={r['score']:.3f}{tag}")
 
-    for e in entries:
-        raw_title = e.get("title", "")
-        vt = normalize(raw_title)
-        duration = e.get("duration", 0)
+    if ranked and ranked[0]["score"] >= 0.55 and ranked[0]["url"]:
+        print(f"[yt_search]  => SCELTO: {ranked[0]['title']} (score {ranked[0]['score']:.3f})")
+        return ranked[0]["url"], ranked[0]["title"]
 
-        if duration and (duration < 20 or duration > 1200):
-            print(f"[yt_search]  '{raw_title}' -> durata {duration}s, scartato")
-            continue
-
-        score = SequenceMatcher(None, et, vt).ratio()
-
-        if ea and ea in vt:
-            score += 0.15
-
-        lower = raw_title.lower()
-        if "feat" in lower or "featuring" in lower or "with" in lower:
-            score += 0.10
-
-        channel = e.get("channel", "").lower()
-        if ea and (ea in normalize(channel) or "official" in channel):
-            score += 0.20
-            print(f"[yt_search]  canale ufficiale: +0.20")
-
-        bad_words = ["cover", "remix", "live", "acoustic", "instrumental", "karaoke",
-                     "8-bit", "8bit", "reaction", "review", "slowed", "reverb", "nightcore"]
-        for w in bad_words:
-            if w in lower:
-                score -= 0.25
-                break
-
-        if re.search(r'\bpart\s*2\b|\bpt\.?\s*2\b|\bii\b|\b2\.0\b', lower) and not re.search(r'\b2\b', et):
-            score -= 0.30
-
-        print(f"[yt_search]  '{raw_title}' -> score={score:.3f}")
-        if score > best_score:
-            best_score = score
-            best = e
-
-    SOGLIA = 0.55
-    if best and best_score >= SOGLIA:
-        print(f"[yt_search]  => SCELTO: {best.get('title', '')} (score {best_score:.3f})")
-        return best.get("webpage_url") or best.get("url"), best.get("title", "")
-
-    print(f"[yt_search]  => NESSUN MATCH sopra soglia {SOGLIA}")
+    print("[yt_search]  => NESSUN MATCH sopra soglia 0.55")
     return None, None
+
+def yt_search_choices_prefer_explicit(query, expected_title="", expected_artist="", limit=6):
+    """Come yt_search_choices, ma esegue anche una seconda ricerca mirata alle
+    versioni 'explicit/uncensored' e la fonde nelle scelte. Se esiste una versione
+    esplicita con punteggio decente, la restituisce come predefinita (il primo
+    chip nel selettore) così l'utente sente l'uncensored senza doverla cercare."""
+    url, title, choices = yt_search_choices(query, expected_title=expected_title,
+                                            expected_artist=expected_artist, limit=limit)
+    # Seconda ricerca mirata alle versioni esplicite/uncensored
+    _, _, extra = yt_search_choices(f"{query} explicit uncensored",
+                                    expected_title=expected_title,
+                                    expected_artist=expected_artist, limit=limit)
+    merged = list(choices)
+    seen = {c["url"] for c in merged if c["url"]}
+    for c in extra:
+        if c["url"] and c["url"] not in seen:
+            merged.append(c)
+            seen.add(c["url"])
+
+    best_explicit = None
+    for c in merged:
+        if c.get("explicit") and c.get("score", 0) >= 0.5:
+            if best_explicit is None or c["score"] > best_explicit["score"]:
+                best_explicit = c
+
+    # La versione esplicita va in cima (e non deve essere tagliata dal limite)
+    if best_explicit:
+        merged = [best_explicit] + [c for c in merged if c["url"] != best_explicit["url"]]
+
+    merged = merged[:limit]
+
+    if best_explicit:
+        return best_explicit["url"], best_explicit["title"], merged
+    return url, title, merged
+
+def yt_search_choices(query, expected_title="", expected_artist="", limit=6):
+    """Come yt_search_first ma restituisce anche la lista dei candidati migliori
+    (con flag explicit/clean) così l'utente può scegliere la versione preferita
+    (es. uncensored vs censurata)."""
+    entries = _yt_fetch_entries(query)
+    if not entries:
+        return None, None, []
+
+    if not expected_title:
+        e = entries[0]
+        return e.get("webpage_url") or e.get("url"), e.get("title", ""), []
+
+    ranked = _rank_yt_entries(entries, expected_title, expected_artist)
+    ranked = [r for r in ranked if r["url"] and r["score"] >= 0.45][:limit]
+    # Il match esatto (se esiste) deve vincere comunque, ma torniamo le scelte
+    et = normalize(expected_title)
+    for i, r in enumerate(ranked):
+        if normalize(r["title"]) == et:
+            ranked.insert(0, ranked.pop(i))
+            break
+    for r in ranked:
+        tag = (" [ESPLICITA]" if r["explicit"] else "") + (" [CENSURATA]" if r["clean"] else "")
+        print(f"[yt_search]  (scelta) '{r['title']}' -> score={r['score']:.3f}{tag}")
+
+    if ranked:
+        return ranked[0]["url"], ranked[0]["title"], ranked
+    return None, None, []
 
 # ── DOWNLOAD ──────────────────────────────────────────────────────────────────
 # Limita i download YouTube simultanei (troppi in parallelo → rate-limit/403)
@@ -1107,8 +1187,9 @@ def _do_download(job_id, query, fmt, quality="192"):
             "quiet": True,
             # cookie esportati da Chrome una tantum in cookies.txt: evita il blocco 403 di YouTube senza prompt del portachiavi
             "cookiefile": os.path.join(BASE_DIR, "cookies.txt"),
-            # deno + solver script da GitHub: necessari per risolvere le firme JS di YouTube
-            "remote_components": ["ejs:github"],
+            # NOTA (ago 2026): remote_components=["ejs:github"] RIMOSSA perché con yt-dlp
+            # recenti provoca "Video unavailable"/403 su YouTube. Il solver JS integrato
+            # (con deno) gestisce da solo le firme.
         }
 
         print(f"[download {job_id}] Avvio download formato nativo...")
@@ -1241,7 +1322,6 @@ def do_download_playlist(job_id, url, fmt="mp3"):
             "progress_hooks": [progress_hook],
             "ignoreerrors": True,
             "cookiefile": os.path.join(BASE_DIR, "cookies.txt"),
-            "remote_components": ["ejs:github"],
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -1366,14 +1446,43 @@ def do_trim(job_id, filename, start, end, fmt):
         jobs[job_id]["status"]="error"; jobs[job_id]["error"]=str(e)
 
 # ── WHOSAMPLED SCRAPER ────────────────────────────────────────────────────────
+# Parole-variante dentro le parentesi: possono comparire subito dopo "("
+# ("(Remix)", "(Clean)", "(Live)") oppure come alternative a più parole
+# ("(Radio Edit)", "(Album Version)").
+_VARIANT_WORDS_IN_PARENS = (r'remix|cover|live|radio edit|edit|version|instrumental|remaster'
+                            r'|acoustic|demo|reprise|album version|single version|explicit'
+                            r'|clean|intro|outro|karaoke|a cappella')
+# Parole-variante come SUFFISSO finale del titolo (senza parentesi o dopo un
+# numero dentro parentesi: "Title Remix", "Title (2024 Remix)"). Escludiamo
+# parole ambigue come version/live/edit perché possono essere parte del nome
+# reale (es. "...(Griffith Park Collection Live Version)").
+_VARIANT_WORDS_TRAILING = (r'remix|cover|instrumental|remaster|acoustic|demo|reprise|karaoke|a cappella')
+# Rileva marcatori di variante: dentro parentesi oppure come parola finale.
+# NON tocca parole a metà titolo ("Live and Let Die" non è una variante).
+_VARIANT_RE = re.compile(
+    r'\((?:%s)\b|\b(?:%s)\s*\)?\s*$' % (_VARIANT_WORDS_IN_PARENS, _VARIANT_WORDS_TRAILING),
+    re.IGNORECASE)
+
+def _has_variant_marker(s):
+    """True se la stringa contiene un marcatore di variante (remix/cover/live/...),
+    che indica una versione NON originale del brano."""
+    return bool(_VARIANT_RE.search(s or ""))
+
 def match_score(sa, st, fa, ft):
     from difflib import SequenceMatcher
+    raw_st, raw_ft = st, ft
     sa, st, fa, ft = normalize(sa), normalize(st), normalize(fa), normalize(ft)
     if sa == fa and st == ft:
         return 1.0
     ts = 0.85 + (min(len(st), len(ft)) / max(len(st), len(ft), 1)) * 0.15 if (st in ft or ft in st) else SequenceMatcher(None, st, ft).ratio()
     ars = 1.0 if (sa == fa or sa in fa or fa in sa) else SequenceMatcher(None, sa, fa).ratio()
-    return ts * 0.80 + ars * 0.20
+    score = ts * 0.80 + ars * 0.20
+    # Le varianti (remix, cover, live…) NON sono il brano originale: se il brano
+    # cercato non è una variante, i candidati variante vengono penalizzati
+    # (es. cercando "Hell on Earth" non deve vincere "Hell on Earth (Remix)").
+    if _has_variant_marker(raw_ft) and not _has_variant_marker(raw_st):
+        score *= 0.75
+    return score
 
 def _detect_chrome_version():
     """Rileva la versione maggiore di Chrome/Chromium installato, per allineare
@@ -1468,7 +1577,15 @@ def search_whosampled(driver, query, searched_artist="", searched_title=""):
         return None, []
     if not searched_artist:
         return candidates[0], candidates
-    best = max(candidates, key=lambda c: match_score(searched_artist, searched_title, c["artist"], c["title"]), default=None)
+    # Preferisce i candidati che NON sono varianti (remix/cover/live…) quando la
+    # ricerca non chiede esplicitamente una variante. Es.: cercando "Hell on Earth"
+    # deve vincere "Hell on Earth (Front Lines)" e non "Hell on Earth (Remix)".
+    pool = candidates
+    if not _has_variant_marker(searched_title):
+        originals = [c for c in candidates if not _has_variant_marker(c["title"])]
+        if originals:
+            pool = originals
+    best = max(pool, key=lambda c: match_score(searched_artist, searched_title, c["artist"], c["title"]), default=None)
     return best, candidates
 
 def extract_timestamps(driver, conn_url):
@@ -1543,6 +1660,33 @@ def clean_yt_title(title, artist=""):
         # il numero di traccia può venire dopo l'artista (es. "ILL MOVEMENT - 1 - TRE STRONZI")
         title = re.sub(r'^\s*\d+[\.\s\-:]+', '', title)
     return re.sub(r'\s+', ' ', title).strip()
+
+def split_yt_title(yt_title, default_artist=""):
+    """Da un titolo YouTube tipo 'Eminem - Guilty Conscience ft. Dr. Dre'
+    estrae (artista, titolo_pulito) -> ('Eminem', 'Guilty Conscience').
+    Se non c'è il prefisso 'Artista - ', usa default_artist.
+    Rimuove parentesi, feat./ft./featuring e numeri di traccia iniziali."""
+    t = (yt_title or "").strip()
+    artist = (default_artist or "").strip()
+    m = re.match(r'^\s*([^\-–—:·|]{1,50}?)\s*[-–—:·|]\s+(.+)$', t)
+    if m:
+        artist = m.group(1).strip() or artist
+        t = m.group(2).strip()
+    # contenuto tra parentesi tonde o quadre
+    t = re.sub(r'\s*[\(\[][^\)\]]*[\)\]]', '', t)
+    # feat. / ft. / featuring (e varianti senza punto)
+    t = re.sub(r'\s+(?:feat\.?|ft\.?|featuring|feat)\b.*$', '', t, flags=re.IGNORECASE)
+    # numero di traccia iniziale (es. "03 Titolo")
+    t = re.sub(r'^\s*\d+\s*[\.\-\s:]+', '', t)
+    t = re.sub(r'\s+', ' ', t).strip(' -–—|')
+    return artist, t
+
+def _strip_part_suffix(title):
+    """Da 'Shook Ones Pt. II' → 'Shook Ones'. Rimuove i suffissi di parte
+    ('Pt. X'/'Part X', arabici o romani) per cercare meglio su WhoSampled."""
+    t = (title or "").strip()
+    t = re.sub(r'\s*(?:pt\.?|part)\s*(?:[ivxIVX]+|\d+)\s*\)?\s*$', '', t, flags=re.IGNORECASE)
+    return t.strip(' ,.–-')
 
 def yt_match_score(expected_artist, expected_title, found_title):
     """Match score tra la canzone cercata e il titolo restituito da YouTube.
@@ -1745,52 +1889,70 @@ def do_scrape(job_id, artist, title):
         # Fallback YouTube se track non trovato o forzato
         if not track and use_yt_fallback:
             log("[DEBUG] WhoSampled non ha trovato la canzone (o punteggio basso), provo su YouTube...")
-            yt_url, yt_title = yt_search_first(f"{artist} {title}")
+            yt_url, yt_title, yt_choices = yt_search_choices_prefer_explicit(
+                f"{artist} {title}", expected_title=title, expected_artist=artist)
             if yt_title:
-                yt_title_clean = clean_yt_title(yt_title)
-                log(f"[DEBUG] YouTube ha trovato: {yt_title_clean}")
+                # Estrae artista e titolo dal titolo YouTube (es. "Eminem - Guilty Conscience ft. Dr. Dre"
+                # -> artista "Eminem", titolo "Guilty Conscience"). Usa la grafia ufficiale di YouTube,
+                # quindi corregge anche eventuali refusi dell'utente (es. "coscience" -> "Conscience").
+                yt_artist_clean, yt_title_clean = split_yt_title(yt_title, artist)
+                log(f"[DEBUG] YouTube ha trovato: artista='{yt_artist_clean}' titolo='{yt_title_clean}'")
 
-                # Tentativo 1: con artista + titolo pulito
-                log(f"Tentativo 1 su WhoSampled: {artist} - {yt_title_clean}")
-                if use_scoring:
-                    track, candidates = search_whosampled(driver, f"{artist} {yt_title_clean}",
-                                                          searched_artist=artist,
-                                                          searched_title=yt_title_clean)
-                else:
-                    track, candidates = search_whosampled(driver, f"{artist} {yt_title_clean}",
-                                                          searched_artist="",
-                                                          searched_title="")
-
-                # Tentativo 2: solo titolo (senza artista)
-                if not track:
-                    log(f"Tentativo 2 su WhoSampled (solo titolo): {yt_title_clean}")
+                # Prova più combinazioni su WhoSampled finché una non dà un match valido.
+                # Oltre al titolo pulito prova anche il titolo SENZA 'Pt. X'/'Part X'
+                # (es. "Shook Ones Pt. 1" → "Shook Ones") perché su WhoSampled le parti
+                # sono scritte in romano ("Shook Ones, Pt. II") e i numeri arabici non
+                # vengono trovati.
+                yt_bare_title = _strip_part_suffix(yt_title_clean)
+                attempts = [
+                    (f"{yt_artist_clean} {yt_title_clean}", yt_artist_clean, yt_title_clean, "artista YouTube"),
+                    (f"{artist} {yt_title_clean}", artist, yt_title_clean, "artista cercato"),
+                ]
+                if yt_bare_title and yt_bare_title.lower() != yt_title_clean.lower():
+                    attempts.append((f"{yt_artist_clean} {yt_bare_title}", yt_artist_clean, yt_bare_title, "artista YouTube + titolo senza pt."))
+                attempts.append((yt_title_clean, "", yt_title_clean, "solo titolo"))
+                if yt_bare_title and yt_bare_title.lower() != yt_title_clean.lower():
+                    attempts.append((yt_bare_title, "", yt_bare_title, "solo titolo senza pt."))
+                for query, sa, st, desc in attempts:
+                    if track:
+                        break
                     if use_scoring:
-                        track, candidates = search_whosampled(driver, yt_title_clean,
-                                                              searched_artist="",
-                                                              searched_title=yt_title_clean)
+                        cand, cands = search_whosampled(driver, query, searched_artist=sa, searched_title=st)
+                        if cand:
+                            sc = match_score(sa or artist, st, cand.get("artist", ""), cand.get("title", ""))
+                            log(f"Tentativo ({desc}): '{query}' -> {cand['artist']} - {cand['title']} (score {sc:.3f})")
+                            if sc >= 0.45:
+                                track = cand
+                        else:
+                            log(f"Tentativo ({desc}): '{query}' -> nessun risultato")
                     else:
-                        track, candidates = search_whosampled(driver, yt_title_clean,
-                                                              searched_artist="",
-                                                              searched_title="")
+                        cand, cands = search_whosampled(driver, query, searched_artist="", searched_title="")
+                        if cand:
+                            log(f"Tentativo ({desc}): '{query}' -> {cand['artist']} - {cand['title']}")
+                            track = cand
+                        else:
+                            log(f"Tentativo ({desc}): '{query}' -> nessun risultato")
 
                 if track:
-                    track['title'] = yt_title_clean
+                    if not track.get("title"):
+                        track['title'] = yt_title_clean
                     log(f"✅ Trovato su WhoSampled: {track['artist']} - {track['title']}")
                 else:
-                    # Se anche dopo due tentativi fallisce, usiamo i dati di YouTube (senza sample)
-                    log("[DEBUG] WhoSampled non trova la canzone nemmeno con titolo pulito, uso i dati di YouTube")
+                    # Se anche dopo i tentativi fallisce, usiamo i dati di YouTube (senza sample)
+                    log("[DEBUG] WhoSampled non trova la canzone, uso i dati di YouTube")
                     track = {
                         "title": yt_title_clean,
-                        "artist": artist,
+                        "artist": yt_artist_clean or artist,
                         "url": None
                     }
                     jobs[job_id]["status"] = "done"
                     jobs[job_id]["result"] = {
                         "title": yt_title_clean,
-                        "artist": artist,
+                        "artist": yt_artist_clean or artist,
                         "ws_url": None,
                         "main_yt_url": yt_url,
                         "main_yt_title": yt_title_clean,
+                        "main_yt_choices": yt_choices or [],
                         "contains": [],
                         "sampled_in": [],
                     }
@@ -1811,7 +1973,7 @@ def do_scrape(job_id, artist, title):
         driver = None
         log(f"Ricerca YouTube: {track['artist']} - {track['title']}")
         jobs[job_id]["status"] = "youtube_search"
-        main_yt_url, main_yt_title = yt_search_first(
+        main_yt_url, main_yt_title, main_yt_choices = yt_search_choices_prefer_explicit(
             f"{track['artist']} {track['title']}",
             expected_title=track['title'],
             expected_artist=track['artist']
@@ -1847,6 +2009,7 @@ def do_scrape(job_id, artist, title):
             "ws_url": track["url"],
             "main_yt_url": main_yt_url,
             "main_yt_title": main_yt_title or track["title"],
+            "main_yt_choices": main_yt_choices or [],
             "contains": detail["contains"],
             "sampled_in": detail["sampled_in"],
             "covered_by": detail.get("covered_by", []),
