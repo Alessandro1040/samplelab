@@ -40,6 +40,8 @@ con `(2)` nella cartella locale:
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
 - `test_fortissimo_compare.py` — test del modello
   (`python3 -m unittest -v test_fortissimo_compare`)
+- `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
+  confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
   (consenso + anti-bot), nessun dato di account Google, PayPal o altri siti.
   Sul Mac il file **completo** resta intatto (escluso dalla repo con
@@ -120,6 +122,42 @@ evidenziarli, non è codice nostro):
    indici: la correzione è convertire Hz→bin con `freqs` e limitare l'indice.)
 
 
+## MIDI Studio (porta 5080) — estrai MIDI da un audio e confronta due MIDI
+
+`midi_studio/` è un'**app locale separata** da questa (così non tocca SampleLab):
+un'unica interfaccia web con tre tab.
+
+- **🎵 Estrai MIDI** — l'estrattore *FORTISSIMO PRO — Auto-Analyzer* (`extractor.html`,
+  JS puro: rileva K strumenti, separazione Wiener, trascrizione YIN, piano roll)
+  gira **nel browser**: carichi un audio e ottieni i `.mid` (uno per strumento +
+  `final_multi_track.mid`) e i `.wav` dei campioni. I MIDI vengono salvati
+  automaticamente in `midi_studio/files/`.
+- **🔀 Confronta MIDI** — carichi due `.mid` (o scegli tra quelli generati) e il
+  backend, con `mido` + `fortissimo_compare_v3.py`, dà lo score complessivo e il
+  dettaglio per strumento.
+- **📁 File generati** — elenco dei file salvati, con download e cancellazione.
+
+**Avvio automatico (una volta sola):**
+
+```bash
+cd "/Users/alessandrolocurcio/Documents/musica/sample lab/midi_studio"
+./install_autostart.sh          # servizio macOS: parte a ogni accesso
+# poi apri http://localhost:5080
+./gestisci.sh status|restart|stop|log
+./uninstall_autostart.sh        # per togliere l'avvio automatico
+```
+
+Avvio manuale: `python3 midi_studio/midi_studio.py` (se la 5080 è occupata passa
+da sola alla successiva; se è già attiva non fa nulla).
+
+Dettagli, endpoint e note sul confronto MIDI: **`midi_studio/README.md`**.
+Test: `cd midi_studio && python3 -m unittest -v test_midi_studio` (23 test).
+
+**Nota**: l'estrattore scaricato (`fortissimo_pro.html`) non funzionava (errore di
+sintassi JS, handler inline verso funzioni inesistenti, un `const` che si
+auto-inizializzava, delta-time negativi che corrompevano i `.mid`): la copia
+servita dall'app è corretta e l'elenco dei fix è in `midi_studio/README.md`.
+
 ## Note operative e stato corrente (11/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
@@ -156,4 +194,15 @@ Da tenere presente nelle sessioni di lavoro successive:
   `test_identico_score_tetto`, `test_tetto_dello_score_midi`, il test HTTP
   `test_compare_stesso_brano` e il check "score di due brani identici" dello
   `/fortissimo/selftest`.
+- **MIDI STUDIO (11/09/2026).** Nuova app **separata** in `midi_studio/` (porta
+  5080, l'app di questa repo resta la principale): serve l'estrattore MIDI e il
+  confronto dei `.mid` in un'unica interfaccia. Resta sempre attiva: LaunchAgent
+  `com.alessandrolocurcio.midistudio` (`RunAtLoad` + `KeepAlive`, log in
+  `midi_studio/logs/`), installato da `midi_studio/install_autostart.sh`; si
+  gestisce con `midi_studio/gestisci.sh` (status/start/stop/restart/log). I file
+  generati stanno in `midi_studio/files/` (**non** versionati, come i log).
+  L'estrattore scaricato non funzionava affatto: corretti 5 bug (sintassi JS,
+  due handler inline verso funzioni inesistenti, `const` auto-inizializzato,
+  delta-time negativi nei `.mid`) — elenco in `midi_studio/README.md`. Test: 23
+  (`cd midi_studio && python3 -m unittest -v test_midi_studio`).
 

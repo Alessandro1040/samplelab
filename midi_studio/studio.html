@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MIDI Studio — estrai e confronta MIDI</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+:root{--bg:#080808;--surface:#111111;--surface2:#1a1a1a;--border:#252525;--border2:#333333;--text:#e8e8e8;--muted:#666666;--dim:#444444;--accent:#c8f000;--accent2:#7b5ea7;--accent3:#2dd4bf;--red:#ff4545}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Space Grotesk',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:30px}
+a{color:var(--accent)}
+header{padding:14px 24px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100}
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+h1{font-family:'Space Mono',monospace;font-size:17px;letter-spacing:-.4px}
+h1 span{color:var(--muted);font-weight:400;font-size:12px}
+.pillinfo{margin-left:auto;font-family:'Space Mono',monospace;font-size:10.5px;color:var(--muted);border:1px solid var(--border2);border-radius:20px;padding:4px 10px}
+.tabs{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.tabs button{background:var(--surface2);border:1px solid var(--border2);color:var(--muted);font-family:'Space Mono',monospace;font-size:11.5px;border-radius:8px;padding:9px 14px;cursor:pointer;transition:all .15s}
+.tabs button:hover{color:var(--text);border-color:var(--accent)}
+.tabs button.active{background:var(--accent);border-color:var(--accent);color:#080808;font-weight:700}
+.badge{display:inline-block;background:#080808;color:var(--accent);border-radius:20px;padding:1px 7px;font-size:10px;margin-left:4px}
+.tabs button.active .badge{background:#080808d0;color:#c8f000}
+.status{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-top:10px;min-height:15px}
+.status.ok{color:var(--accent3)}
+.status.err{color:var(--red)}
+main{padding:18px 24px;max-width:1400px}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+.note{font-size:12.5px;color:var(--muted);line-height:1.65;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.note b{color:var(--accent3);font-weight:600}
+.note code{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--accent)}
+iframe#extractor{width:100%;height:calc(100vh - 210px);min-height:640px;border:1px solid var(--border);border-radius:12px;background:#0f0f0f}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+.card h2{font-size:13px;font-weight:700;margin-bottom:10px;letter-spacing:.02em}
+.card h2 .hint{font-weight:400;color:var(--muted);font-size:11px;font-family:'Space Mono',monospace}
+input[type=file]{width:100%;font-size:12px;color:var(--muted);background:#0d0d0d;border:1px dashed var(--border2);border-radius:10px;padding:10px;cursor:pointer}
+input[type=file]:hover{border-color:var(--accent)}
+.or{font-family:'Space Mono',monospace;font-size:10.5px;color:var(--dim);margin:10px 0 6px}
+select,input[type=number]{width:100%;background:#0d0d0d;border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:12px;border-radius:8px;padding:9px;outline:none}
+select:focus,input[type=number]:focus{border-color:var(--accent)}
+.controls{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.weights{display:flex;gap:10px;flex-wrap:wrap}
+.wfield{display:flex;flex-direction:column;gap:4px}
+.wfield label{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.wfield input{width:86px}
+.spacer{margin-left:auto}
+.btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11.5px;border-radius:8px;padding:9px 15px;cursor:pointer;transition:all .15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--accent);border:1px solid var(--accent);color:#080808;font-weight:700}
+.btn-primary:hover{color:#080808;filter:brightness(1.08)}
+.scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px}
+.sCard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px}
+.sCard .lbl{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.sCard .val{font-size:28px;font-weight:700;margin:5px 0 8px;letter-spacing:-.5px}
+.bar{height:6px;border-radius:4px;background:var(--surface2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .35s}
+.bar.b2 i{background:var(--accent3)}
+.bar.b3 i{background:var(--accent2)}
+.bar.b4 i{background:#f4d35e}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{background:var(--surface2);padding:8px 10px;text-align:left;font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(255,255,255,.02)}
+.mono{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)}
+.tag{display:inline-block;font-family:'Space Mono',monospace;font-size:10px;border:1px solid var(--border2);border-radius:20px;padding:2px 8px;color:var(--muted)}
+.tag.ok{border-color:var(--accent3);color:var(--accent3)}
+.tag.only-a{border-color:#7b3f3f;color:#ff8f8f}
+.tag.only-b{border-color:#3f6b7b;color:#8fd8ff}
+.tag.drum{border-color:#7b5ea7;color:#c9a9ff}
+.empty{text-align:center;padding:30px;color:var(--muted);font-family:'Space Mono',monospace;font-size:12px}
+details{margin-top:12px}
+details summary{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);cursor:pointer}
+pre{background:#0d0d0d;border:1px solid var(--border2);border-radius:10px;padding:12px;overflow:auto;max-height:400px;font-family:'Space Mono',monospace;font-size:11px;color:var(--text);margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>🎹 MIDI Studio <span>estrai MIDI da un audio · confronta due MIDI</span></h1>
+    <div class="pillinfo" id="info">caricamento…</div>
+  </div>
+  <div class="tabs">
+    <button class="active" data-tab="extract">🎵 Estrai MIDI</button>
+    <button data-tab="compare">🔀 Confronta MIDI</button>
+    <button data-tab="files">📁 File generati<span class="badge" id="file-count">0</span></button>
+  </div>
+  <div class="status" id="status">Pronto.</div>
+</header>
+
+<main>
+  <!-- TAB 1: ESTRAZIONE -->
+  <section class="tab-panel active" id="tab-extract">
+    <div class="note">
+      Carica un file audio (WAV, MP3, FLAC, OGG) nell'area qui sotto: l'analisi gira <b>nel browser</b>,
+      quindi l'audio <b>non viene caricato da nessuna parte</b>. L'estrattore rileva quanti strumenti ci sono,
+      li separa, trascrive le note (YIN) e genera i file <b>.mid</b> (uno per strumento + <code>final_multi_track.mid</code>).
+      Appena finisce, i MIDI vengono <b>salvati automaticamente</b> in <code>midi_studio/files/</code> e li trovi nelle tab
+      <b>File generati</b> e <b>Confronta MIDI</b>.
+      <br>Serve un audio di prova? <a href="/api/test-audio" download>Scarica test_audio.wav</a> e poi caricalo qui sotto.
+    </div>
+    <iframe id="extractor" src="/extract" title="FORTISSIMO PRO — estrattore MIDI"></iframe>
+  </section>
+
+  <!-- TAB 2: CONFRONTO -->
+  <section class="tab-panel" id="tab-compare">
+    <div class="note">
+      Confronta due MIDI con il modello <b>Fortissimo Compare v3</b>: carica due file, oppure scegli tra quelli
+      generati nella tab <b>Estrai MIDI</b>. Il confronto è strumento-per-strumento (nome + timbro) e combina il blocco
+      <b>MIDI</b> (note, timing, velocity, ritmo) con un one-shot <b>sintetizzato</b> dal MIDI stesso (i <code>.mid</code>
+      non contengono audio).
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>MIDI A <span class="hint" id="sum-a"></span></h2>
+        <input type="file" id="file-a" accept=".mid,.midi,.kar,audio/midi">
+        <div class="or">…oppure un file già salvato</div>
+        <select id="sel-a"><option value="">— scegli un file —</option></select>
+      </div>
+      <div class="card">
+        <h2>MIDI B <span class="hint" id="sum-b"></span></h2>
+        <input type="file" id="file-b" accept=".mid,.midi,.kar,audio/midi">
+        <div class="or">…oppure un file già salvato</div>
+        <select id="sel-b"><option value="">— scegli un file —</option></select>
+      </div>
+    </div>
+    <div class="card controls">
+      <div class="weights">
+        <div class="wfield"><label>peso MIDI</label>
+          <input id="w-midi" type="number" step="0.05" min="0" max="1" value="0.4"></div>
+        <div class="wfield"><label>peso one-shot</label>
+          <input id="w-oneshot" type="number" step="0.05" min="0" max="1" value="0.4"></div>
+        <div class="wfield"><label>peso presence</label>
+          <input id="w-presence" type="number" step="0.05" min="0" max="1" value="0.2"></div>
+        <div class="wfield"><label>volume one-shot</label>
+          <input id="w-volume" type="number" step="0.05" min="0" max="1" value="0.3"></div>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn-primary" id="btn-compare" onclick="runCompare()">CONFRONTA</button>
+      <button class="btn" onclick="swapInputs()">⇄ Scambia A/B</button>
+    </div>
+    <section id="results" class="card">
+      <div class="empty">Nessun confronto ancora. Carica due MIDI (o scegli due file generati) e premi CONFRONTA.</div>
+    </section>
+  </section>
+
+  <!-- TAB 3: FILE GENERATI -->
+  <section class="tab-panel" id="tab-files">
+    <div class="card">
+      <div class="controls" style="margin-bottom:12px">
+        <h2 style="margin:0">File in <code class="mono">midi_studio/files/</code></h2>
+        <span class="spacer"></span>
+        <button class="btn" onclick="loadFiles()">↻ Aggiorna</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>File</th><th>Tipo</th><th>Dimensione</th><th>Tracce / Note</th>
+        <th>Durata</th><th>BPM</th><th>Modificato</th><th></th></tr></thead>
+        <tbody id="files-body"><tr><td colspan="8" class="empty">Nessun file</td></tr></tbody>
+      </table></div>
+      <div class="note" style="margin-top:12px;margin-bottom:0">
+        I file restano in <code>midi_studio/files/</code>: puoi scaricarli o cancellarli, e il confronto accetta
+        sia i file salvati sia quelli caricati al volo.
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ── MIDI Studio — interfaccia unificata ──────────────────────────────────────
+const $ = id => document.getElementById(id);
+const fmt = v => (v === null || v === undefined) ? "—" : Number(v).toFixed(3);
+const fmtSize = b => !b ? "" : (b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : (b / 1e3).toFixed(1) + " KB");
+const fmtSec = s => !s ? "—" : (s >= 60 ? Math.floor(s / 60) + "m " + Math.round(s % 60) + "s" : s.toFixed(1) + "s");
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function setStatus(msg, kind){const s = $("status"); s.textContent = msg; s.className = "status" + (kind ? " " + kind : "");}
+
+document.querySelectorAll(".tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    $("tab-" + btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab !== "extract") loadFiles();
+  });
+});
+
+fetch("/api/health").then(r => r.json()).then(d => {
+  $("info").textContent = "porta " + (d.port || "5080") + " · modello " + d.model +
+                          (d.model_found ? "" : " (NON TROVATO)");
+}).catch(() => { $("info").textContent = "app non raggiungibile"; });
+
+// ── file salvati ────────────────────────────────────────────────────────────
+let FILES = [];
+async function loadFiles(){
+  try{
+    const d = await (await fetch("/api/files")).json();
+    FILES = d.files || [];
+    $("file-count").textContent = FILES.length;
+    const mids = FILES.filter(f => f.kind === "midi");
+    for (const sel of ["sel-a", "sel-b"]){
+      const cur = $(sel).value;
+      $(sel).innerHTML = '<option value="">— scegli un file —</option>' + mids.map(f =>
+        '<option value="' + esc(f.name) + '">' + esc(f.name) +
+        (f.n_notes ? " · " + f.n_notes + " note" : "") + '</option>').join("");
+      $(sel).value = cur;
+    }
+    const body = $("files-body");
+    if (!FILES.length){
+      body.innerHTML = '<tr><td colspan="8" class="empty">Nessun file: usa la tab “Estrai MIDI”.</td></tr>';
+      return;
+    }
+    body.innerHTML = FILES.map(f => '<tr>' +
+      '<td>' + (f.kind === "midi" ? "🎼" : "🔊") + ' ' + esc(f.name) + '</td>' +
+      '<td><span class="tag ' + (f.kind === "midi" ? "ok" : "") + '">' + f.kind + '</span></td>' +
+      '<td class="mono">' + fmtSize(f.size) + '</td>' +
+      '<td class="mono">' + (f.n_tracks != null ? f.n_tracks + " tr / " + f.n_notes + " note" : "—") + '</td>' +
+      '<td class="mono">' + fmtSec(f.duration) + '</td>' +
+      '<td class="mono">' + (f.tempo_bpm || "—") + '</td>' +
+      '<td class="mono">' + esc(f.modified || "") + '</td>' +
+      '<td><a class="btn" style="padding:4px 10px" href="/download/' + encodeURIComponent(f.name) + '">⬇</a> ' +
+      '<button class="btn" style="padding:4px 10px" onclick="deleteFile(\'' + esc(f.name).replace(/'/g, "\\'") + '\')">🗑</button></td>' +
+      '</tr>').join("");
+  }catch(e){ setStatus("Errore nell'elenco file: " + e.message, "err"); }
+}
+async function deleteFile(name){
+  if (!confirm("Cancellare " + name + "?")) return;
+  await fetch("/api/delete/" + encodeURIComponent(name), {method: "DELETE"});
+  setStatus("Cancellato: " + name, "ok");
+  loadFiles();
+}
+window.addEventListener("message", ev => {
+  if (ev.data && ev.data.type === "midi-studio-saved"){
+    setStatus("Estrattore: salvati " + ev.data.files.length + " MIDI (" + ev.data.files.join(", ") + ")", "ok");
+    loadFiles();
+  }
+});
+loadFiles();
+
+// ── confronto ───────────────────────────────────────────────────────────────
+function weights(){
+  return {midi: parseFloat($("w-midi").value), oneshot: parseFloat($("w-oneshot").value),
+          presence: parseFloat($("w-presence").value), volume: parseFloat($("w-volume").value)};
+}
+function swapInputs(){
+  const a = $("file-a"), b = $("file-b");
+  const ta = new DataTransfer(), tb = new DataTransfer();
+  for (const f of a.files) ta.items.add(f);
+  for (const f of b.files) tb.items.add(f);
+  a.files = tb.files;
+  b.files = ta.files;
+  const sa = $("sel-a").value;
+  $("sel-a").value = $("sel-b").value;
+  $("sel-b").value = sa;
+  setStatus("Input scambiati (A ⇄ B).");
+}
+async function runCompare(){
+  const fa = $("file-a").files[0], fb = $("file-b").files[0];
+  const sa = $("sel-a").value, sb = $("sel-b").value;
+  if (!fa && !sa){ setStatus("Manca il MIDI A: carica un file o scegline uno salvato.", "err"); return; }
+  if (!fb && !sb){ setStatus("Manca il MIDI B: carica un file o scegline uno salvato.", "err"); return; }
+  const w = weights(), sum = w.midi + w.oneshot + w.presence;
+  if (Math.abs(sum - 1) > 1e-6){
+    setStatus("I pesi MIDI + one-shot + presence devono sommare 1.0 (ora " + sum.toFixed(3) + ").", "err");
+    return;
+  }
+  const fd = new FormData();
+  if (fa) fd.append("a", fa, fa.name); else fd.append("a_name", sa);
+  if (fb) fd.append("b", fb, fb.name); else fd.append("b_name", sb);
+  fd.append("w_midi", w.midi);
+  fd.append("w_oneshot", w.oneshot);
+  fd.append("w_presence", w.presence);
+  fd.append("w_volume", w.volume);
+  $("btn-compare").disabled = true;
+  setStatus("Confronto in corso…");
+  try{
+    const r = await fetch("/api/compare", {method: "POST", body: fd});
+    const d = await r.json();
+    if (!r.ok || d.error){ setStatus(d.error || ("HTTP " + r.status), "err"); }
+    else {
+      renderResult(d, "Confronto fatto — A: " + d.a_file + " · B: " + d.b_file +
+                      " · pesi MIDI " + w.midi + " / one-shot " + w.oneshot + " / presence " + w.presence);
+      loadFiles();
+    }
+  }catch(e){ setStatus("Errore di rete: " + e.message, "err"); }
+  $("btn-compare").disabled = false;
+}
+function sCard(lbl, val, cls){
+  const p = Math.max(0, Math.min(1, Number(val) || 0)) * 100;
+  return '<div class="sCard"><div class="lbl">' + lbl + '</div><div class="val">' + fmt(val) +
+         '</div><div class="bar ' + cls + '"><i style="width:' + p + '%"></i></div></div>';
+}
+function trackTable(sum){
+  if (!sum) return "";
+  const rows = (sum.tracks || []).map(t => '<tr><td>' + esc(t.name) + '</td>' +
+    '<td>' + esc(t.instrument) + (t.is_drum ? ' <span class="tag drum">drum</span>' : '') + '</td>' +
+    '<td class="mono">' + t.channel + '</td><td class="mono">' + t.note_count + '</td>' +
+    '<td class="mono">' + t.pitch_min_name + '..' + t.pitch_max_name + '</td>' +
+    '<td class="mono">' + (t.program == null ? "—" : t.program) + '</td></tr>').join("");
+  return '<div class="mono" style="margin:10px 0 6px">' + esc(sum.file) + ' · ' + sum.tempo_bpm +
+         ' BPM · ' + fmtSec(sum.duration) + ' · ' + sum.n_tracks + ' tracce / ' + sum.n_notes + ' note</div>' +
+         '<div class="table-wrap"><table><thead><tr><th>Traccia</th><th>Strumento (per il modello)</th>' +
+         '<th>Ch</th><th>Note</th><th>Estensione</th><th>Program</th></tr></thead><tbody>' + rows +
+         '</tbody></table></div>';
+}
+function renderResult(d, msg){
+  const res = d.result;
+  const rows = (res.details || []).map(x => '<tr>' +
+    '<td>' + esc(x.name_a || "—") + '</td><td>' + esc(x.name_b || "—") + '</td>' +
+    '<td class="mono">' + (x.match_conf ? fmt(x.match_conf) : "—") + '</td>' +
+    '<td class="mono">' + (x.midi ? fmt(x.midi.score) : "—") + '</td>' +
+    '<td class="mono">' + (x.midi ? fmt(x.midi.f1) : "—") + '</td>' +
+    '<td class="mono">' + (x.midi ? fmt(x.midi.rhythm) : "—") + '</td>' +
+    '<td class="mono">' + (x.shot ? fmt(x.shot.score) : "—") + '</td>' +
+    '<td class="mono">' + fmt(x.score) + '</td><td class="mono">' + fmt(x.weight) + '</td>' +
+    '<td>' + (x.reason ? '<span class="tag ' + (x.reason === "only_a" ? "only-a" : "only-b") +
+      '">solo ' + (x.reason === "only_a" ? "A" : "B") + '</span>' : '<span class="tag ok">match</span>') +
+    '</td></tr>').join("");
+  $("results").innerHTML =
+    '<div class="scores">' + sCard("Overall score", res.overall_score, "") +
+    sCard("MIDI score", res.midi_score, "b2") + sCard("One-shot score", res.oneshot_score, "b3") +
+    sCard("Presence score", res.presence_score, "b4") + '</div>' +
+    '<div class="mono">A: ' + res.n_a + ' tracce · B: ' + res.n_b + ' tracce · matchate: ' + res.n_match +
+      (res.unmatched_a.length ? ' · solo in A: ' + res.unmatched_a.map(esc).join(", ") : '') +
+      (res.unmatched_b.length ? ' · solo in B: ' + res.unmatched_b.map(esc).join(", ") : '') + '</div>' +
+    '<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Strumento A</th>' +
+      '<th>Strumento B</th><th>match</th><th>MIDI</th><th>f1</th><th>ritmo</th><th>one-shot</th>' +
+      '<th>score</th><th>peso</th><th>esito</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="10" class="empty">nessuna traccia confrontabile</td></tr>') +
+      '</tbody></table></div>' +
+    '<details><summary>Tracce lette dai due MIDI</summary>' + trackTable(d.a) + trackTable(d.b) +
+    '</details>' +
+    '<details><summary>JSON completo del risultato</summary><pre>' + esc(JSON.stringify(res, null, 2)) +
+    '</pre></details>';
+  setStatus(msg, "ok");
+}
+</script>
+</body>
+</html>
+

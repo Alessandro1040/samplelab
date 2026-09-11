@@ -26,3 +26,7 @@ __pycache__/
 # (anti-403, senza dati di account). Non caricare mai il file completo.
 cookies.txt
 
+# ── MIDI Studio: file generati e log restano solo in locale ──────────────
+midi_studio/files/
+midi_studio/logs/
+
