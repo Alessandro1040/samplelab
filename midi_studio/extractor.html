@@ -125,7 +125,7 @@ else D.set(c0);O=D;document.getElementById('ba').disabled=false;document.getElem
 log('Caricato: '+D.length+' campioni @ '+Sr+'Hz','g');
 }).catch(e=>log('Errore: '+e.message,'r'));
 }
-async function run(){
+async function run(){try{
 document.getElementById('pg').style.display='block';document.getElementById('rs').style.display='none';
 document.getElementById('ba').disabled=true;document.getElementById('lg').innerHTML='';
 const t0=performance.now(),maxK=+document.getElementById('mk').value,osig=+document.getElementById('os').value/10,mnd=+document.getElementById('md').value;
@@ -140,14 +140,15 @@ log('Note: '+tn,'g');await sl(400);
 sp('FASE 6: Estrazione campioni',78);SA={};
 for(const[id,src]of Object.entries(SS)){const si=DS.find(s=>s.id===id);const s=extract(src,Sr,si);if(s)SA[id]=s}
 log('Campioni: '+Object.keys(SA).length,'i');await sl(300);
-sp('FASE 7: Ricostruzione ADSR',90);R=recon(TR,SA,D.length,Sr);
-const sdr=siSdr(O,R),mseV=mse(O,R),cor=corr(O,R);await sl(300);
+sp('FASE 7a: Ricostruzione ADSR',88);const t7=performance.now();R=recon(TR,SA,D.length,Sr);log('Ricostruzione: '+((performance.now()-t7)/1000).toFixed(1)+'s','i');await sl(50);
+sp('FASE 7b: Metriche SI-SDR / MSE / correlazione',92);const tm=performance.now();const sdr=siSdr(O,R),mseV=mse(O,R),cor=corr(O,R);log('Metriche: '+((performance.now()-tm)/1000).toFixed(1)+'s','i');await sl(100);
+sp('FASE 7c: Grafici e pannelli',95);
 sp('Completato!',100);
 const el=((performance.now()-t0)/1000).toFixed(1);
 log('SI-SDR: '+sdr.toFixed(1)+'dB | '+el+'s',sdr>3?'g':'w');
 show(nk,tn,sdr,mseV,cor,el);
 document.getElementById('ba').disabled=false;
-}
+}catch(e){log('⛔ ERRORE: '+((e&&e.message)?e.message:e),'r');sp('ERRORE: '+((e&&e.message)?e.message:e),100);document.getElementById('ba').disabled=false;}}
 
 function specgram(data,sr){
 const N=2048,h=512,fr=Math.floor((data.length-N)/h),nb=N/2,spec=[];
@@ -308,7 +309,7 @@ const il=document.getElementById('il');il.innerHTML='';
 DS.forEach((s,i)=>{const notes=TR[s.id]||[];const d=document.createElement('div');d.className='inst';d.innerHTML='<div><div class="dot" style="background:'+SC[s.id]+'"></div><div><div style="font-size:14px;font-weight:600">'+(i+1)+'. '+s.name+'</div><div style="font-size:11px;color:#888">Centroid '+Math.round(s.features.centroid)+'Hz | ZCR '+s.features.zcr.toFixed(3)+' | Note '+notes.length+'</div></div></div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn2" style="padding:4px 10px;font-size:11px" onclick="ps(\''+s.id+'\')">▶️ Campione</button><button class="btn btn2" style="padding:4px 10px;font-size:11px" onclick="ps2(\''+s.id+'\')">▶️ Separato</button></div>';il.appendChild(d)});
 
 // Spectrograms
-drawSpec('so',O,Sr);drawSpec('sr',R,Sr);
+const tds=performance.now();drawSpec('so',O,Sr);drawSpec('sr',R,Sr);log('Spettrogrammi: '+((performance.now()-tds)/1000).toFixed(1)+'s','i');
 
 // Piano roll
 renderPR();
@@ -417,6 +418,13 @@ async function saveMidisToStudio(){
   if (saved.length && window.parent !== window)
     window.parent.postMessage({type: "midi-studio-saved", files: saved}, "*");
 }
+// Errori non gestiti: invece di "bloccarsi" in silenzio, finiscono nel log
+window.addEventListener('error', function(ev){
+  try{ log('⛔ ' + (ev.message || 'errore JS'), 'r'); }catch(e){}
+});
+window.addEventListener('unhandledrejection', function(ev){
+  try{ const r = ev.reason; log('⛔ ' + ((r && r.message) ? r.message : r), 'r'); }catch(e){}
+});
 (function hookShow(){
   const orig = window.show;
   window.show = function(){
