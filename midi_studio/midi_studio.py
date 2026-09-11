@@ -112,6 +112,18 @@ def extract_page():
     return send_file(os.path.join(BASE_DIR, "extractor.html"))
 
 
+@app.route("/alg")
+def alg_page():
+    """Banco di prova dell'algoritmo puro (alg/fortissimo_alg.js), senza interfaccia."""
+    return send_file(os.path.join(BASE_DIR, "alg_test.html"))
+
+
+@app.route("/alg/<path:filename>")
+def alg_files(filename):
+    """Serve i file dell'algoritmo (fortissimo_alg.js) usati dal banco di prova."""
+    return send_from_directory(os.path.join(BASE_DIR, "alg"), filename)
+
+
 @app.route("/favicon.ico")
 def favicon():
     return ("", 204)

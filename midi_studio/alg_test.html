@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fortissimo — prova dell'algoritmo puro</title>
+<style>
+:root{--bg:#0f0f0f;--fg:#e8e8e8;--b:#2a2a2a;--a:#4ecdc4;--g:#44af69;--r:#ef476f;--w:#f4d35e}
+*{box-sizing:border-box;font-family:system-ui,-apple-system,sans-serif}
+body{background:var(--bg);color:var(--fg);margin:0;padding:24px;max-width:1000px;margin:0 auto;line-height:1.5}
+h2{margin:0 0 4px;font-size:20px}
+p.sub{color:#888;font-size:13px;margin:0 0 18px}
+.card{border:1px solid var(--b);border-radius:12px;padding:16px;margin-bottom:14px;background:#141414}
+button{background:var(--fg);color:var(--bg);border:none;border-radius:8px;padding:9px 16px;font-weight:600;cursor:pointer}
+button.alt{background:transparent;color:var(--fg);border:1px solid var(--b)}
+button:disabled{opacity:.4;cursor:not-allowed}
+input[type=file]{color:#888;font-size:13px;margin-right:10px}
+pre{background:#0b0b0b;border:1px solid var(--b);border-radius:8px;padding:12px;font-size:12px;max-height:420px;overflow:auto;white-space:pre-wrap}
+.dl a{display:inline-block;margin:4px 10px 0 0;color:var(--a);font-size:13px}
+.fasi{font-size:12px;color:#888;margin-top:8px}
+</style>
+</head>
+<body>
+<h2>Fortissimo — algoritmo puro (<code>fortissimo_alg.js</code>)</h2>
+<p class="sub">
+  Questo banco di prova esegue <b>solo l'algoritmo</b>, senza interfaccia: serve a svilupparlo e a
+  verificare che una modifica non cambi i risultati. Le funzioni di calcolo sono le stesse
+  dell'estrattore (<code>extractor.html</code>).
+</p>
+
+<div class="card">
+  <input type="file" id="f" accept="audio/*">
+  <button id="bt">Analizza file</button>
+  <button class="alt" id="bt2">Usa audio di prova (6 s)</button>
+  <div class="fasi" id="fasi"></div>
+</div>
+
+<div class="card"><pre id="out">Premi "Usa audio di prova" per una verifica immediata.</pre></div>
+<div class="card dl" id="dl"></div>
+
+<script src="/alg/fortissimo_alg.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// decodifica un audio (file locale oppure URL same-origin) in Float32Array mono
+async function decodifica(sorgente) {
+  const ab = (sorgente instanceof File) ? await sorgente.arrayBuffer()
+                                        : await (await fetch(sorgente)).arrayBuffer();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const buf = await ctx.decodeAudioData(ab);
+  const n = buf.length, c0 = buf.getChannelData(0);
+  const mono = new Float32Array(n);
+  if (buf.numberOfChannels > 1) {
+    const c1 = buf.getChannelData(1);
+    for (let i = 0; i < n; i++) mono[i] = (c0[i] + c1[i]) / 2;
+  } else mono.set(c0);
+  ctx.close();
+  return { mono, sr: buf.sampleRate };
+}
+
+// ── ingressi usati anche dai test automatici ────────────────────────────────
+async function prova(seconds, opts) {
+  const { mono, sr } = await decodifica('/api/test-audio?seconds=' + (seconds || 6));
+  return esegui(mono, sr, opts);
+}
+async function esegui(mono, sr, opts) {
+  const log = [];
+  const esito = await analizza(mono, Object.assign({
+    sr: sr,
+    onLog: m => log.push(m),
+    onProgress: (fase, pct) => { $("fasi").textContent = pct + "% — " + fase; }
+  }, opts || {}));
+  return {
+    sr: sr, campioni: mono.length, secondi: +(mono.length / sr).toFixed(2),
+    nSources: esito.nSources,
+    sources: esito.sources.map(s => ({ nome: s.name, tipo: s.type, energia: s.energyPct + "%" })),
+    note: esito.noteCount,
+    notePerSorgente: Object.fromEntries(Object.entries(esito.notes).map(([k, v]) => [k, v.length])),
+    campioni_estratti: Object.keys(esito.samples).length,
+    siSdr: +esito.siSdr.toFixed(2), mse: +esito.mse.toFixed(6), corr: +esito.corr.toFixed(4),
+    ms: Math.round(esito.ms), log: log, _esito: esito
+  };
+}
+window.prova = prova;
+window.esegui = esegui;
+window.algoritmo = { analizza, writeMidi, writeMultiMidi, writeWav };
+
+function mostra(r) {
+  $("out").textContent = JSON.stringify({
+    secondi: r.secondi, campioni: r.campioni, sr: r.sr,
+    sorgenti_rilevate: r.nSources, sorgenti: r.sources,
+    note_totali: r.note, note_per_sorgente: r.notePerSorgente,
+    campioni_one_shot: r.campioni_estratti,
+    siSdr_dB: r.siSdr, mse: r.mse, corr: r.corr, tempo_ms: r.ms,
+    log: r.log
+  }, null, 1);
+
+  const e = r._esito, dl = $("dl");
+  dl.innerHTML = "<b>Download dei file prodotti dall'algoritmo</b><br>";
+  for (const [id, note] of Object.entries(e.notes)) {
+    if (!note.length) continue;
+    const nome = (e.sources.find(s => s.id === id) || {}).name || id;
+    const blob = new Blob([writeMidi(nome.replace(/\s+/g, "_"), note)], { type: "audio/midi" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = nome + ".mid";
+    a.textContent = "⬇ " + nome + ".mid";
+    dl.appendChild(a);
+  }
+  const multi = new Blob([writeMultiMidi(e.sources.map(s => ({ id: s.id })), e.notes)], { type: "audio/midi" });
+  const am = document.createElement("a");
+  am.href = URL.createObjectURL(multi); am.download = "final_multi_track.mid";
+  am.textContent = "⬇ final_multi_track.mid"; dl.appendChild(am);
+  const wav = new Blob([writeWav(e.reconstructed, e.sr)], { type: "audio/wav" });
+  const aw = document.createElement("a");
+  aw.href = URL.createObjectURL(wav); aw.download = "ricostruzione.wav";
+  aw.textContent = "⬇ ricostruzione.wav"; dl.appendChild(aw);
+}
+
+$("bt2").onclick = async () => {
+  $("out").textContent = "analisi in corso…";
+  try { mostra(await prova(6)); } catch (e) { $("out").textContent = "ERRORE: " + e.message; }
+};
+$("bt").onclick = async () => {
+  const f = $("f").files[0];
+  if (!f) { alert("Scegli prima un file audio"); return; }
+  $("out").textContent = "analisi in corso…";
+  try { const d = await decodifica(f); mostra(await esegui(d.mono, d.sr)); }
+  catch (e) { $("out").textContent = "ERRORE: " + e.message; }
+};
+</script>
+</body>
+</html>
