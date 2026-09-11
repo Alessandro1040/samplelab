@@ -47,7 +47,9 @@ con `(2)` nella cartella locale:
   Sul Mac il file **completo** resta intatto (escluso dalla repo con
   `.gitignore` + `skip-worktree`) perché è quello che l'app usa davvero per
   i download senza errori 403. **Regola d'oro**: non caricare mai il file
-  completo su GitHub — nemmeno in una repo privata.
+  completo su GitHub — tanto meno ora che **la repo è pubblica** (dall'11/09/2026):
+  quello che è in repo è visibile a chiunque, e la storia di git non si "pulisce"
+  con un semplice commit.
 
 ## Cartelle escluse dal versionamento
 
@@ -205,4 +207,22 @@ Da tenere presente nelle sessioni di lavoro successive:
   due handler inline verso funzioni inesistenti, `const` auto-inizializzato,
   delta-time negativi nei `.mid`) — elenco in `midi_studio/README.md`. Test: 23
   (`cd midi_studio && python3 -m unittest -v test_midi_studio`).
+- **REPO PUBBLICA (11/09/2026).** `https://github.com/Alessandro1040/samplelab`
+  è stata resa **pubblica** (`gh repo edit --visibility public`), branch `main`
+  allineato. Sono quindi visibili a chiunque: tutto il codice, la pagina
+  `midi_studio/alg/` (algoritmo puro + prompt), i file legacy, `cookies.txt`
+  **snellito** (9 cookie anonimi di YouTube: `YSC`, `VISITOR_INFO1_LIVE`,
+  `SOCS`, `PREF`, `GPS`, `__Secure-ROLLOUT_TOKEN` — **nessun** cookie di account)
+  e `samplelab (2).db` con la libreria (titoli/artisti/nomi file, ~890 brani).
+  Verificato: il file **completo** dei cookie non è mai stato committato (nella
+  storia c'è un solo blob da 566 byte) e nel codice non ci sono segreti.
+  Per tornare privati: `gh repo edit Alessandro1040/samplelab --visibility private`
+  (ma chi ha già clonato/forkato conserva la copia).
+- **ALGORITMO IN FILE PURO (11/09/2026).** `midi_studio/alg/fortissimo_alg.js` è
+  l'algoritmo dell'estrattore estratto verbatim (19 funzioni identiche, nessun
+  DOM) con ingresso unico `analizza(audio, opts)`; si rigenera da
+  `extractor.html` con `midi_studio/alg/estrai_alg.py` (idempotente). Banco di
+  prova su **http://localhost:5080/alg**. Attenzione: la pagina
+  `extractor.html` ha ancora una **copia propria** delle stesse funzioni, quindi
+  una modifica al file puro non cambia la pagina finché non si allinea.
 
