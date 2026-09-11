@@ -8,6 +8,10 @@
 > **ricostruisce il mix** da note + campioni e ne **misura la qualità**
 > (SI-SDR / MSE / correlazione). Ingresso unico:
 > `await analizza(audio, { sr, maxK, onsetSigma, minNoteMs, onLog, onProgress })`.
+> Sono disponibili anche `rendiTraccia(id, esito, [durata])` e
+> `rendiMix([ids], esito, [durata])`, che rendono il MIDI di una traccia
+> applicandolo al **suo** one-shot (è così che il MIDI "suona con lo strumento
+> giusto"): **mantienile funzionanti**.
 >
 > **Cosa voglio**: migliorare (1) la stima del numero di sorgenti, (2) la qualità
 > della separazione, (3) la trascrizione MIDI, **senza cambiare** la firma di
@@ -23,7 +27,9 @@
 > 2,5 s → 4 sorgenti, 31 note, SI-SDR ≈ −45 dB, 1,15 s di calcolo; 6 s → 4
 > sorgenti, 70 note, SI-SDR ≈ −39,6 dB, 2,78 s. Brano vero di 150 s → 2 sorgenti,
 > 60 note, SI-SDR −56 dB, 50 s. C'è anche un banco di prova web (`alg_test.html`)
-> che esegue l'algoritmo e stampa il riepilogo, con download di MIDI/WAV.
+> che esegue l'algoritmo e, per ogni traccia, permette di **ascoltare il MIDI reso
+> con il one-shot di quella sorgente** (pulsante *🎹 MIDI con lo strumento*),
+> la traccia separata e il campione, con piano roll e download di `.mid`/`.wav`.
 >
 > **Difetti misurati da correggere** (dettagli nel README allegato):
 > 1. non deterministico (`kmeans` con random init);

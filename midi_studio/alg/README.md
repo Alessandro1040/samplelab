@@ -35,6 +35,18 @@ Sono esportate anche `writeMidi(nome, note)`, `writeMultiMidi(sorgenti, note)` e
 `writeWav(campioni, sr)` (restituiscono `Uint8Array`). In Node:
 `const { analizza } = require("./alg/fortissimo_alg.js")`.
 
+Per **far suonare il MIDI con lo strumento giusto** (il one-shot della traccia):
+
+```js
+rendiTraccia(id, esito, [durata])   // → Float32Array: MIDI di una sorgente reso
+                                    //   applicandolo al SUO one-shot (pitch+ADSR)
+rendiMix([ids], esito, [durata])    // → mix di più tracce rese così
+```
+
+`rendiTraccia` è la stessa logica di `recon()` ristretta a una traccia: le note
+MIDI vengono trasposte sul pitch del campione one-shot di quella sorgente, quindi
+il timbro resta quello dello strumento rilevato.
+
 ## Pipeline (ordine dei passi nel codice)
 
 | Fase | Funzione | Cosa fa |
@@ -53,6 +65,18 @@ Sono esportate anche `writeMidi(nome, note)`, `writeMultiMidi(sorgenti, note)` e
   riferimenti al DOM, sintassi valida (JavaScriptCore).
 - Banco di prova: **http://localhost:5080/alg** (esegue `analizza()` su un audio di
   prova o su un file caricato, stampa il riepilogo e offre i download di MIDI/WAV).
+- **Ascolto per traccia** (nel banco `/alg`): per ogni sorgente una scheda con
+  piano roll e i pulsanti *🎹 MIDI con lo strumento* (`rendiTraccia` → MIDI reso
+  con il one-shot di quella sorgente), *🔊 Traccia separata* (`SS[id]`),
+  *🎯 Campione* (`samples[id]`), più i download `.mid` e del rendering `.wav`;
+  in cima i comandi globali (originale, mix MIDI+one-shot, mix ricostruito,
+  ferma). Nell'estrattore (`/extract`, tab **Strumenti**) c'è lo stesso pulsante
+  *🎹 MIDI con lo strumento* accanto a *Campione* e *Separato*.
+- Verifiche del rendering per traccia (Chrome headless, audio di prova 6 s):
+  4 sorgenti, per ognuna la resa ha 264.600 campioni con ~193.000 campioni non
+  nulli e ampiezza massima 0,909; playback avviato davvero (`suonaTraccia`,
+  `suonaMixTracce`, `suonaRicostruzione`, `suonaOriginale` → `true`, stato
+  AudioContext `running`), nessun errore in console.
 - Misure su audio di prova sintetico (3 sorgenti + melodia + kick):
   - 2,5 s → **4 sorgenti**, 31 note, SI-SDR ≈ −45 dB, **1,15 s** di calcolo;
   - 6 s → **4 sorgenti**, 70 note, SI-SDR ≈ −39,6 dB, **2,78 s** di calcolo.

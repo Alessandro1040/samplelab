@@ -56,9 +56,13 @@ Se la 5080 è occupata l'app passa da sola alla porta libera successiva
 C'è anche un **banco di prova dell'algoritmo puro** su
 **http://localhost:5080/alg**: esegue solo le funzioni di calcolo
 (`midi_studio/alg/fortissimo_alg.js`, estratte identiche dall'estrattore) su un
-audio di prova o su un file caricato, stampa il riepilogo e offre i download dei
-MIDI/WAV prodotti. Serve per sviluppare l'algoritmo senza l'interfaccia:
-descrizione, limiti misurati e prompt pronto per un'AI in `midi_studio/alg/`.
+audio di prova o su un file caricato, e per **ogni traccia** mostra una scheda con
+piano roll e i pulsanti di ascolto — *🎹 MIDI con lo strumento* (il MIDI reso con
+il one-shot di quella sorgente), *🔊 Traccia separata*, *🎯 Campione* — più i
+download del `.mid` e del rendering `.wav`; in cima i comandi globali (originale,
+mix MIDI+one-shot, mix ricostruito). Serve per sviluppare l'algoritmo senza
+l'interfaccia: descrizione, limiti misurati e prompt pronto per un'AI in
+`midi_studio/alg/`.
 
 ## Endpoint (per script/automazioni)
 

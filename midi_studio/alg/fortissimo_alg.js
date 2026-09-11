@@ -273,9 +273,49 @@ async function analizza(audio, opts) {
   };
 }
 
+/**
+ * Rende il MIDI di UNA sorgente applicandolo al SUO campione one-shot.
+ * È la stessa logica di recon() (trasposizione sul pitch + ADSR + velocity)
+ * applicata a una sola traccia: così il MIDI "suona con lo strumento giusto",
+ * perché il timbro viene dal one-shot estratto da quella sorgente.
+ * @param {string} id       id della sorgente (es. "s0")
+ * @param {object} esito    risultato di analizza()
+ * @param {number} [durata] quanti campioni rendere (default: durata dell'audio)
+ * @returns {Float32Array}  audio reso (vuoto se la sorgente non ha campione/note)
+ */
+function rendiTraccia(id, esito, durata) {
+  const sr = esito.sr || Sr || 44100;
+  const note = (esito.notes || {})[id] || [];
+  const campione = (esito.samples || {})[id];
+  if (!campione || !campione.length) return new Float32Array(0);
+  const n = Math.max(1, Math.floor(durata || Math.round((esito.durationSec || 0) * sr) || campione.length));
+  const t = {}, s = {};
+  t[id] = note; s[id] = campione;
+  return recon(t, s, n, sr);
+}
+
+/**
+ * Mix di più tracce rese con rendiTraccia() (per "suona tutte insieme"):
+ * è il mix composto con i one-shot scelti, non la somma delle tracce separate.
+ * @param {string[]} [ids]  sorgenti da includere (default: tutte quelle con note)
+ */
+function rendiMix(ids, esito, durata) {
+  const sr = esito.sr || Sr || 44100;
+  const n = Math.max(1, Math.floor(durata || Math.round((esito.durationSec || 0) * sr)));
+  const out = new Float32Array(n);
+  (ids || Object.keys(esito.notes || {})).forEach(id => {
+    const r = rendiTraccia(id, esito, n);
+    for (let i = 0; i < n && i < r.length; i++) out[i] += r[i];
+  });
+  let mx = 1e-9;
+  for (let i = 0; i < n; i++) { const a = Math.abs(out[i]); if (a > mx) mx = a; }
+  if (mx > 0) for (let i = 0; i < n; i++) out[i] = out[i] / mx * 0.9;
+  return out;
+}
+
 // Export per Node (nel browser sono già funzioni globali)
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { analizza, writeMidi, writeMultiMidi, writeWav,
+  module.exports = { analizza, rendiTraccia, rendiMix, writeMidi, writeMultiMidi, writeWav,
                      specgram, autoK, wiener, features, classify, transcribe,
                      yin, extract, recon };
 }

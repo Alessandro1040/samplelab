@@ -18,6 +18,15 @@ input[type=file]{color:#888;font-size:13px;margin-right:10px}
 pre{background:#0b0b0b;border:1px solid var(--b);border-radius:8px;padding:12px;font-size:12px;max-height:420px;overflow:auto;white-space:pre-wrap}
 .dl a{display:inline-block;margin:4px 10px 0 0;color:var(--a);font-size:13px}
 .fasi{font-size:12px;color:#888;margin-top:8px}
+.track{border:1px solid var(--b);border-radius:10px;padding:12px;margin-bottom:10px;background:#151515}
+.track h3{margin:0 0 4px;font-size:14px}
+.track .meta{font-size:11px;color:#888;margin-bottom:9px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:9px}
+.btnrow button{padding:6px 11px;font-size:12px;border-radius:7px}
+.btnrow button.on{background:var(--a);color:#08100f;font-weight:700}
+.btnrow a{font-size:12px;color:var(--a);text-decoration:none;border:1px solid var(--b);border-radius:7px;padding:5px 10px}
+.btnrow a:hover{border-color:var(--a)}
+canvas.roll{width:100%;height:90px;background:#0b0b0b;border:1px solid var(--b);border-radius:6px;display:block}
 </style>
 </head>
 <body>
@@ -35,8 +44,12 @@ pre{background:#0b0b0b;border:1px solid var(--b);border-radius:8px;padding:12px;
   <div class="fasi" id="fasi"></div>
 </div>
 
+<div class="card">
+  <div class="btnrow" id="globali"></div>
+  <div id="tracce"></div>
+</div>
+
 <div class="card"><pre id="out">Premi "Usa audio di prova" per una verifica immediata.</pre></div>
-<div class="card dl" id="dl"></div>
 
 <script src="alg/fortissimo_alg.js"></script>
 <script>
@@ -106,7 +119,7 @@ async function esegui(mono, sr, opts) {
     notePerSorgente: Object.fromEntries(Object.entries(esito.notes).map(([k, v]) => [k, v.length])),
     campioni_estratti: Object.keys(esito.samples).length,
     siSdr: +esito.siSdr.toFixed(2), mse: +esito.mse.toFixed(6), corr: +esito.corr.toFixed(4),
-    ms: Math.round(esito.ms), log: log, _esito: esito
+    ms: Math.round(esito.ms), log: log, _esito: esito, _mono: mono, _sr: sr
   };
 }
 window.prova = prova;
@@ -114,9 +127,73 @@ window.esegui = esegui;
 window.audioDiProva = audioDiProva;
 window.algoritmo = { analizza, writeMidi, writeMultiMidi, writeWav };
 
+// ── ASCOLTO: one-shot applicato al MIDI della traccia, tracce separate, mix ──
+let AC = null, corrente = null, ESITO = null, MONO = null, SR = 44100;
+
+function ctxAudio() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); return AC; }
+function ferma() { if (corrente) { try { corrente.stop(); } catch (e) {} corrente = null; } }
+function suona(buf, sr) {
+  if (!buf || !buf.length) return false;
+  ferma();
+  const c = ctxAudio();
+  const b = c.createBuffer(1, buf.length, sr || 44100);
+  b.copyToChannel(buf, 0);
+  const s = c.createBufferSource();
+  s.buffer = b; s.connect(c.destination); s.start();
+  corrente = s;
+  return true;
+}
+// Questa è la richiesta: il MIDI della traccia suonato con il SUO one-shot
+function suonaTraccia(id) { return suona(rendiTraccia(id, ESITO), ESITO.sr); }
+function suonaMixTracce() { return suona(rendiMix(null, ESITO), ESITO.sr); }
+function suonaSeparato(id) { return suona(ESITO.state.SS[id], ESITO.sr); }
+function suonaCampione(id) { return suona(ESITO.samples[id], ESITO.sr); }
+function suonaOriginale() { return suona(MONO, SR); }
+function suonaRicostruzione() { return suona(ESITO.reconstructed, ESITO.sr); }
+window.ferma = ferma;
+window.suonaTraccia = suonaTraccia;
+window.suonaSeparato = suonaSeparato;
+window.suonaCampione = suonaCampione;
+window.suonaOriginale = suonaOriginale;
+window.suonaRicostruzione = suonaRicostruzione;
+window.suonaMixTracce = suonaMixTracce;
+
+function urlBlob(dati, tipo) { return URL.createObjectURL(new Blob([dati], { type: tipo })); }
+function link(testo, url, nome) {
+  const a = document.createElement("a");
+  a.href = url; a.download = nome; a.textContent = testo;
+  return a;
+}
+function bottone(testo, fn, alt) {
+  const b = document.createElement("button");
+  if (alt) b.className = "alt";
+  b.textContent = testo; b.onclick = fn;
+  return b;
+}
+
+function pianoRoll(canvas, note, durSec) {
+  const x = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
+  x.clearRect(0, 0, W, H);
+  if (!note || !note.length) {
+    x.fillStyle = "#555"; x.font = "12px sans-serif"; x.fillText("nessuna nota", 8, 20); return;
+  }
+  let lo = 127, hi = 0;
+  note.forEach(n => { if (n.pitch < lo) lo = n.pitch; if (n.pitch > hi) hi = n.pitch; });
+  if (hi - lo < 12) { const c = (hi + lo) / 2; lo = Math.floor(c - 6); hi = lo + 12; }
+  x.fillStyle = "#4ecdc4";
+  note.forEach(n => {
+    const px = n.start / durSec * W, pw = Math.max(1.5, (n.end - n.start) / durSec * W);
+    const py = H - (n.pitch - lo) / (hi - lo) * H, ph = Math.max(2, H / (hi - lo));
+    x.fillRect(px, py - ph, pw, ph);
+  });
+}
+
 function mostra(r) {
+  ESITO = r._esito; MONO = r._mono; SR = r._sr;
+  const e = ESITO, sr = e.sr, durSec = e.durationSec || (e.reconstructed.length / sr);
+
   $("out").textContent = JSON.stringify({
-    secondi: r.secondi, campioni: r.campioni, sr: r.sr,
+    secondi: r.secondi, campioni: r.campioni, sr: sr,
     sorgenti_rilevate: r.nSources, sorgenti: r.sources,
     note_totali: r.note, note_per_sorgente: r.notePerSorgente,
     campioni_one_shot: r.campioni_estratti,
@@ -124,26 +201,61 @@ function mostra(r) {
     log: r.log
   }, null, 1);
 
-  const e = r._esito, dl = $("dl");
-  dl.innerHTML = "<b>Download dei file prodotti dall'algoritmo</b><br>";
-  for (const [id, note] of Object.entries(e.notes)) {
-    if (!note.length) continue;
-    const nome = (e.sources.find(s => s.id === id) || {}).name || id;
-    const blob = new Blob([writeMidi(nome.replace(/\s+/g, "_"), note)], { type: "audio/midi" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = nome + ".mid";
-    a.textContent = "⬇ " + nome + ".mid";
-    dl.appendChild(a);
-  }
-  const multi = new Blob([writeMultiMidi(e.sources.map(s => ({ id: s.id })), e.notes)], { type: "audio/midi" });
-  const am = document.createElement("a");
-  am.href = URL.createObjectURL(multi); am.download = "final_multi_track.mid";
-  am.textContent = "⬇ final_multi_track.mid"; dl.appendChild(am);
-  const wav = new Blob([writeWav(e.reconstructed, e.sr)], { type: "audio/wav" });
-  const aw = document.createElement("a");
-  aw.href = URL.createObjectURL(wav); aw.download = "ricostruzione.wav";
-  aw.textContent = "⬇ ricostruzione.wav"; dl.appendChild(aw);
+  // ── comandi globali ────────────────────────────────────────────────────────
+  const g = $("globali");
+  g.innerHTML = "";
+  g.appendChild(bottone("▶ Originale", suonaOriginale, true));
+  g.appendChild(bottone("🎛 Mix (MIDI + one-shot di tutte)", suonaMixTracce));
+  g.appendChild(bottone("🎧 Mix ricostruito (come lo calcola l'algoritmo)", suonaRicostruzione, true));
+  g.appendChild(bottone("⏹ Ferma", ferma, true));
+  g.appendChild(link("⬇ ricostruzione.wav", urlBlob(writeWav(e.reconstructed, sr), "audio/wav"), "ricostruzione.wav"));
+  g.appendChild(link("⬇ final_multi_track.mid",
+    urlBlob(writeMultiMidi(e.sources.map(s => ({ id: s.id })), e.notes), "audio/midi"),
+    "final_multi_track.mid"));
+
+  // ── una scheda per traccia, con ascolto e piano roll ──────────────────────
+  const box = $("tracce");
+  box.innerHTML = "";
+  e.sources.forEach((s, i) => {
+    const note = e.notes[s.id] || [];
+    const card = document.createElement("div");
+    card.className = "track";
+    const h = document.createElement("h3");
+    h.textContent = (i + 1) + ". " + s.name;
+    card.appendChild(h);
+
+    const camp = e.samples[s.id];
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = s.type + " · " + note.length + " note · energia " + s.energyPct + "% · one-shot " +
+      (camp ? Math.round(camp.length / sr * 1000) + " ms" : "assente") +
+      " · centroid " + Math.round(s.features ? s.features.centroid : 0) + " Hz";
+    card.appendChild(meta);
+
+    const row = document.createElement("div");
+    row.className = "btnrow";
+    row.appendChild(bottone("🎹 MIDI con lo strumento", () => suonaTraccia(s.id)));
+    row.appendChild(bottone("🔊 Traccia separata", () => suonaSeparato(s.id), true));
+    row.appendChild(bottone("🎯 Campione (one-shot)", () => suonaCampione(s.id), true));
+    if (note.length) {
+      const nome = s.name.replace(/\s+/g, "_");
+      row.appendChild(link("⬇ .mid", urlBlob(writeMidi(nome, note), "audio/midi"), nome + ".mid"));
+      const resa = rendiTraccia(s.id, e);
+      if (resa.length) {
+        row.appendChild(link("⬇ rendering .wav", urlBlob(writeWav(resa, sr), "audio/wav"),
+          "rendering_" + nome + ".wav"));
+      }
+    }
+    card.appendChild(row);
+
+    const cv = document.createElement("canvas");
+    cv.className = "roll"; cv.width = 900; cv.height = 90;
+    card.appendChild(cv);
+    box.appendChild(card);
+    pianoRoll(cv, note, durSec);
+  });
 }
+window.mostra = mostra;
 
 $("bt2").onclick = async () => {
   $("out").textContent = "analisi in corso…";
@@ -156,6 +268,7 @@ $("bt").onclick = async () => {
   try { const d = await decodifica(f); mostra(await esegui(d.mono, d.sr)); }
   catch (e) { $("out").textContent = "ERRORE: " + e.message; }
 };
+
 </script>
 </body>
 </html>

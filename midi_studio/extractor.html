@@ -306,7 +306,7 @@ DS.forEach((s,i)=>{const d=document.createElement('div');d.className='inst';d.in
 
 // Instruments detail
 const il=document.getElementById('il');il.innerHTML='';
-DS.forEach((s,i)=>{const notes=TR[s.id]||[];const d=document.createElement('div');d.className='inst';d.innerHTML='<div><div class="dot" style="background:'+SC[s.id]+'"></div><div><div style="font-size:14px;font-weight:600">'+(i+1)+'. '+s.name+'</div><div style="font-size:11px;color:#888">Centroid '+Math.round(s.features.centroid)+'Hz | ZCR '+s.features.zcr.toFixed(3)+' | Note '+notes.length+'</div></div></div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn2" style="padding:4px 10px;font-size:11px" onclick="ps(\''+s.id+'\')">▶️ Campione</button><button class="btn btn2" style="padding:4px 10px;font-size:11px" onclick="ps2(\''+s.id+'\')">▶️ Separato</button></div>';il.appendChild(d)});
+DS.forEach((s,i)=>{const notes=TR[s.id]||[];const d=document.createElement('div');d.className='inst';d.innerHTML='<div><div class="dot" style="background:'+SC[s.id]+'"></div><div><div style="font-size:14px;font-weight:600">'+(i+1)+'. '+s.name+'</div><div style="font-size:11px;color:#888">Centroid '+Math.round(s.features.centroid)+'Hz | ZCR '+s.features.zcr.toFixed(3)+' | Note '+notes.length+'</div></div></div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn2" style="padding:4px 10px;font-size:11px" onclick="psMidi(\''+s.id+'\')">🎹 MIDI con lo strumento</button><button class="btn btn2" style="padding:4px 10px;font-size:11px" onclick="ps(\''+s.id+'\')">▶️ Campione</button><button class="btn btn2" style="padding:4px 10px;font-size:11px" onclick="ps2(\''+s.id+'\')">▶️ Separato</button></div>';il.appendChild(d)});
 
 // Spectrograms
 const tds=performance.now();drawSpec('so',O,Sr);drawSpec('sr',R,Sr);log('Spettrogrammi: '+((performance.now()-tds)/1000).toFixed(1)+'s','i');
@@ -357,6 +357,8 @@ for(let i=0;i<w;i++){const idx=i*step;let max=0;for(let j=0;j<step;j++)max=Math.
 
 function ps(id){if(!C)C=new(window.AudioContext||webkitAudioContext)();const s=SA[id];if(!s)return;const b=C.createBuffer(1,s.length,Sr);b.copyToChannel(s,0);const src=C.createBufferSource();src.buffer=b;src.connect(C.destination);src.start()}
 function ps2(id){if(!C)C=new(window.AudioContext||webkitAudioContext)();const s=SS[id];if(!s)return;const b=C.createBuffer(1,s.length,Sr);b.copyToChannel(s,0);const src=C.createBufferSource();src.buffer=b;src.connect(C.destination);src.start()}
+// 🎹 MIDI della sorgente applicato al SUO one-shot (timbro dello strumento rilevato)
+function psMidi(id){const note=TR[id]||[];const campione=SA[id];if(!campione){log('Nessun campione per '+id,'w');return}const t={},s={};t[id]=note;s[id]=campione;const r=recon(t,s,D.length,Sr);if(!C)C=new(window.AudioContext||webkitAudioContext)();const b=C.createBuffer(1,r.length,Sr);b.copyToChannel(r,0);const src=C.createBufferSource();src.buffer=b;src.connect(C.destination);src.start()}
 function play(which){if(!C)C=new(window.AudioContext||webkitAudioContext)();const buf=which==='o'?O:R;if(!buf)return;const b=C.createBuffer(1,buf.length,Sr);b.copyToChannel(buf,0);const s=C.createBufferSource();s.buffer=b;s.connect(C.destination);s.start()}
 function dl(which,fn){const buf=which==='r'?R:O;if(!buf)return;const wav=writeWav(buf,Sr);const blob=new Blob([wav],{type:'audio/wav'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fn;a.click();URL.revokeObjectURL(url)}
 
