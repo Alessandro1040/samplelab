@@ -38,7 +38,7 @@ pre{background:#0b0b0b;border:1px solid var(--b);border-radius:8px;padding:12px;
 <div class="card"><pre id="out">Premi "Usa audio di prova" per una verifica immediata.</pre></div>
 <div class="card dl" id="dl"></div>
 
-<script src="/alg/fortissimo_alg.js"></script>
+<script src="alg/fortissimo_alg.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -59,10 +59,37 @@ async function decodifica(sorgente) {
   return { mono, sr: buf.sampleRate };
 }
 
+// ── audio di prova autogenerato: rende il banco autonomo (nessun server) ────
+// Riproduce la stessa ricetta di /api/test-audio: basso a 220 Hz, melodia
+// 440/554/659/880 ogni 0,9 s (0,7 s), kick a 60 Hz ogni secondo, normalizzato.
+function audioDiProva(seconds) {
+  const sr = 22050, dur = seconds || 6, n = Math.floor(sr * dur);
+  const s = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const t = i / sr; if (Math.sin(2 * Math.PI * 0.5 * t) > 0) s[i] = 0.30 * Math.sin(2 * Math.PI * 220 * t); }
+  [440, 554.37, 659.25, 880].forEach((f, i) => {
+    const st = Math.floor(i * 0.9 * sr);
+    if (st >= n) return;
+    const len = Math.min(Math.floor(0.7 * sr), n - st);
+    for (let j = 0; j < len; j++) { const t = j / sr; s[st + j] += 0.40 * Math.sin(2 * Math.PI * f * t) * Math.exp(-t * 3); }
+  });
+  for (let k = 0; k <= Math.floor(dur); k++) {
+    const st = Math.floor(k * sr);
+    if (st >= n) break;
+    const len = Math.min(Math.floor(0.12 * sr), n - st);
+    for (let j = 0; j < len; j++) { const t = j / sr; s[st + j] += 0.45 * Math.sin(2 * Math.PI * 60 * t) * Math.exp(-t * 25); }
+  }
+  let mx = 1e-9;
+  for (let i = 0; i < n; i++) { const a = Math.abs(s[i]); if (a > mx) mx = a; }
+  for (let i = 0; i < n; i++) s[i] = Math.max(-1, Math.min(1, s[i] / mx * 0.9));
+  return { mono: s, sr: sr };
+}
+
 // ── ingressi usati anche dai test automatici ────────────────────────────────
 async function prova(seconds, opts) {
-  const { mono, sr } = await decodifica('/api/test-audio?seconds=' + (seconds || 6));
-  return esegui(mono, sr, opts);
+  let d;
+  try { d = await decodifica('/api/test-audio?seconds=' + (seconds || 6)); }
+  catch (e) { d = audioDiProva(seconds || 6); }   // senza server: audio generato qui
+  return esegui(d.mono, d.sr, opts);
 }
 async function esegui(mono, sr, opts) {
   const log = [];
@@ -84,6 +111,7 @@ async function esegui(mono, sr, opts) {
 }
 window.prova = prova;
 window.esegui = esegui;
+window.audioDiProva = audioDiProva;
 window.algoritmo = { analizza, writeMidi, writeMultiMidi, writeWav };
 
 function mostra(r) {
