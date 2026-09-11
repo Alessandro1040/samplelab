@@ -119,10 +119,32 @@ più l'aggiunta che salva i MIDI sul server.
    fuori range (`data byte must be in range 0..127`): illeggibili da mido e da
    qualsiasi DAW. → i delta sono ora limitati a ≥ 0 in entrambi i writer
    (`writeMidi`, `writeMultiMidi`).
+6. **Analisi che moriva al 90% su audio più lungo di ~2,7 s.** `recon()` faceva
+   `Math.max(...recon.map(Math.abs))` su un array lungo quanto tutto l'audio:
+   in Chrome lo spread di argomenti esplode già a ~125.000 elementi
+   (`RangeError: Maximum call stack size exceeded`), quindi qualsiasi brano vero
+   si fermava su "FASE 7 — 90%" senza risultati. → massimo calcolato con un
+   ciclo (corretta anche `proc()` e il piano roll, che usavano lo stesso schema).
+   Trovato durante un test su un estratto reale di 12 s.
 
 In coda alla pagina c'è l'aggiunta di MIDI Studio: al termine dell'analisi i `.mid`
 generati vengono inviati a `POST /api/save-midi`, così compaiono subito in
 "File generati" e nel selettore di "Confronta MIDI".
+
+## Tempi e qualità (misurati)
+
+- **Tempo**: l'analisi gira in JavaScript, in un solo thread, e il costo cresce
+  con durata e numero di sorgenti rilevate. Misure reali: **6,6 s** per un
+  estratto di 12 s di un brano vero (2 sorgenti), ~10 s per 2,5 s di audio
+  sintetico (5 sorgenti). In pratica: da ~0,5× a ~4× la durata del brano, quindi
+  per una canzone intera aspettati **da 1-2 a ~10 minuti**.
+- **Tieni la tab in primo piano**: Chrome rallenta le tab in background e
+  chiudendo la pagina l'analisi si interrompe (non c'è nulla lato server).
+- **Qualità**: la trascrizione è pensata per materiale **melodico/sparso**
+  (sul test sintetico: 5 strumenti e 38 note, coerenti). Su un mix denso e
+  moderno estrae molto meno (sull'estratto di "Average Joe": 2 sorgenti, 1 nota
+  ciascuna, SI-SDR -40 dB): il valore è indicativo, non è una trascrizione
+  professionale.
 
 ## Consigli sul confronto
 

@@ -268,7 +268,7 @@ return proc(data.slice(bs,bs+tl),sr);
 function proc(s,sr){
 const f=new Float32Array(s.length);
 for(let i=0;i<s.length;i++){let e=1;const fi=Math.floor(sr*0.01),fo=Math.floor(sr*0.05);if(i<fi)e=i/fi;if(i>s.length-fo)e=Math.min(e,(s.length-i)/fo);f[i]=s[i]*e}
-const p=Math.max(...f.map(Math.abs));if(p>0)for(let i=0;i<f.length;i++)f[i]/=p*1.2;return f;
+let p=0;for(let i=0;i<f.length;i++){const av=Math.abs(f[i]);if(av>p)p=av;}if(p>0)for(let i=0;i<f.length;i++)f[i]/=p*1.2;return f;
 }
 
 function recon(trans,samples,targetLen,sr){
@@ -276,7 +276,7 @@ const recon=new Float32Array(targetLen);
 for(const[id,notes]of Object.entries(trans)){const sample=samples[id];if(!sample||!notes)continue;
 for(const note of notes){const st=Math.floor(note.start*sr);const ratio=Math.pow(2,(note.pitch-72)/12);const sl=Math.floor(sample.length/ratio);const nd=Math.floor((note.end-note.start)*sr);const al=Math.min(sl,nd);
 for(let i=0;i<al&&st+i<targetLen;i++){const si=Math.floor(i*ratio);if(si<sample.length){let e=1;const a=Math.min(al*0.05,sr*0.01),rl=Math.min(al*0.2,sr*0.05);if(i<a)e=i/a;if(i>al-rl)e*=Math.min(e,(al-i)/rl);recon[st+i]+=sample[si]*(note.velocity/127)*e*0.6}}}}
-const p=Math.max(...recon.map(Math.abs));if(p>0)for(let i=0;i<recon.length;i++)recon[i]/=p*1.1;return recon;
+let p=0;for(let i=0;i<recon.length;i++){const av=Math.abs(recon[i]);if(av>p)p=av;}if(p>0)for(let i=0;i<recon.length;i++)recon[i]/=p*1.1;return recon;
 }
 
 function siSdr(ref,est){const n=Math.min(ref.length,est.length);let rM=0,eM=0;for(let i=0;i<n;i++){rM+=ref[i];eM+=est[i]}rM/=n;eM/=n;let num=0,rR=0;for(let i=0;i<n;i++){const r=ref[i]-rM,e=est[i]-eM;num+=r*e;rR+=r*r}const a=num/(rR+1e-10);let p2=0,no=0;for(let i=0;i<n;i++){const r=ref[i]-rM,e=est[i]-eM;const p=a*r;p2+=p*p;no+=(e-p)*(e-p)}return 10*Math.log10(p2/(no+1e-10))}
@@ -332,7 +332,7 @@ function renderPR(){
 const container=document.getElementById('pr');const dur=D.length/Sr;
 const allN=[];DS.forEach(s=>(TR[s.id]||[]).forEach(n=>allN.push({...n,track:s.id,color:SC[s.id]})));
 if(!allN.length){container.innerHTML='<div style="color:#888;font-size:12px">Nessuna nota</div>';return}
-const minP=Math.min(...allN.map(n=>n.pitch))-2,maxP=Math.max(...allN.map(n=>n.pitch))+2,pr=maxP-minP;
+let minP=999,maxP=-1;allN.forEach(n=>{if(n.pitch<minP)minP=n.pitch;if(n.pitch>maxP)maxP=n.pitch});minP-=2;maxP+=2;const pr=maxP-minP;
 const h=220,w=860,nh=h/pr;
 const wrap=document.createElement('div');wrap.className='piano';wrap.style.width=w+'px';wrap.style.height=h+'px';
 for(let p=minP;p<=maxP;p++){const line=document.createElement('div');line.style.cssText='position:absolute;left:0;right:0;height:1px;background:'+([1,3,6,8,10].includes(p%12)?'#333':'#1a1a1a')+';top:'+((maxP-p)*nh)+'px;';wrap.appendChild(line)}
