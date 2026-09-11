@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SampleLab (2) — Fortissimo Compare v3</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+:root{--bg:#080808;--surface:#111111;--surface2:#1a1a1a;--border:#252525;--border2:#333333;--text:#e8e8e8;--muted:#666666;--dim:#444444;--accent:#c8f000;--accent2:#7b5ea7;--accent3:#2dd4bf;--red:#ff4545}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Space Grotesk',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:40px}
+a{color:var(--accent)}
+header{display:flex;align-items:center;gap:16px;padding:16px 28px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100;flex-wrap:wrap}
+.logo{font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent);text-decoration:none;letter-spacing:-.5px}
+.logo span{color:var(--muted);font-weight:400}
+.page-title{font-size:16px;font-weight:600}
+.page-title .v{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent3);border:1px solid var(--border2);border-radius:20px;padding:2px 8px;margin-left:6px}
+.nav{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.nav a{font-family:'Space Mono',monospace;font-size:11px;color:var(--text);background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:7px 12px;text-decoration:none;transition:border-color .15s,color .15s}
+.nav a:hover{border-color:var(--accent);color:var(--accent)}
+.wrap{padding:22px 28px;max-width:1320px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:980px){.grid{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.card-head h2{font-size:14px;font-weight:700;letter-spacing:.02em}
+.card-head .spacer{margin-left:auto}
+textarea{width:100%;min-height:240px;resize:vertical;background:#0d0d0d;border:1px solid var(--border2);border-radius:10px;color:var(--text);font-family:'Space Mono',monospace;font-size:11.5px;line-height:1.5;padding:12px;outline:none}
+textarea:focus{border-color:var(--accent)}
+.meta{font-family:'Space Mono',monospace;font-size:10.5px;color:var(--muted);margin-top:8px;min-height:14px}
+.meta.bad{color:var(--red)}
+.btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 14px;cursor:pointer;transition:all .15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--accent);border:1px solid var(--accent);color:#080808;font-weight:700}
+.btn-primary:hover{color:#080808;filter:brightness(1.08)}
+.btn-mini{background:none;border:1px solid var(--border2);color:var(--muted);font-family:'Space Mono',monospace;font-size:10.5px;border-radius:20px;padding:5px 11px;cursor:pointer;transition:all .15s}
+.btn-mini:hover{border-color:var(--accent);color:var(--accent)}
+.controls{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+.weights{display:flex;gap:10px;flex-wrap:wrap}
+.wfield{display:flex;flex-direction:column;gap:4px}
+.wfield label{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.wfield input{width:78px;background:#0d0d0d;border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:12px;border-radius:8px;padding:7px 9px;outline:none}
+.wfield input:focus{border-color:var(--accent)}
+.status{font-family:'Space Mono',monospace;font-size:11px;margin-top:12px;min-height:16px;color:var(--muted)}
+.status.ok{color:var(--accent3)}
+.status.err{color:var(--red)}
+.scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px}
+.sCard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px}
+.sCard .lbl{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.sCard .val{font-size:30px;font-weight:700;margin:6px 0 8px;letter-spacing:-.5px}
+.bar{height:6px;border-radius:4px;background:var(--surface2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .35s}
+.bar.b2 i{background:var(--accent3)}
+.bar.b3 i{background:var(--accent2)}
+.bar.b4 i{background:#f4d35e}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{background:var(--surface2);padding:9px 10px;text-align:left;font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(255,255,255,.02)}
+.mono{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)}
+.pill{display:inline-block;font-family:'Space Mono',monospace;font-size:10px;border:1px solid var(--border2);border-radius:20px;padding:2px 8px;color:var(--muted)}
+.pill.only-a{border-color:#7b3f3f;color:#ff8f8f}
+.pill.only-b{border-color:#3f6b7b;color:#8fd8ff}
+.unmatched{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+details{margin-top:14px}
+details summary{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);cursor:pointer}
+pre{background:#0d0d0d;border:1px solid var(--border2);border-radius:10px;padding:12px;overflow:auto;max-height:420px;font-family:'Space Mono',monospace;font-size:11px;color:var(--text);margin-top:8px}
+.hint{font-size:12px;color:var(--muted);line-height:1.6;margin-top:10px}
+.hint b{color:var(--accent3);font-weight:600}
+.hint code{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent)}
+.empty{text-align:center;padding:34px;color:var(--muted);font-family:'Space Mono',monospace;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/">SampleLab <span>(2)</span></a>
+  <div class="page-title">🎛️ Fortissimo Compare<span class="v">v3</span></div>
+  <nav class="nav">
+    <a href="/">🔍 Trova Campioni</a>
+    <a href="/browse">🎧 Esplora</a>
+    <a href="/onyx">▶ Onyx</a>
+  </nav>
+</header>
+
+<main class="wrap">
+  <div class="grid">
+    <section class="card">
+      <div class="card-head">
+        <h2>Analisi A</h2>
+        <span class="mono" id="info-a"></span>
+        <span class="spacer"></span>
+        <button class="btn-mini" onclick="loadExample('a')">Carica esempio A</button>
+      </div>
+      <textarea id="json-a" spellcheck="false" placeholder='{ "instruments": [ ... ] }'></textarea>
+      <div class="meta" id="meta-a">nessun JSON</div>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>Analisi B</h2>
+        <span class="mono" id="info-b"></span>
+        <span class="spacer"></span>
+        <button class="btn-mini" onclick="loadExample('b')">Carica esempio B</button>
+      </div>
+      <textarea id="json-b" spellcheck="false" placeholder='{ "instruments": [ ... ] }'></textarea>
+      <div class="meta" id="meta-b">nessun JSON</div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="controls">
+      <div class="weights">
+        <div class="wfield"><label>peso MIDI</label>
+          <input id="w-midi" type="number" step="0.05" min="0" max="1" value="0.4"></div>
+        <div class="wfield"><label>peso one-shot</label>
+          <input id="w-oneshot" type="number" step="0.05" min="0" max="1" value="0.4"></div>
+        <div class="wfield"><label>peso presence</label>
+          <input id="w-presence" type="number" step="0.05" min="0" max="1" value="0.2"></div>
+        <div class="wfield"><label>volume (one-shot)</label>
+          <input id="w-volume" type="number" step="0.05" min="0" max="1" value="0.3"></div>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn-primary" id="btn-compare" onclick="runCompare()">CONFRONTA</button>
+      <button class="btn" id="btn-selftest" onclick="runSelftest()">Self-test del modello</button>
+      <button class="btn" onclick="clearAll()">Svuota</button>
+    </div>
+    <div class="status" id="status">Pronto: carica l'esempio (A e B) e premi CONFRONTA.</div>
+    <div class="hint">
+      Ogni analisi è un JSON nel formato di <b>AudioAnalysisOutput</b>:
+      <code>{"instruments":[{"instrument_name":"piano","separation_quality":1.0,"track":{...},"one_shot":{...}}]}</code>.
+      Dentro <code>track</code> le note si indicano con <code>"notes":[{"pitch":60,"start":0,"end":0.4,"velocity":100}]</code>
+      oppure in forma compatta con <code>"pattern":{"base_pitch":60,"pattern":[0,4,7],"tempo":120}</code>.
+      Il one-shot prende la waveform da una spec: <code>"audio":{"type":"pluck"|"sine"|"noise"|"silence","freq":440,"duration":0.1,"amp":0.6}</code>
+      oppure da un array di campioni <code>"audio":[...]</code>.
+    </div>
+  </section>
+
+  <section id="results" class="card">
+    <div class="empty">Nessun confronto ancora: premi <b style="color:var(--accent)">Carica esempio A</b> e <b style="color:var(--accent)">Carica esempio B</b>, poi <b style="color:var(--accent)">CONFRONTA</b>.</div>
+  </section>
+</main>
+
+<script>
+// ── FORTISSIMO COMPARE — interfaccia di test del modello v3 ──────────────────
+const $ = id => document.getElementById(id);
+const fmt3 = v => (v===null||v===undefined) ? "—" : Number(v).toFixed(3);
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function setStatus(msg,kind){const s=$("status");s.textContent=msg;s.className="status"+(kind?" "+kind:"");}
+function busy(on){["btn-compare","btn-selftest"].forEach(id=>{$(id).disabled=on;});}
+
+function parseBox(id){
+  const el=$(id);
+  try{ const v=JSON.parse(el.value); el.style.borderColor=""; return v; }
+  catch(e){ el.style.borderColor="var(--red)";
+            throw new Error((id==="json-a"?"JSON A":"JSON B")+" non valido: "+e.message); }
+}
+function updateMeta(id){
+  const el=$(id), meta=$(id.replace("json-","meta-")), info=$(id.replace("json-","info-"));
+  if(!el.value.trim()){ meta.textContent="nessun JSON"; meta.className="meta"; info.textContent=""; return; }
+  try{
+    const d=JSON.parse(el.value), ins=d.instruments||[];
+    const notes=ins.reduce((n,i)=>n+((i.track&&i.track.notes)||[]).length
+                                      +((i.track&&i.track.pattern&&i.track.pattern.pattern)||[]).length,0);
+    meta.className="meta";
+    meta.textContent=(d.source_filename||"(senza nome)")+" · "+ins.length+" strumenti · "+notes+" note";
+    info.textContent=ins.length+" str.";
+  }catch(e){ meta.className="meta bad"; meta.textContent="JSON non valido"; info.textContent=""; }
+}
+async function loadExample(which){
+  try{
+    const d=await (await fetch("/fortissimo/example")).json();
+    if(which==="a"||which==="both"){ $("json-a").value=JSON.stringify(d.a,null,2); updateMeta("json-a"); }
+    if(which==="b"||which==="both"){ $("json-b").value=JSON.stringify(d.b,null,2); updateMeta("json-b"); }
+    setStatus("Esempio caricato: canzone A (piano 0.5) vs canzone B (piano 0.9).","ok");
+  }catch(e){ setStatus("Errore nel caricare l'esempio: "+e.message,"err"); }
+}
+function weights(){
+  return {midi:parseFloat($("w-midi").value), oneshot:parseFloat($("w-oneshot").value),
+          presence:parseFloat($("w-presence").value), volume:parseFloat($("w-volume").value)};
+}
+async function runCompare(){
+  let a,b;
+  try{ a=parseBox("json-a"); b=parseBox("json-b"); }catch(e){ setStatus(e.message,"err"); return; }
+  const w=weights(), sum=w.midi+w.oneshot+w.presence;
+  if(Math.abs(sum-1)>1e-6){ setStatus("I pesi MIDI + one-shot + presence devono sommare 1.0 (ora "+sum.toFixed(3)+").","err"); return; }
+  busy(true); setStatus("Confronto in corso…");
+  try{
+    const r=await fetch("/fortissimo/compare",{method:"POST",headers:{"Content-Type":"application/json"},
+                                              body:JSON.stringify({a:a,b:b,weights:w})});
+    const d=await r.json();
+    if(!r.ok||d.error){ setStatus(d.error||("HTTP "+r.status),"err"); }
+    else { renderResult(d.result,[],"Confronto completato — pesi MIDI "+w.midi+" / one-shot "+w.oneshot+
+                                 " / presence "+w.presence+" (volume nel one-shot "+w.volume+")."); }
+  }catch(e){ setStatus("Errore di rete: "+e.message,"err"); }
+  busy(false);
+}
+async function runSelftest(){
+  busy(true); setStatus("Self-test in corso…");
+  try{
+    const d=await (await fetch("/fortissimo/selftest")).json();
+    if(d.error){ setStatus(d.error,"err"); }
+    else { renderResult(d.result,d.checks,(d.ok?"Self-test SUPERATO":"Self-test FALLITO")+" — risultato dell'esempio A vs B."); }
+  }catch(e){ setStatus("Errore di rete: "+e.message,"err"); }
+  busy(false);
+}
+function sCard(lbl,val,cls){
+  const p=Math.max(0,Math.min(1,Number(val)||0))*100;
+  return '<div class="sCard"><div class="lbl">'+lbl+'</div><div class="val">'+fmt3(val)+
+         '</div><div class="bar '+cls+'"><i style="width:'+p+'%"></i></div></div>';
+}
+function renderResult(res,checks,statusMsg){
+  const rows=(res.details||[]).map(d=>'<tr>'+
+    '<td>'+esc(d.name_a||"—")+'</td><td>'+esc(d.name_b||"—")+'</td>'+
+    '<td class="mono">'+(d.match_conf?fmt3(d.match_conf):"—")+'</td>'+
+    '<td class="mono">'+(d.midi?fmt3(d.midi.score):"—")+'</td>'+
+    '<td class="mono">'+(d.midi?fmt3(d.midi.f1):"—")+'</td>'+
+    '<td class="mono">'+(d.shot?fmt3(d.shot.score):"—")+'</td>'+
+    '<td class="mono">'+(d.shot?fmt3(d.shot.volume_sim):"—")+'</td>'+
+    '<td class="mono">'+fmt3(d.score)+'</td><td class="mono">'+fmt3(d.weight)+'</td>'+
+    '<td>'+(d.reason?('<span class="pill '+(d.reason==="only_a"?"only-a":"only-b")+'">solo '+
+                      (d.reason==="only_a"?"A":"B")+'</span>'):'<span class="pill">match</span>')+'</td></tr>').join("");
+  const checksHtml=(checks&&checks.length)?('<div class="table-wrap" style="margin-bottom:16px"><table>'+
+    '<thead><tr><th>Controllo</th><th>Esito</th><th>Valore</th></tr></thead><tbody>'+
+    checks.map(c=>'<tr><td>'+esc(c.name)+'</td><td>'+(c.ok?'<span style="color:var(--accent3)">OK</span>':
+      '<span style="color:var(--red)">FAIL</span>')+'</td><td class="mono">'+esc(c.detail)+'</td></tr>').join("")+
+    '</tbody></table></div>'):"";
+  const un=(arr,cls,label)=>(arr&&arr.length)?('<span class="pill '+cls+'">'+label+': '+arr.map(esc).join(", ")+'</span>'):"";
+  $("results").innerHTML = checksHtml+
+    '<div class="scores">'+
+      sCard("Overall score",res.overall_score,"")+
+      sCard("MIDI score",res.midi_score,"b2")+
+      sCard("One-shot score",res.oneshot_score,"b3")+
+      sCard("Presence score",res.presence_score,"b4")+
+    '</div>'+
+    '<div class="mono" style="margin-bottom:10px">Strumenti: A='+res.n_a+' · B='+res.n_b+' · matchati='+res.n_match+'</div>'+
+    '<div class="unmatched">'+un(res.unmatched_a,"only-a","solo in A")+un(res.unmatched_b,"only-b","solo in B")+'</div>'+
+    '<div class="table-wrap" style="margin-top:14px"><table>'+
+      '<thead><tr><th>Strumento A</th><th>Strumento B</th><th>match</th><th>MIDI</th><th>MIDI f1</th>'+
+      '<th>one-shot</th><th>volume</th><th>score</th><th>peso</th><th>esito</th></tr></thead>'+
+      '<tbody>'+(rows||'<tr><td colspan="10" class="empty">nessuno strumento nelle due analisi</td></tr>')+'</tbody>'+
+    '</table></div>'+
+    '<details><summary>JSON completo del risultato</summary><pre>'+esc(JSON.stringify(res,null,2))+'</pre></details>';
+  setStatus(statusMsg,"ok");
+}
+function clearAll(){
+  ["json-a","json-b"].forEach(id=>{$(id).value="";updateMeta(id);});
+  $("results").innerHTML='<div class="empty">Nessun confronto ancora.</div>';
+  setStatus("Pronto: carica l'esempio (A e B) e premi CONFRONTA.");
+}
+document.querySelectorAll("#json-a,#json-b").forEach(el=>el.addEventListener("input",()=>updateMeta(el.id)));
+loadExample("both");
+</script>
+</body>
+</html>

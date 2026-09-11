@@ -2042,6 +2042,11 @@ def onyx():
 def browse():
     return send_file(os.path.join(BASE_DIR, "browse.html"))
 
+# ── FORTISSIMO COMPARE (pagina di test del modello di confronto strumenti) ────
+@app.route("/fortissimo")
+def fortissimo():
+    return send_file(os.path.join(BASE_DIR, "fortissimo.html"))
+
 # ── STREAMING ────────────────────────────────────────────────────────────────
 @app.route("/stream/<path:filename>")
 def stream_file(filename):
@@ -3469,6 +3474,270 @@ def playback_state_set():
         )
         row = row2dict(conn.execute("SELECT * FROM playback_state WHERE id=1").fetchone())
     return jsonify({"state": row})
+
+# ═══════════════════════════════════════════════════════════
+# FORTISSIMO COMPARE — ponte JSON ⇄ modello (fortissimo_compare_v3.py)
+# Il modello confronta due output AudioAnalysis (YAMNet + Demucs → MIDI +
+# one-shot) e restituisce uno score [0,1]. Qui lo si rende pilotabile dal
+# browser: le due analisi arrivano come JSON e i one-shot si generano da una
+# piccola "spec" (non serve caricare waveform).
+# ═══════════════════════════════════════════════════════════
+FC_PATH = os.path.join(BASE_DIR, "fortissimo_compare_v3.py")
+FC_LOCK = threading.Lock()
+FC_MOD = None
+
+def fc_module():
+    """Importa una sola volta il modulo del modello Fortissimo."""
+    global FC_MOD
+    with FC_LOCK:
+        if FC_MOD is None:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("fortissimo_compare_v3", FC_PATH)
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"Impossibile caricare {FC_PATH}")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            FC_MOD = mod
+    return FC_MOD
+
+def fc_jsonable(obj):
+    """Rende serializzabili in JSON i tipi numpy restituiti dal modello."""
+    import numpy as np
+    if isinstance(obj, dict):
+        return {k: fc_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [fc_jsonable(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    return obj
+
+def fc_synth_audio(spec, sr=44100):
+    """Genera la waveform di un one-shot dalla spec JSON.
+
+    spec = {"type":"pluck"|"sine"|"noise"|"silence", "freq":440.0,
+            "duration":0.1, "amp":0.6, "harmonics":[1.0,0.5], "seed":0}
+    "pluck" riproduce esattamente il gen_pluck() dell'esempio del modello.
+    """
+    import numpy as np
+    spec = spec or {}
+    kind = str(spec.get("type") or "pluck").lower()
+    sr = int(spec.get("sr", sr) or sr)
+    dur = float(spec.get("duration", 0.1) or 0.1)
+    amp = float(spec.get("amp", 0.5) if spec.get("amp") is not None else 0.5)
+    n = max(0, int(sr * dur))
+    if kind == "silence" or n == 0:
+        return np.zeros(n, dtype=float)
+    t = np.linspace(0, dur, n, endpoint=False)
+    if kind == "noise":
+        rng = np.random.default_rng(int(spec.get("seed", 0) or 0))
+        w = rng.uniform(-1.0, 1.0, n)
+    elif kind == "sine":
+        w = np.sin(2 * np.pi * float(spec.get("freq", 440.0)) * t)
+    else:
+        f = float(spec.get("freq", 440.0))
+        w = np.sin(2 * np.pi * f * t)
+        for i, h in enumerate(spec.get("harmonics", [1.0, 0.5]) or [], start=2):
+            w = w + float(h) * np.sin(2 * np.pi * f * i * t)
+        w = w * np.exp(-t * 4)
+    return w * amp
+
+def fc_build_notes(track):
+    """Costruisce le NoteEvent di una traccia dal JSON.
+
+    Due formati, combinabili:
+      "notes":   [{"pitch":64,"start":0.0,"end":0.4,"velocity":100,"channel":0}, ...]
+      "pattern": {"base_pitch":64,"pattern":[0,2,4],"tempo":120,"velocity":100,
+                  "length":0.8}   (come make_notes() nell'esempio del modello)
+    """
+    mod = fc_module()
+    ch = int(track.get("channel", 0) or 0)
+    notes = []
+    for n in track.get("notes") or []:
+        notes.append(mod.NoteEvent(
+            pitch=int(n.get("pitch", 60)),
+            start=float(n.get("start", 0.0) or 0.0),
+            end=float(n.get("end", 0.0) or 0.0),
+            velocity=int(n.get("velocity", 100)),
+            channel=int(n.get("channel", ch)),
+        ))
+    pat = track.get("pattern")
+    if isinstance(pat, dict):
+        base = int(pat.get("base_pitch", 60))
+        tempo = float(pat.get("tempo", 120.0) or 120.0)
+        vel = int(pat.get("velocity", 100))
+        ln = float(pat.get("length", 0.8))
+        bd = (60.0 / tempo) if tempo > 0 else 0.5
+        for k, step in enumerate(pat.get("pattern") or []):
+            notes.append(mod.NoteEvent(base + int(step), k * bd,
+                                       k * bd + bd * ln, vel, ch))
+    return notes
+
+def fc_build_output(payload):
+    """Costruisce un AudioAnalysisOutput del modello da un payload JSON."""
+    import numpy as np
+    mod = fc_module()
+    payload = payload or {}
+    sr_default = int(payload.get("sr", 44100) or 44100)
+    instruments = []
+    for inst in payload.get("instruments") or []:
+        tr = inst.get("track") or {}
+        sk = inst.get("one_shot") or {}
+        name = inst.get("instrument_name") or tr.get("name") or "unknown"
+        track = mod.InstrumentTrack(
+            name=tr.get("name") or name,
+            program=int(tr.get("program", 0) or 0),
+            channel=int(tr.get("channel", 0) or 0),
+            notes=fc_build_notes(tr),
+            is_drum=bool(tr.get("is_drum", False)),
+            confidence=float(tr.get("confidence", 1.0) or 1.0),
+        )
+        sr = int(sk.get("sr", sr_default) or sr_default)
+        spec = sk.get("audio")
+        if isinstance(spec, dict):
+            audio = fc_synth_audio(spec, sr=sr)
+        elif isinstance(spec, list):
+            audio = np.asarray(spec, dtype=float)
+        else:
+            audio = fc_synth_audio({"type": "silence"}, sr=sr)
+        shot = mod.OneShotSample(
+            instrument_name=sk.get("instrument_name") or track.name,
+            program=int(sk.get("program", track.program) or 0),
+            pitch=int(sk.get("pitch", 60) or 0),
+            audio=audio,
+            sr=sr,
+            original_loudness=float(sk.get("original_loudness", 0.0) or 0.0),
+            features=sk.get("features") or {},
+        )
+        instruments.append(mod.AnalyzedInstrument(
+            instrument_name=name, track=track, one_shot=shot,
+            separation_quality=float(inst.get("separation_quality", 1.0) or 0.0),
+        ))
+    return mod.AudioAnalysisOutput(
+        instruments=instruments,
+        source_filename=str(payload.get("source_filename") or ""),
+        global_tempo=float(payload.get("global_tempo", 120.0) or 0.0),
+        duration=float(payload.get("duration", 0.0) or 0.0),
+    )
+
+def fc_example_payload():
+    """Riproduce l'esempio di test di fortissimo_compare_v3.py (canzoni A e B).
+
+    B è identica ad A tranne il piano suonato più forte: serve a vedere sia il
+    MIDI sia il one-shot lavorare (il volume pesa solo sul one-shot).
+    """
+    def song(fname, piano_amp):
+        return {"source_filename": fname, "global_tempo": 120, "duration": 4.0,
+                "instruments": [
+                    {"instrument_name": "electric guitar", "separation_quality": 1.0,
+                     "track": {"name": "electric guitar", "program": 27, "channel": 0,
+                               "pattern": {"base_pitch": 64,
+                                           "pattern": [0, 2, 4, 2, 0, -1, 0, 2],
+                                           "tempo": 120, "velocity": 100}},
+                     "one_shot": {"program": 27, "pitch": 72, "sr": 44100,
+                                  "original_loudness": 0.6,
+                                  "audio": {"type": "pluck", "freq": 440, "duration": 0.1,
+                                            "amp": 0.6, "harmonics": [1.0, 0.5]}}},
+                    {"instrument_name": "bass", "separation_quality": 1.0,
+                     "track": {"name": "bass", "program": 32, "channel": 1,
+                               "pattern": {"base_pitch": 36,
+                                           "pattern": [0, 0, 7, 0, 5, 0, 7, 0],
+                                           "tempo": 120, "velocity": 100}},
+                     "one_shot": {"program": 32, "pitch": 36, "sr": 44100,
+                                  "original_loudness": 0.7,
+                                  "audio": {"type": "pluck", "freq": 110, "duration": 0.1,
+                                            "amp": 0.7, "harmonics": [1.0, 0.5]}}},
+                    {"instrument_name": "piano", "separation_quality": 1.0,
+                     "track": {"name": "piano", "program": 0, "channel": 2,
+                               "pattern": {"base_pitch": 60,
+                                           "pattern": [0, 4, 7, 4, 0, -3, 0, 4],
+                                           "tempo": 120, "velocity": 100}},
+                     "one_shot": {"program": 0, "pitch": 72, "sr": 44100,
+                                  "original_loudness": piano_amp,
+                                  "audio": {"type": "pluck", "freq": 440, "duration": 0.1,
+                                            "amp": piano_amp, "harmonics": [1.0, 0.5]}}},
+                ]}
+    return {"a": song("song_a.wav", 0.5), "b": song("song_b.wav", 0.9)}
+
+# ── FORTISSIMO COMPARE: API (esempio, self-test, confronto) ───────────────────
+@app.route("/fortissimo/example", methods=["GET"])
+def fortissimo_example():
+    """Le due analisi di esempio (canzoni A e B dell'esempio del modello)."""
+    return jsonify(fc_example_payload())
+
+@app.route("/fortissimo/selftest", methods=["GET"])
+def fortissimo_selftest():
+    """Verifica rapida del modello sui casi noti (senza input dell'utente)."""
+    try:
+        mod = fc_module()
+        ex = fc_example_payload()
+        a, b = fc_build_output(ex["a"]), fc_build_output(ex["b"])
+        model = mod.AudioSimilarityModel()
+        demo = model.compare(a, b)
+        same = model.compare(a, a)
+        quick = model.quick_score(a, b)
+        checks = [
+            {"name": "A vs A non peggiore di A vs B",
+             "ok": same["overall_score"] >= demo["overall_score"],
+             "detail": f"{same['overall_score']} >= {demo['overall_score']}"},
+            {"name": "score di due brani identici = 0.925 (tetto MIDI 0.85)",
+             "ok": abs(same["overall_score"] - 0.925) < 1e-6,
+             "detail": f"{same['overall_score']}"},
+            {"name": "A vs B → 0 < overall < 1",
+             "ok": 0.0 < demo["overall_score"] < 1.0,
+             "detail": f"{demo['overall_score']}"},
+            {"name": "3/3 strumenti matchati",
+             "ok": demo["n_match"] == demo["n_a"] == 3,
+             "detail": f"{demo['n_match']}/{demo['n_a']}"},
+            {"name": "quick_score == overall_score",
+             "ok": abs(quick - demo["overall_score"]) < 1e-9,
+             "detail": f"{quick} vs {demo['overall_score']}"},
+            {"name": "tutti gli score in [0,1]",
+             "ok": all(0.0 <= demo[k] <= 1.0 for k in
+                       ("overall_score", "midi_score", "oneshot_score", "presence_score")),
+             "detail": "ok"},
+        ]
+        return jsonify({"ok": bool(all(c["ok"] for c in checks)),
+                        "checks": fc_jsonable(checks),
+                        "quick_score": float(quick), "result": fc_jsonable(demo)})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+
+@app.route("/fortissimo/compare", methods=["POST"])
+def fortissimo_compare():
+    """Confronta due analisi JSON. Body: {a:{...}, b:{...}, weights:{...}}."""
+    data = request.json or {}
+    a, b = data.get("a"), data.get("b")
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return jsonify({"error": "Servono due analisi JSON: i campi 'a' e 'b'"}), 400
+    w = data.get("weights") or {}
+    weights = {
+        "midi": float(w.get("midi", 0.4)),
+        "oneshot": float(w.get("oneshot", 0.4)),
+        "presence": float(w.get("presence", 0.2)),
+        "volume": float(w.get("volume", 0.3)),
+    }
+    try:
+        mod = fc_module()
+        model = mod.AudioSimilarityModel(
+            midi_weight=weights["midi"], oneshot_weight=weights["oneshot"],
+            presence_weight=weights["presence"], volume_weight=weights["volume"],
+        )
+        result = model.compare(fc_build_output(a), fc_build_output(b))
+        return jsonify({"ok": True, "weights": weights, "result": fc_jsonable(result)})
+    except AssertionError:
+        return jsonify({"error": "I pesi midi + oneshot + presence devono sommare 1.0"}), 400
+    except (ValueError, TypeError) as e:
+        return jsonify({"error": f"Payload non valido: {e}"}), 400
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
 if __name__ == "__main__":
     init_db()
