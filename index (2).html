@@ -3362,7 +3362,7 @@ function loadPlayerAudio(key,query,containerId,startSec,label,isXCopy,token){
   }
   if(downloadCache[cacheKey]?.status==="pending"){downloadCache[cacheKey].callbacks.push({key,containerId,startSec:startSec||0,label,token});return}
   downloadCache[cacheKey]={status:"pending",filename:null,callbacks:[]};
-  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3"})})
+  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3",expected_title:label||""})})
   .then(r=>r.json()).then(({job_id,error})=>{
     if(error){downloadCache[cacheKey].status="error";if(!isStaleByToken(containerId,token))setContainerError(containerId,error);return}
     pollDownloadJob(cacheKey,job_id,key,containerId,startSec||0,label,token);
@@ -3428,7 +3428,7 @@ function loadSampleXEditor(containerId, query, startSec, label){
   if(downloadCache[cacheKey]?.status==="done"){ doBuild(downloadCache[cacheKey].filename); return; }
   if(downloadCache[cacheKey]?.status==="pending"){ downloadCache[cacheKey].callbacks.push({fn:doBuild}); return; }
   downloadCache[cacheKey]={status:"pending",filename:null,callbacks:[]};
-  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3"})})
+  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3",expected_title:label||""})})
   .then(r=>r.json()).then(({job_id,error})=>{
     if(error){downloadCache[cacheKey].status="error";setContainerError(containerId,error);return}
     pollDownloadJobX(cacheKey,job_id,doBuild,containerId);
@@ -3959,7 +3959,7 @@ function downloadFull(key,filename){
   const p=players[key],fmt=document.getElementById(`fmt-${key}`)?.value||"mp3",statusEl=document.getElementById(`dls-${key}`);
   if(filename&&(fmt==="mp3"?filename.endsWith(".mp3"):filename.endsWith(".wav"))){triggerDownload(`/download-file/${encodeURIComponent(filename)}`,filename);return}
   if(statusEl){statusEl.className="dl-status";statusEl.textContent="Download..."}
-  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:p.filename?`/stream/${encodeURIComponent(p.filename)}`:mainYtUrlX,format:fmt})})
+  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:p.filename?`/stream/${encodeURIComponent(p.filename)}`:mainYtUrlX,format:fmt,expected_title:mainTitleX||""})})
   .then(r=>r.json()).then(({job_id,error})=>{if(error){if(statusEl){statusEl.className="dl-status error";statusEl.textContent=error}return}pollTrimJob(job_id,statusEl)})
   .catch(e=>{if(statusEl){statusEl.className="dl-status error";statusEl.textContent=e.message}});
 }
@@ -4797,7 +4797,7 @@ async function dbAddSong(){
   if(!artist&&!title&&!yt){status.textContent='Inserisci almeno artista+titolo o URL YouTube';return}
   status.textContent='⏳ Ricerca e download in corso…';
   const query=yt||(artist+' '+title);
-  const{job_id}=await fetch('/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,format:'mp3'})}).then(r=>r.json());
+  const{job_id}=await fetch('/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,format:'mp3',expected_title:title||'',expected_artist:artist||''})}).then(r=>r.json());
   const poll=setInterval(async()=>{
     const j=await fetch(`/status/${job_id}`).then(r=>r.json());
     status.textContent=`⏳ ${j.status}…`;

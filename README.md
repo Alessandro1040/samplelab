@@ -40,6 +40,8 @@ con `(2)` nella cartella locale:
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
 - `test_fortissimo_compare.py` — test del modello
   (`python3 -m unittest -v test_fortissimo_compare`)
+- `test_download_fallback.py` — test del recupero dei download (solo file creati
+  dal job, mai l'audio di un altro sample): `python3 -m unittest -v test_download_fallback`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -160,7 +162,7 @@ sintassi JS, handler inline verso funzioni inesistenti, un `const` che si
 auto-inizializzava, delta-time negativi che corrompevano i `.mid`): la copia
 servita dall'app è corretta e l'elenco dei fix è in `midi_studio/README.md`.
 
-## Note operative e stato corrente (11/09/2026)
+## Note operative e stato corrente (11/09/2026, aggiornate al 16/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
 
@@ -225,4 +227,34 @@ Da tenere presente nelle sessioni di lavoro successive:
   prova su **http://localhost:5080/alg**. Attenzione: la pagina
   `extractor.html` ha ancora una **copia propria** delle stesse funzioni, quindi
   una modifica al file puro non cambia la pagina finché non si allinea.
+- **AUDIO SBAGLIATO NEI SAMPLE — CORRETTO (16/09/2026).** Cercando *Till I
+  Collapse* di Eminem il sample **"Sam Is Dead"** compariva correttamente in
+  elenco, ma il player riproduceva l'audio di **"Mosh"** (un altro sample dello
+  stesso gruppo), e lo stesso file sbagliato si ripeteva su più card. Causa: in
+  `_do_download` il fallback, quando un download non produceva file, restituiva
+  *l'ultimo file di `downloads/` modificato negli ultimi 60 secondi*; con i
+  sample scaricati in parallelo (2 alla volta, `DL_SEM`) era il file di un ALTRO
+  job. (Il video di "Sam Is Dead" è davvero non scaricabile: yt-dlp risponde
+  `Please sign in`, è un brano con restrizioni.) Fix in `app (2).py`:
+  1. `_downloads_snapshot()` + `_pick_job_file()`: si consegnano solo file
+     creati **da quel job** e, se la pagina manda `expected_title`, il nome deve
+     contenerlo; se non c'è nulla il job va in **errore** — mai l'audio altrui
+     (il messaggio in pagina è "Download non riuscito: nessun file audio per
+     '…' (audio NON sostituito)");
+  2. recupero mirato: se il video di partenza non è scaricabile e si conoscono
+     titolo/artista, si cerca un **altro video dello stesso brano** (ranking
+     titolo/artista, soglia 0.55) e si scarica quello;
+  3. le query `/stream/<file>` (es. conversione m4a→mp3 dall'editor) non passano
+     più dalla ricerca YouTube: sono file locali, convertiti con ffmpeg;
+  4. `_rank_yt_entries`: penalità per i video < 60 s e, a parità di titolo/score,
+     vince la versione **più lunga** — senza questo, fra i due "match esatti" di
+     *Sam Is Dead* poteva uscire una clip di 30 s invece del brano da 170 s.
+  La pagina (`index (2).html`) manda ora `expected_title` a `/download` dai 4
+  punti che lo chiamano (player principale, editor sample, download completo,
+  tab database). Verifiche del 16/09/2026: `python3 -m unittest -v
+  test_download_fallback` (13 test) e prova end-to-end — URL inesistente → job
+  **in errore senza file** (prima restituiva `Mosh.mp3`), "Sam Is Dead" →
+  `Sam (Is Dead).mp3` (170 s, recupero del brano completo; con il vecchio
+  ranking usciva `sam is dead.mp3`, una clip di 30 s), `/stream/Mosh.mp3` +
+  formato wav → `Mosh.wav`.
 

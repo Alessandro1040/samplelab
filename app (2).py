@@ -1016,6 +1016,10 @@ def _rank_yt_entries(entries, expected_title="", expected_artist=""):
             print(f"[yt_search]  '{raw_title}' -> durata {duration}s, scartato")
             continue
         score = SequenceMatcher(None, et, vt).ratio()
+        if duration and duration < 60:
+            # clip/anteprima di pochi secondi: quasi mai il brano che serve
+            # (penalità, non esclusione: se è l'unica versione resta selezionabile)
+            score -= 0.25
         if ea and ea in vt:
             score += 0.15
         lower = raw_title.lower()
@@ -1044,8 +1048,11 @@ def _rank_yt_entries(entries, expected_title="", expected_artist=""):
             "score": round(score, 3),
             "explicit": explicit,
             "clean": clean,
+            "duration": duration or 0,
         })
-    ranked.sort(key=lambda r: r["score"], reverse=True)
+    # A parità di score si preferisce la versione più lunga (brano completo
+    # invece di una clip di pochi secondi).
+    ranked.sort(key=lambda r: (r["score"], r["duration"]), reverse=True)
     return ranked
 
 def yt_search_first(query, expected_title="", expected_artist=""):
@@ -1058,16 +1065,20 @@ def yt_search_first(query, expected_title="", expected_artist=""):
         return e.get("webpage_url") or e.get("url"), e.get("title", "")
 
     et = normalize(expected_title)
-    # Match esatto
-    for e in entries:
-        if normalize(e.get("title", "")) == et:
-            print(f"[yt_search]  MATCH ESATTO: {e.get('title')}")
-            return e.get("webpage_url") or e.get("url"), e.get("title", "")
-
     ranked = _rank_yt_entries(entries, expected_title, expected_artist)
     for r in ranked:
         tag = (" [ESPLICITA]" if r["explicit"] else "") + (" [CENSURATA]" if r["clean"] else "")
-        print(f"[yt_search]  '{r['title']}' -> score={r['score']:.3f}{tag}")
+        print(f"[yt_search]  '{r['title']}' -> score={r['score']:.3f} ({r.get('duration')}s){tag}")
+
+    # Un titolo identico vince sempre; fra più titoli identici si sceglie però il
+    # migliore (score + durata), così una clip di 30 s non batte la versione
+    # completa del brano (caso "Sam Is Dead", 16/09/2026).
+    exact = [r for r in ranked if r["url"] and normalize(r["title"]) == et]
+    if exact:
+        best = max(exact, key=lambda r: (r["score"], r.get("duration") or 0))
+        print(f"[yt_search]  MATCH ESATTO: {best['title']} "
+              f"({best.get('duration')}s, score {best['score']:.3f})")
+        return best["url"], best["title"]
 
     if ranked and ranked[0]["score"] >= 0.55 and ranked[0]["url"]:
         print(f"[yt_search]  => SCELTO: {ranked[0]['title']} (score {ranked[0]['score']:.3f})")
@@ -1142,14 +1153,114 @@ def yt_search_choices(query, expected_title="", expected_artist="", limit=6):
 # Limita i download YouTube simultanei (troppi in parallelo → rate-limit/403)
 DL_SEM = threading.Semaphore(2)
 
-def do_download(job_id, query, fmt, quality="192"):
-    with DL_SEM:
-        _do_download(job_id, query, fmt, quality)
+# Estensioni considerate "file audio" della cartella download.
+AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".webm", ".mp4", ".ogg", ".opus", ".flac")
 
-def _do_download(job_id, query, fmt, quality="192"):
+def _downloads_snapshot():
+    """Nome file -> (mtime, size) della cartella download.
+
+    Serve a capire quali file ha creato UN determinato job: senza questo
+    confronto un download fallito poteva "adottare" il file scritto da un altro
+    download in corso (bug del 16/09/2026: il sample "Sam Is Dead" riproduceva
+    l'audio di "Mosh")."""
+    snap = {}
+    try:
+        names = os.listdir(DL_DIR)
+    except OSError:
+        return snap
+    for f in names:
+        if f.startswith("."):
+            continue
+        try:
+            st = os.stat(os.path.join(DL_DIR, f))
+        except OSError:
+            continue
+        snap[f] = (st.st_mtime, st.st_size)
+    return snap
+
+def _pick_job_file(before, after, expected_title=""):
+    """Sceglie il file audio creato DA QUESTO job: presente in `after` ma non in
+    `before` (o modificato nel frattempo).
+
+    Se `expected_title` è noto il file deve anche contenerlo (testo normalizzato):
+    meglio nessun file — e quindi un errore visibile in pagina — che un audio
+    appartenente a un altro brano. Ritorna il nome file oppure None."""
+    candidates = []
+    for name, state in after.items():
+        if not name.lower().endswith(AUDIO_EXTS):
+            continue
+        if before.get(name) == state:
+            continue                      # già presente e invariato: non è di questo job
+        candidates.append((state[0], name))
+    candidates.sort(reverse=True)         # il più recente per primo
+    if expected_title:
+        needle = normalize(expected_title)
+        if needle:
+            matching = [n for _, n in candidates if needle in normalize(n)]
+            if not matching:
+                return None               # il job NON ha prodotto il brano richiesto
+            return matching[0]
+    return candidates[0][1] if candidates else None
+
+def _convert_download_format(job_id, filename, fmt):
+    """Converte con ffmpeg il file scaricato nel formato richiesto (mp3/wav).
+
+    Ritorna il nome file da consegnare al job: quello convertito quando la
+    conversione riesce, altrimenti l'originale (comportamento invariato)."""
+    if not filename:
+        return filename
+    ext = filename.rsplit(".", 1)[-1].lower()
+    target_ext = "mp3" if fmt == "mp3" else "wav"
+    if ext == target_ext or fmt not in ("mp3", "wav") or not FFMPEG:
+        return filename
+    base = os.path.splitext(filename)[0]
+    out_name = f"{base}.{target_ext}"
+    out_path = os.path.join(DL_DIR, out_name)
+    src_path = os.path.join(DL_DIR, filename)
+    codec_args = ["-acodec", "libmp3lame", "-q:a", "2"] if target_ext == "mp3" else ["-acodec", "pcm_s16le"]
+    cmd = [FFMPEG, "-y", "-i", src_path, *codec_args, out_path]
+    try:
+        print(f"[download {job_id}] Conversione in {target_ext}...")
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        if result.returncode == 0 and os.path.exists(out_path):
+            print(f"[download {job_id}] Conversione OK: {out_name}")
+            return out_name
+        err = result.stderr.decode(errors="ignore")[-200:]
+        print(f"[download {job_id}] Conversione fallita, uso formato nativo: {err}")
+    except Exception as conv_err:
+        print(f"[download {job_id}] Errore conversione, uso formato nativo: {conv_err}")
+    return filename
+
+def do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist=""):
+    with DL_SEM:
+        _do_download(job_id, query, fmt, quality, expected_title, expected_artist)
+
+def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist=""):
+    # Foto della cartella download PRIMA di iniziare: alla fine si accettano solo
+    # i file creati da questo job (vedi _pick_job_file), mai file di altri download.
+    before = _downloads_snapshot()
+    expected_title = (expected_title or "").strip()
+    expected_artist = (expected_artist or "").strip()
     jobs[job_id]["status"] = "searching"
     jobs[job_id]["progress"] = {"percent": 0, "speed": "", "eta": ""}
     try:
+        # Query "/stream/<file>": la pagina chiede un file che sta già in downloads/
+        # (es. conversione m4a→mp3 dall'editor audio). Qui non c'è niente da
+        # cercare su YouTube: prima questa query finiva in una ricerca senza senso
+        # e poi nel fallback dei file recenti, restituendo un audio a caso.
+        if query.startswith("/stream/"):
+            local_name = os.path.basename(urllib.parse.unquote(query[len("/stream/"):]))
+            if not local_name or not os.path.exists(os.path.join(DL_DIR, local_name)):
+                jobs[job_id]["status"] = "error"
+                jobs[job_id]["error"] = f"File locale non trovato: {local_name or query}"
+                return
+            print(f"[download {job_id}] File locale, nessuna ricerca YouTube: {local_name}")
+            jobs[job_id]["yt_title"] = local_name
+            filename = _convert_download_format(job_id, local_name, fmt)
+            jobs[job_id]["status"] = "done"
+            jobs[job_id]["filename"] = filename
+            return
+
         if is_youtube_url(query):
             yt_url = query
             yt_title = ""
@@ -1193,72 +1304,64 @@ def _do_download(job_id, query, fmt, quality="192"):
         }
 
         print(f"[download {job_id}] Avvio download formato nativo...")
-        filename = None
-        for attempt in range(1, 4):
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(yt_url, download=True)
-                    prepared = ydl.prepare_filename(info) if info else None
-                    filename = os.path.basename(prepared) if prepared else None
-                if filename:
-                    break
-            except Exception as e:
-                print(f"[download {job_id}] Tentativo {attempt}/3 fallito: {e}")
+
+        def _attempt_download(url):
+            """Un giro di download (3 tentativi). Ritorna il nome del file creato
+            da yt-dlp (percorso reale, non un file qualsiasi della cartella), o None."""
+            for attempt in range(1, 4):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        prepared = ydl.prepare_filename(info) if info else None
+                        requested = (info or {}).get("requested_downloads") or []
+                        if requested and requested[0].get("filepath"):
+                            prepared = requested[0]["filepath"]
+                        name = os.path.basename(prepared) if prepared else None
+                    if name and os.path.exists(os.path.join(DL_DIR, name)):
+                        return name
+                except Exception as e:
+                    print(f"[download {job_id}] Tentativo {attempt}/3 fallito: {e}")
                 if attempt < 3:
                     jobs[job_id]["status"] = "retry"
                     time.sleep(3)
+            return None
 
-        # Fallback SICURO: recupera solo un file creato durante QUESTA operazione
-        # (ultimi 60 secondi). Mai sostituire con un file casuale della cartella,
-        # altrimenti si riproduce la canzone sbagliata (es. quella principale).
-        if not filename or not os.path.exists(os.path.join(DL_DIR, filename)):
-            recent = []
-            valid_exts = (".mp3", ".wav", ".m4a", ".webm", ".mp4", ".ogg", ".opus", ".flac")
-            now = time.time()
-            for f in os.listdir(DL_DIR):
-                if f.startswith(".") or not f.lower().endswith(valid_exts):
-                    continue
-                fp = os.path.join(DL_DIR, f)
-                if now - os.path.getmtime(fp) <= 60:
-                    recent.append((os.path.getmtime(fp), f))
-            if recent:
-                recent.sort(reverse=True)
-                filename = recent[0][1]
-                print(f"[download {job_id}] Recuperato file recente di questo job: {filename}")
-            else:
-                jobs[job_id]["status"] = "error"
-                jobs[job_id]["error"] = "Download fallito: nessun file audio ottenuto"
-                print(f"[download {job_id}] ERRORE: download fallito (nessun file valido)")
-                return
+        filename = _attempt_download(yt_url)
+
+        # RECUPERO 1 (16/09/2026): se il video indicato non è scaricabile (capita
+        # spesso con "Please sign in" di YouTube sui brani con restrizioni) e la
+        # pagina ci ha detto QUALE brano serve, si cerca un ALTRO video dello
+        # stesso brano con il ranking titolo/artista, invece di restituire il
+        # primo file trovato in cartella.
+        if not filename and expected_title:
+            alt_url, alt_title = yt_search_first(
+                f"{expected_artist} {expected_title}".strip(),
+                expected_title=expected_title, expected_artist=expected_artist)
+            if alt_url and alt_url != yt_url:
+                print(f"[download {job_id}] Video di partenza non scaricabile: provo {alt_url}")
+                jobs[job_id]["status"] = "downloading"
+                filename = _attempt_download(alt_url)
+                if filename:
+                    yt_title = alt_title or ""
+
+        # RECUPERO 2: si accettano SOLO file creati da questo job (confronto con
+        # la foto iniziale della cartella) e, quando il titolo è noto, che lo
+        # contengono. Il vecchio fallback prendeva "l'ultimo file degli ultimi 60
+        # secondi": nei download in parallelo dei sample succedeva che il sample
+        # "Sam Is Dead" riproducesse l'audio di "Mosh" (file di un altro job).
+        if not filename:
+            filename = _pick_job_file(before, _downloads_snapshot(), expected_title or yt_title)
 
         if not filename:
             jobs[job_id]["status"] = "error"
-            jobs[job_id]["error"] = "Download completato ma nessun file trovato"
+            jobs[job_id]["error"] = (f"Download non riuscito: nessun file audio per "
+                                     f"'{expected_title or query}' (audio NON sostituito)")
+            print(f"[download {job_id}] ERRORE: questo job non ha prodotto file "
+                  f"(nessun file di altri download riutilizzato)")
             return
 
         # Conversione esplicita con ffmpeg (se richiesto)
-        ext = filename.rsplit(".", 1)[-1].lower()
-        target_ext = "mp3" if fmt == "mp3" else "wav"
-        if ext != target_ext and fmt in ("mp3", "wav") and FFMPEG:
-            base = os.path.splitext(filename)[0]
-            out_name = f"{base}.{target_ext}"
-            out_path = os.path.join(DL_DIR, out_name)
-            src_path = os.path.join(DL_DIR, filename)
-
-            codec_args = ["-acodec", "libmp3lame", "-q:a", "2"] if target_ext == "mp3" else ["-acodec", "pcm_s16le"]
-            cmd = [FFMPEG, "-y", "-i", src_path, *codec_args, out_path]
-
-            try:
-                print(f"[download {job_id}] Conversione in {target_ext}...")
-                result = subprocess.run(cmd, capture_output=True, timeout=120)
-                if result.returncode == 0 and os.path.exists(out_path):
-                    filename = out_name
-                    print(f"[download {job_id}] Conversione OK: {filename}")
-                else:
-                    err = result.stderr.decode(errors="ignore")[-200:]
-                    print(f"[download {job_id}] Conversione fallita, uso formato nativo: {err}")
-            except Exception as conv_err:
-                print(f"[download {job_id}] Errore conversione, uso formato nativo: {conv_err}")
+        filename = _convert_download_format(job_id, filename, fmt)
 
         print(f"[download {job_id}] Successo: {filename}")
         jobs[job_id]["status"] = "done"
@@ -2243,6 +2346,10 @@ def start_download():
     query = (data.get("query", "") or data.get("url", "")).strip()
     fmt = data.get("format", "mp3")
     quality = data.get("quality", "192")
+    # Titolo/artista attesi: li manda la pagina (es. il titolo del sample). Servono
+    # a NON consegnare un audio di un altro brano quando il download fallisce.
+    expected_title = (data.get("expected_title") or "").strip()
+    expected_artist = (data.get("expected_artist") or "").strip()
     if not query:
         return jsonify({"error": "URL/query mancante"}), 400
     jid = str(uuid.uuid4())[:8]
@@ -2253,8 +2360,11 @@ def start_download():
         "filename": None,
         "yt_title": "",
         "error": "",
+        "expected_title": expected_title,
     }
-    threading.Thread(target=do_download, args=(jid, query, fmt, quality), daemon=True).start()
+    threading.Thread(target=do_download,
+                     args=(jid, query, fmt, quality, expected_title, expected_artist),
+                     daemon=True).start()
     return jsonify({"job_id": jid})
 
 # ── DOWNLOAD PLAYLIST ─────────────────────────────────────────────────────────
