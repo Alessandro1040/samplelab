@@ -252,7 +252,7 @@ Da tenere presente nelle sessioni di lavoro successive:
   La pagina (`index (2).html`) manda ora `expected_title` a `/download` dai 4
   punti che lo chiamano (player principale, editor sample, download completo,
   tab database). Verifiche del 16/09/2026: `python3 -m unittest -v
-  test_download_fallback` (13 test) e prova end-to-end — URL inesistente → job
+  test_download_fallback` (17 test) e prova end-to-end — URL inesistente → job
   **in errore senza file** (prima restituiva `Mosh.mp3`), "Sam Is Dead" →
   `Sam (Is Dead).mp3` (170 s, recupero del brano completo; con il vecchio
   ranking usciva `sam is dead.mp3`, una clip di 30 s), `/stream/Mosh.mp3` +
