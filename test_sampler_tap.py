@@ -61,7 +61,8 @@ class TestBpmDaTap(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        src = open(PAGINA, encoding="utf-8").read()
+        with open(PAGINA, encoding="utf-8") as fh:
+            src = fh.read()
         js = estrai_funzione(src, "bpmDaTap") + """
 const casi = %s;
 const out = {};

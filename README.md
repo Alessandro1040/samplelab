@@ -42,6 +42,9 @@ con `(2)` nella cartella locale:
 - `test_sampler_tap.py` — test della stima **TAP** del sampler (funzione pura
   `bpmDaTap`: media di tutti i colpi, decimali, tocchi fuori tempo):
   `python3 -m unittest -v test_sampler_tap`
+- `test_sampler_metronomo.py` — test del **metronomo** del sampler (passo fra i
+  colpi, accenti, unità: 1/4 · 2/4 · 3/4 · battuta · 2 · 4 battute):
+  `python3 -m unittest -v test_sampler_metronomo`
 - `fortissimo_compare_v3.py` — modello **Fortissimo Compare v3**: confronto tra
   due output `AudioAnalysis` (MIDI + one-shot), score [0,1]
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
@@ -457,6 +460,18 @@ Da tenere presente nelle sessioni di lavoro successive:
   ⚠️ Le righe con `title` NULL restano (dati da decidere): il codice ora non ci
   sbatte più, ma la riga di *Apex* va rinominata (vedi **🎛 Sampler** o *✏️ Edit*).
 
+- **METRONOMO CON UNITÀ SUA (17/09/2026).** Il metronomo del sampler non segue più
+  la griglia: ha una **tendina dedicata** con **ogni 1/4** (predefinito), `ogni 2/4`,
+  `ogni 3/4`, `ogni battuta`, `ogni 2 battute`, `ogni 4 battute`. Prima seguiva la
+  suddivisione della griglia, quindi per sentire i quarti si doveva mettere la
+  griglia a `1/4 bar` — cambiando anche linee e snap. Lo stato in basso dice cosa
+  stai sentendo (`🔊 1/4`), il primo colpo di ogni battuta resta più acuto
+  (1000 Hz) e i colpi sono **contati davvero** nelle prove: a 120 BPM in due
+  battute escono **8 colpi** con `ogni 1/4`, 4 con `2/4`, 2 con `ogni battuta`,
+  1 con `ogni 2 battute`, con la griglia **ferma a 1 battuta**. La matematica è in
+  funzioni pure (`stepMetronomo`, `accentoBattuta`, `etichettaUnita`) con test
+  committato `test_sampler_metronomo.py`: **8/8** in JavaScriptCore e **15/15** in
+  Chrome (colpi reali intercettando `playMetronomeClick`, stato `🔊 1/4`).
 - **TAP PIÙ PRECISO (17/09/2026).** Nel sampler il pulsante **🎵 TAP** ora ricava
   il BPM dalla **media di tutti i colpi della sessione** (prima teneva solo gli
   ultimi 8) e lo salva con **un decimale** invece di arrotondarlo all'intero: più
@@ -509,6 +524,17 @@ Da tenere presente nelle sessioni di lavoro successive:
   mostra `Rush Ya Clique`; log dell'app senza errori.
   ⚠️ I brani **senza** Eminem e con altri featuring sono rimasti come erano
   (es. `Murder, Murder Lyrics (HD)`): la riparazione ha toccato solo i danni.
+  🛡️ **Prevenzione:** lo script di esempio nel pannello «Script personalizzato»
+  era proprio quello che aveva fatto il danno (`re.sub(r'\s*Eminem\s*', '', …)`,
+  senza confine di parola: `Eminems` → `s`, `(feat. Eminem)` → `(feat.`). Ora
+  l'esempio è **di sola lettura** (mostra le righe col nome nel titolo e non
+  modifica niente) e ricorda le due regole per una `UPDATE` sicura: usare
+  `r'\bEminem\b'` e ripulire le parentesi rimaste vuote. Verificato provando le
+  regex dell'esempio sui titoli che erano stati rovinati: la versione vecchia li
+  rompe (`Eminems…` → `s Freestyle…`, `Rock City (feat. Eminem)` → `Rock City
+  (feat.)`), mentre un esempio "sicuro" che togliesse comunque Eminem ne
+  creerebbe di nuovi (`You Hear Me (feat. Eminem & Pauly Yams)` → `You Hear Me &
+  Pauly Yams)`) — ed è il motivo per cui l'esempio non modifica più nulla.
 
 - **ANNO VUOTO E ALBUM «Mus» — CORRETTI (17/09/2026).** Premendo *Verifica* su un
   brano compariva la data di Genius ("September 2, 2025") ma **non l'anno**, e

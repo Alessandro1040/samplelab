@@ -119,7 +119,7 @@ Dall'alto verso il basso il modale è organizzato in **nove fasce**:
 ├─────────────────────────────────────────────────────────────────────┤
 │ 0 Offset │ Battute Sel. 4 │ Diventa Bar N° 1 │ Allinea griglia      │  5
 ├─────────────────────────────────────────────────────────────────────┤
-│ 🎵 TAP │ ● Metronomo │ ↔ Sposta │ ↩ Undo │ ↪ Redo │ ✕ Deseleziona   │  6
+│ 🎵 TAP │ ● Metronomo │ ogni 1/4 ▾ │ ↔ Sposta │ ↩ Undo │ ↪ Redo        │  6
 ├─────────────────────────────────────────────────────────────────────┤
 │ │1    │2    │3    │4    │5    │6    │7    │   ← righello numerato   │  7
 ├─────────────────────────────────────────────────────────────────────┤
@@ -142,9 +142,10 @@ Dall'alto verso il basso il modale è organizzato in **nove fasce**:
    moltiplicatore con **Moltiplica**.
 5. **Griglia (riga 2)** — **Offset** (di quanto la griglia è spostata rispetto
    allo zero), **Battute Sel.**, **Diventa Bar N°** e **Allinea griglia**.
-6. **Griglia (riga 3)** — **🎵 TAP**, **Metronomo**, **↔ Sposta**, **↩ Undo**,
-   **↪ Redo** e **✕ Deseleziona** (quest'ultimo compare solo quando hai una
-   battuta selezionata).
+6. **Griglia (riga 3)** — **🎵 TAP**, **Metronomo** con la sua **tendina
+   dell'unità** (`ogni 1/4`, `2/4`, `3/4`, `battuta`, `2`, `4 battute`),
+   **↔ Sposta**, **↩ Undo**, **↪ Redo** e **✕ Deseleziona** (quest'ultimo compare
+   solo quando hai una battuta selezionata).
 7. **Righello** — i numeri delle battute calcolati *con la griglia corrente*
    (il `1` è in giallo), con le maniglie ai bordi della battuta selezionata.
 8. **Forma d'onda** — l'audio (con la griglia disegnata sopra), le ombreggiature
@@ -162,8 +163,10 @@ DJ Shocca, BPM **60.1** nel database).
 
 1. **Apri il sampler** — tab 🗄️ Database, riga del brano, pulsante **🎛 Sampler**
    (oppure ⋮ → 🎛 Apri nel sampler dal player). Nel campo BPM leggi `60.10`.
-2. **Metti il metronomo a misura di quarti** — scegli **1/4 bar** nella tendina
-   della griglia e premi **● Metronomo** (l'icona in basso passa a 🔊).
+2. **Metti il metronomo a misura di quarti** — nella tendina accanto a
+   **● Metronomo** scegli **`ogni 1/4`** (è già il valore predefinito: un colpo per
+   quarto) e premi **● Metronomo** (lo stato in basso passa a `🔊 1/4`). La griglia
+   può restare a `1 bar`: sono due cose indipendenti.
 3. **Premi ▶** e ascolta: se i colpi del metronomo **cadono insieme** alla cassa
    (o al charleston) il BPM salvato è quello giusto. Ogni volta che un colpo
    arriva "fuori fase" il numero è sbagliato.
@@ -179,7 +182,7 @@ DJ Shocca, BPM **60.1** nel database).
    (nella prova: 2,000 s con 4 → **120 BPM**) e posiziona la griglia lì.
 7. **Verifica** — torna a **1 bar** nell'unità della griglia: le linee marcate
    devono cadere ogni battuta (i numeri del righello tornano a ogni giro) e il
-   metronomo a 1/4 bar deve battere a tempo anche dopo 30 secondi.
+   metronomo su `ogni 1/4` deve battere a tempo anche dopo 30 secondi.
 8. **Salva** — ✕ Chiudi, poi **✏️ Edit** sulla riga della tabella e scrivi il BPM
    giusto nel campo `bpm`: da quel momento la colonna dice la verità.
 
@@ -217,7 +220,7 @@ DJ Shocca, BPM **60.1** nel database).
 |---|---|
 | **Visualizza / Nascondi griglia** | disegna (o toglie) le linee verticali sul righello e sulla forma d'onda; quelle più marcate sono le **battute**. L'etichetta dice sempre lo stato in cui passi. |
 | **Adatta alla griglia** | prende **IN** e **OUT** e li porta sul punto più vicino della griglia (snap). È il "raddrizza la selezione" dopo averla trascinata a orecchio. *Se la griglia è spenta o il BPM è 0 non fa niente*: non c'è niente su cui agganciare. Nella prova a 120 BPM: IN 10,3 → **10** e OUT 13,9 → **14**; con offset 0,7 gli agganci stanno a 0,7 + multipli del passo (10,3 → **10,7**). |
-| **unità della griglia** | `1/4 bar` = un quarto, `1/2 bar` = due quarti, `1 bar` = una battuta 4/4 (**predefinito**), `2 bar` = due battute, `4 bar` = quattro battute. Cambia insieme linee, righello, metronomo e snap. |
+| **unità della griglia** | `1/4 bar` = un quarto, `1/2 bar` = due quarti, `1 bar` = una battuta 4/4 (**predefinito**), `2 bar` = due battute, `4 bar` = quattro battute. Cambia **linee, righello e snap**: il **metronomo no**, che ha un'unità sua (§5.5). |
 | **BPM** | il tempo in battiti al minuto, con passi di 0,1. Quando confermi il valore (Invio o uscendo dal campo): la selezione si riaggancia alla nuova griglia, il metronomo si risincronizza e l'azione finisce nello storico (**Undo**). All'apertura arriva dal database. |
 | **x (es. 2,3)** + **Moltiplica** | moltiplica il BPM per il fattore scritto. Accetta **virgola o punto** (`2,3` = `2.3`). Nella prova: 120 × 2,3 = **276**. Dopo il calcolo la casella si svuota. Usalo per i mezzi tempi (×2 se il BPM vero è il doppio, ×0,5 se è la metà). |
 
@@ -242,7 +245,7 @@ cade la musica rispetto alla griglia**.
 | Controllo | Cosa fa |
 |---|---|
 | **🎵 TAP** | premuto a tempo di musica ricava il BPM dalla **media di tutti i colpi della sessione** (dal secondo in poi): più colpi batti, più la stima è precisa — e il pulsante lo dice, mostrando il contatore (`🎵 TAP ×12`). Accetta intervalli fra **0,2 e 2 s** (cioè 30–300 BPM): un tocco fuori tempo (o un doppio tocco) **fa ripartire la sessione** da quel colpo, e lo stesso succede se cambi il BPM a mano. Il risultato è tenuto con **un decimale** (es. `187.6`), come i BPM del database: nessun arrotondamento all'intero. |
-| **● Metronomo** | clic generati via Web Audio (nessun file da caricare), con l'icona di stato che passa da 🔇 a 🔊 e un pallino che pulsa. **I colpi seguono l'unità della griglia**: con `1/4 bar` batti i quarti, con `1 bar` batti una volta per battuta. Il **primo** colpo di ogni battuta è più acuto (1000 Hz) e più forte, gli altri più cupi (720 Hz): così senti dove ricomincia il giro. Ogni colpo fa lampeggiare una lineetta sulla forma d'onda: è il «click» che vedi. |
+| **● Metronomo** | clic generati via Web Audio (nessun file da caricare), con lo stato che passa da `🔇` a `🔊` (e dice l'unità: `🔊 1/4`) e un pallino che pulsa. **Ha una sua unità, indipendente dalla griglia**: nella tendina accanto scegli `ogni 1/4` (predefinito: un colpo per quarto), `ogni 2/4`, `ogni 3/4`, `ogni battuta`, `ogni 2 battute`, `ogni 4 battute` — così puoi tenere la griglia a `1 bar` per vedere le battute e sentire comunque i quarti. Il **primo** colpo di ogni battuta è più acuto (1000 Hz) e più forte, gli altri più cupi (720 Hz): senti dove ricomincia il giro. Ogni colpo fa lampeggiare una lineetta sulla forma d'onda: è il «click» che vedi. |
 
 > 💡 **Per misurare il tempo il metronomo vuole «1/4 bar»**: con l'unità a `1 bar`
 > senti un colpo per battuta e non capisci se il tempo è giusto; con `1/4 bar`
@@ -332,6 +335,7 @@ vale `240 / BPM` secondi** (4 quarti × 60/BPM). Da lì:
 | BPM dal **bordo destro** della cella (Shift = intero) | `BPM = 240 × unità / nuova lunghezza` | cella da 2 s con unità 1 bar → **120 BPM** |
 | **Moltiplica** | `BPM × fattore` (virgola o punto) | 120 × `2,3` → **276** |
 | **Segui** e playhead | il playhead è a `timeline = audio.currentTime + sample`; il metronomo suona sui `t = offset + k × passo` | a 1/4 bar e 120 BPM: un colpo ogni 0,5 s |
+| **metronomo**: passo fra due colpi | `passo = (240 / BPM) × unità_metronomo` (unità: 0,25 = ogni 1/4, 0,5 = 2/4, 1 = battuta, 2 = 2 battute…) | a 120 BPM: 1/4 → **0,5 s** · 2/4 → 1 s · 3/4 → 1,5 s · battuta → 2 s |
 | selezione coperta da **Battute Sel.** | `celle coperte = Battute Sel. / 4` | con unità `1 bar`: `4` → una cella/una battuta |
 
 Tre cose da tenere a mente:
@@ -426,26 +430,27 @@ sono quelli di `index (2).html` (il contenuto della textarea inizia alla riga
 | Cosa | Dove |
 |---|---|
 | Modale del sampler | `index (2).html` riga **780** (`#audio-editor-modal` + `iframe#audio-editor-iframe`) |
-| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **790–2826** (`<textarea id="audio-editor-src">`) |
-| Apertura del modale | `index (2).html` riga **5137**: `openAudioEditor(url, filename, startSec, bpm)` |
-| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5160**: `openInSampler(songIdOFile, opts)` |
-| Pulsante nella riga del database | dentro `renderDbTable` (riga **4217**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit) |
-| Ricezione dal player (`openSampler`) | `index (2).html` riga **2917** |
-| Link diretti `?tab=` / `?sampler=` / `?sampler_file=` | `index (2).html` riga **2953** |
+| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **790–2889** (`<textarea id="audio-editor-src">`) |
+| Apertura del modale | `index (2).html` riga **5201**: `openAudioEditor(url, filename, startSec, bpm)` |
+| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5224**: `openInSampler(songIdOFile, opts)` |
+| Pulsante nella riga del database | dentro `renderDbTable` (riga **4281**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit) |
+| Ricezione dal player (`openSampler`) | `index (2).html` riga **2981** |
+| Link diretti `?tab=` / `?sampler=` / `?sampler_file=` | `index (2).html` riga **3017** |
 | Voce di menu nel player | `onyx_whosampled.html` riga **2478**, con `samplerUrlFor` (**2489**), `dbSongIdFor` (**2497**), `openInSampler` (**2516**) |
 | Handshake col documento (`{action:'load', url, filename, startSec, bpm}`) | documento del sampler, ricezione del messaggio (in coda allo script) |
-| Griglia: passo, snap, unità | `getGridStep` **2159** · `snapToGrid` **2164** · `snapTrimToGrid` **2201** · `setBpm` **2171** · `setGridOffset` **2183** · `setGridSubdivision` **2193** |
-| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1709** · `alignGridToSelection` **1717** |
-| BPM dai battiti e dal fattore | `bpmDaTap` **2219** (media pura) · `tapTempo` **2240** · `updateTapLabel` **2233** · `multiplyBpm` **2262** |
-| Metronomo | `toggleMetronome` **2283** · `checkMetronome` **2302** · `flashMetronome` **2332** |
-| Disegno della griglia e del righello | `updateGridUI` **2345** · `updateRuler` **2371** |
-| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2440** · `deselectBar` **2458** · `updateBarSelectionUI` **2473** · `_startCellBorderDrag` **2513** · `_moveCellBorderDrag` **2541** |
-| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2616** · `onAudioLayerMouseDown` **2625** · `startPlayheadDrag` **2716** · `applyHandleDrag` **2070** · `startSelDrag` **2083** · `resetTrimStart` **2750** |
-| Zoom, scorrimento, trasporto | `setZoom` **1880** · `adjustZoom` **1898** · `onTrimWheel` **1922** · `togglePlay` **1935** · `toggleFollow` **1753** |
-| Storico (Undo/Redo) | `pushHistory` **1457** · `applyHistoryState` **1490** · `undoAction` **1513** · `redoAction` **1520** |
-| Caricamento del brano | `initPlayer` **1612** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
+| Griglia: passo, snap, unità | `getGridStep` **2169** · `snapToGrid` **2174** · `snapTrimToGrid` **2211** · `setBpm` **2181** · `setGridOffset` **2193** · `setGridSubdivision` **2203** |
+| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1719** · `alignGridToSelection` **1727** |
+| BPM dai battiti e dal fattore | `bpmDaTap` **2229** (media pura) · `tapTempo` **2250** · `updateTapLabel` **2243** · `multiplyBpm` **2272** |
+| Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **2301** (pura) · `accentoBattuta` **2311** (pura) · `etichettaUnita` **2320** (pura) · `getMetroStep` **2330** · `updateMetroStatus` **2336** · `setMetroSubdivision` **2343** · `toggleMetronome` **2351** · `checkMetronome` **2368** · `flashMetronome` **2396** |
+| Disegno della griglia e del righello | `updateGridUI` **2409** · `updateRuler` **2435** |
+| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2504** · `deselectBar` **2522** · `updateBarSelectionUI` **2537** · `_startCellBorderDrag` **2577** · `_moveCellBorderDrag` **2605** |
+| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2680** · `onAudioLayerMouseDown` **2689** · `startPlayheadDrag` **2780** · `applyHandleDrag` **2080** · `startSelDrag` **2093** · `resetTrimStart` **2814** |
+| Zoom, scorrimento, trasporto | `setZoom` **1890** · `adjustZoom` **1908** · `onTrimWheel` **1932** · `togglePlay` **1945** · `toggleFollow` **1763** |
+| Storico (Undo/Redo) | `pushHistory` **1465** · `applyHistoryState` **1498** · `undoAction` **1521** · `redoAction` **1528** |
+| Caricamento del brano | `initPlayer` **1620** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
 | Taglio reale (player delle card) | `index (2).html` `downloadTrim` → `POST /trim` → `GET /status/<job_id>` → `GET /download-file/<nome>` (in `app (2).py`: righe **2528**, **2395**, **2308**) |
 | Test della stima TAP | `test_sampler_tap.py` (`python3 -m unittest -v test_sampler_tap`): esegue `bpmDaTap` con JavaScriptCore su 11 casi |
+| Test del metronomo | `test_sampler_metronomo.py` (`python3 -m unittest -v test_sampler_metronomo`): 8 test su `stepMetronomo`, `accentoBattuta` ed `etichettaUnita` (JavaScriptCore) |
 | Streaming del file | `app (2).py` riga **2265**: `/stream/<path:filename>` (regge anche le richieste Range) |
 
 ## 13. Note, limiti e piccoli trucchi
@@ -469,7 +474,7 @@ sono quelli di `index (2).html` (il contenuto della textarea inizia alla riga
 
 | Trucco | Perché |
 |---|---|
-| Metti **1/4 bar** prima di accendere il metronomo | senti ogni quarto e l'errore salta all'orecchio subito |
+| Lascia la griglia a **1 bar** e metti il metronomo su **`ogni 1/4`** | vedi le battute sulla griglia e senti i quarti: le due unità sono **indipendenti** (prima andavano cambiate insieme) |
 | **✂ Sel** su 4 o 8 battute invece di tutto il brano | il tempo si giudica sul giro, non sull'intro |
 | **Allinea griglia** su 4 o 8 battute (non su una) | più battute nella selezione = stima del BPM più precisa |
 | **Diventa Bar N°** invece di ritoccare l'offset a mano | sposta i numeri del righello dove ti servono, in un colpo |
@@ -495,7 +500,12 @@ e su `?sampler_file=`. Il **TAP** ha verifiche sue: 11/11 sulla funzione pura
 tocco a 150 ms e a 2,5 s → sessione da riavviare) e 9/9 in Chrome con **clic
 reali** sul pulsante (contatore `🎵 TAP ×12`, BPM 120,00 con 12 colpi, 187,6 con
 5 colpi a 320 ms, sessione che riparte dopo un tocco fuori tempo e azzerata
-quando si scrive il BPM a mano).
+quando si scrive il BPM a mano). Anche il **metronomo** ha le sue: 8/8 test sulla
+parte pura (`stepMetronomo`, `accentoBattuta`, `etichettaUnita`) e 15/15 in
+Chrome, dove i colpi vengono **contati davvero** intercettando
+`playMetronomeClick`: a 120 BPM in due battute escono **8 colpi** con `ogni 1/4`,
+4 con `ogni 2/4`, 2 con `ogni battuta`, 1 con `ogni 2 battute` — e la **griglia
+resta a 1 battuta** (2 s) mentre il metronomo batte i quarti.
 
 
 

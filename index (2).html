@@ -584,7 +584,7 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
       </div>
       <div>
         <label style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace">Python (accesso a `conn`, `re`, `db_path`)</label>
-        <textarea id="custom-script" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px;font-family:'Space Mono',monospace;font-size:12px;resize:vertical" placeholder="# Esempio: sposta Eminem dal titolo all'artista&#10;cursor = conn.cursor()&#10;rows = cursor.execute(&quot;SELECT id, title, artist FROM songs WHERE title LIKE '%Eminem%'&quot;).fetchall()&#10;for row in rows:&#10;    new_title = re.sub(r'\s*Eminem\s*', '', row[1], flags=re.IGNORECASE).strip()&#10;    if not new_title: new_title = row[1]&#10;    if 'eminem' not in row[2].lower():&#10;        new_artist = row[2] + (', Eminem' if row[2] else 'Eminem')&#10;        cursor.execute('UPDATE songs SET title=?, artist=? WHERE id=?', (new_title, new_artist, row[0]))&#10;conn.commit()&#10;print('Fatto')"></textarea>
+        <textarea id="custom-script" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px;font-family:'Space Mono',monospace;font-size:12px;resize:vertical" placeholder="# Esempio (SICURO): mostra le canzoni con un nome dentro il titolo&#10;# Non modifica niente: per correggere usa &#9999;&#65039; Edit nella pagina (o il README).&#10;rows = conn.execute(&quot;SELECT id, title, artist FROM songs WHERE title LIKE '%Eminem%'&quot;).fetchall()&#10;for r in rows:&#10;    print(r['id'], '|', r['title'], '|', r['artist'])&#10;print('Trovate:', len(rows))&#10;# Se scrivi una UPDATE: usa r'\bEminem\b' (senza \b spezzi 'Eminems' -> 's') e&#10;# poi pulisci le parentesi rimaste vuote:&#10;#   re.sub(r'\(\s*(?:feat|ft)\.?\s*\)?', '', testo)"></textarea>
         <div style="display:flex;gap:8px;margin-top:6px">
           <button class="btn-sm" onclick="runCustomScript()">▶ Esegui Python</button>
           <button class="btn-sm" onclick="loadEminemScript()">📋 Script Eminem</button>
@@ -1350,6 +1350,14 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
         <button class="metro-btn" id="metro-btn-main" onclick="toggleMetronome('main')">
           <span class="pulse-dot"></span> Metronomo
         </button>
+        <select class="grid-select" id="metro-sel-main" onchange="setMetroSubdivision('main',this.value)" title="Ogni quanto batte il metronomo (indipendente dalla griglia)">
+          <option value="0.25" selected>ogni 1/4</option>
+          <option value="0.5">ogni 2/4</option>
+          <option value="0.75">ogni 3/4</option>
+          <option value="1">ogni battuta</option>
+          <option value="2">ogni 2 battute</option>
+          <option value="4">ogni 4 battute</option>
+        </select>
         
         <!-- Controlli di spostamento e UNDO/REDO Globale -->
         <button class="move-mode-btn" id="move-btn-main" onclick="toggleMoveMode('main')">↔ Sposta</button>
@@ -1638,6 +1646,7 @@ function initPlayer(key, url, startSec) {
     tapTimes: [],
     cellBorderDrag: null,
     metronomeEnabled: false,
+    metroSubdivision: 0.25,   // unità del METRONOMO (0,25 = ogni quarto), indipendente dalla griglia
     nextMetroBeatTime: null,
     followEnabled: false,
     _animId: null,
@@ -1689,6 +1698,7 @@ function initPlayer(key, url, startSec) {
     }
   });
 
+  updateMetroStatus(key);   // mostra subito "🔇 1/4" (unità del metronomo)
   audio.load();
 }
 
@@ -2280,31 +2290,87 @@ function multiplyBpm(key) {
 }
 
 // ─── METRONOME ──────────────────────────────────────────────────
+// ─── METRONOMO ──────────────────────────────────────────────────
+// Il metronomo ha una SUA unità (`metroSubdivision`), indipendente dalla griglia:
+// così si può tenere la griglia a "1 bar" (per vedere le battute) e sentire i
+// colpi ogni 1/4, ogni 2/4, ogni 3/4, ogni battuta, ogni 2 o 4 battute —
+// richiesta del 17/09/2026 (prima il metronomo seguiva la suddivisione della
+// griglia, quindi per sentire i quarti si doveva cambiare la griglia).
+// `stepMetronomo` (pura): secondi fra un colpo e l'altro. 240/BPM è una battuta
+// 4/4, quindi unità 0,25 = ogni quarto, 1 = ogni battuta, 2 = ogni due battute.
+function stepMetronomo(bpm, unita) {
+  const b = parseFloat(bpm);
+  if (!b || b <= 0) return 0;
+  let u = parseFloat(unita);
+  if (!u || u <= 0) u = 0.25;
+  return (240 / b) * u;
+}
+
+// `accentoBattuta` (pura): vero se il colpo che cade in `istante` (secondi,
+// relativo all'offset della griglia) è il PRIMO della battuta, quello più acuto.
+function accentoBattuta(istante, bpm, unita) {
+  const bat = 240 / parseFloat(bpm || 0);
+  const passo = stepMetronomo(bpm, unita);
+  if (!bat || !passo) return true;
+  const rel = ((istante % bat) + bat) % bat;
+  return rel < passo * 0.3;
+}
+
+// `etichettaUnita` (pura): nome dell'unità scelta, per lo stato in basso.
+function etichettaUnita(unita) {
+  const u = parseFloat(unita);
+  if (!u || u <= 0) return '1/4';
+  if (u === 0.25) return '1/4';
+  if (u === 0.5) return '2/4';
+  if (u === 0.75) return '3/4';
+  if (u === 1) return '1 battuta';
+  return u + ' battute';
+}
+
+function getMetroStep(key) {
+  const p = players[key];
+  if (!p) return 0;
+  return stepMetronomo(p.bpm, p.metroSubdivision);
+}
+
+function updateMetroStatus(key) {
+  const p = players[key];
+  const status = document.getElementById(`metro-status-${key}`);
+  if (!p || !status) return;
+  status.textContent = (p.metronomeEnabled ? '🔊 ' : '🔇 ') + etichettaUnita(p.metroSubdivision);
+}
+
+function setMetroSubdivision(key, val) {
+  const p = players[key];
+  if (!p) return;
+  p.metroSubdivision = parseFloat(val) || 0.25;
+  p.nextMetroBeatTime = null;   // il prossimo colpo si risincronizza
+  updateMetroStatus(key);
+}
+
 function toggleMetronome(key) {
   const p = players[key];
   if (!p) return;
   p.metronomeEnabled = !p.metronomeEnabled;
   const btn = document.getElementById(`metro-btn-${key}`);
-  const status = document.getElementById(`metro-status-${key}`);
   if (p.metronomeEnabled) {
     btn?.classList.add('active');
-    if (status) status.textContent = '🔊';
     p.nextMetroBeatTime = null;
     getAudioContext();
     playMetronomeClick(880, 0.3, 0.06);
   } else {
     btn?.classList.remove('active');
-    if (status) status.textContent = '🔇';
     p.nextMetroBeatTime = null;
   }
+  updateMetroStatus(key);
 }
 
 function checkMetronome(key) {
   const p = players[key];
-  // FIX: Ora si sente sempre se è attivo (tolto !p.gridEnabled)
+  // Il metronomo suona se è acceso, anche con la griglia nascosta.
   if (!p || !p.metronomeEnabled) return;
   if (!p.bpm || p.bpm <= 0) return;
-  const step = getGridStep(key);
+  const step = getMetroStep(key);      // unità del METRONOMO, non della griglia
   if (!step || step <= 0) return;
   const offset = p.gridOffset || 0;
   const t = p.timelineTime;
@@ -2315,9 +2381,7 @@ function checkMetronome(key) {
   }
 
   if (t >= p.nextMetroBeatTime - 1e-9) {
-    const barDuration = 240 / p.bpm;
-    const relToBar = ((p.nextMetroBeatTime - offset) % barDuration + barDuration) % barDuration;
-    const isDownbeat = relToBar < step * 0.3;
+    const isDownbeat = accentoBattuta(p.nextMetroBeatTime - offset, p.bpm, p.metroSubdivision);
 
     const freq = isDownbeat ? 1000 : 720;
     const vol = isDownbeat ? 0.35 : 0.22;
