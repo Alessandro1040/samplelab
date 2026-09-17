@@ -2322,6 +2322,14 @@ def browse():
 def fortissimo():
     return send_file(os.path.join(BASE_DIR, "fortissimo.html"))
 
+# ── SCHEDA CANZONE (stem + remix/cover + campionamenti WhoSampled) ───────────
+# Una schermata per canzone: /scheda?song=<id> (i dati li dà
+# /db/songs/<id>/scheda). Si apre dal pulsante «📄 Scheda» della tabella del
+# database, su ogni riga.
+@app.route("/scheda")
+def scheda():
+    return send_file(os.path.join(BASE_DIR, "scheda.html"))
+
 # ── STREAMING ────────────────────────────────────────────────────────────────
 @app.route("/stream/<path:filename>")
 def stream_file(filename):
@@ -2878,6 +2886,269 @@ def db_delete_relation(rel_id):
     with get_db() as conn:
         conn.execute("DELETE FROM sample_relations WHERE id=?", (rel_id,))
     return jsonify({"ok": True})
+
+# ── DB: SCHEDA CANZONE (stem · remix e cover · campionamenti) ────────────────
+# La pagina /scheda (scheda.html) mette insieme TUTTO quello che il database sa
+# di una canzone: le tracce separate (stem_sessions + stem_tracks), i remix e le
+# cover e i campionamenti (sample_relations) e le analisi audio (audio_analyses).
+# Le regole con cui una relazione finisce in un gruppo stanno qui in funzioni
+# PURE, provate da test_scheda_canzone.py: così la pagina e il backend restano
+# d'accordo su cosa è un sample, un remix e una cover.
+
+# Categorie con cui il database descrive una relazione. Quelle "cover" sono
+# quelle del pannello Salva coppia di index (2).html (VOCAL_COVER, FULL_REMAKE,
+# INSTRUMENT_REMAKE); SAMPLE, STEM_REUSE e BEAT_CHANGE sono campionamenti.
+REL_CATEGORIE_COVER = {"COVER", "COVERS", "VOCAL_COVER", "FULL_REMAKE",
+                       "INSTRUMENT_REMAKE", "REINTERPRETATION", "RIFACIMENTO"}
+
+_RE_MARCATORE_REMIX = re.compile(r"\b(remix|rmx|remixed|rework|bootleg)\b")
+_RE_MARCATORE_COVER = re.compile(r"\b(cover|covered|covers|karaoke|reinterpretation|reinterpretazione|rifacimento)\b")
+# Marcatori di variante nel titolo ("X (Remix)", "X [Cover]", "X Live"): servono
+# a riconoscere le altre versioni dello stesso brano già in libreria.
+_RE_VARIANTE_TITOLO = re.compile(r"\b(remix|rmx|cover|covered|karaoke|instrumental|strumentale|reinterpretation|rework|live|acoustic|demo)\b")
+# Annotazioni fra parentesi da BUTTARE via nel titolo base: se dentro le
+# parentesi c'è una di queste parole la parentesi è un'annotazione («(Remix)»,
+# «[HQ Lyrics]», «(Official Video)», «(feat. Tizio)»); altrimenti le parole
+# contano e restano («Sam (Is Dead)» → «sam is dead»).
+_RE_PARENTESI_ANNOTAZIONE = re.compile(
+    r"(remix|rmx|cover|live|acoustic|instrumental|strumentale|karaoke|demo|remaster|"
+    r"version|edit|lyrics|testo|official|video|audio|visualizer|feat\.?|ft\.?|with|"
+    r"prod\.?|explicit|clean|hq|hd|4k)", re.I)
+
+
+def classifica_relazione(rel, direzione="derivative"):
+    """In quale gruppo della scheda va questa relazione: "remix", "cover" o "sample".
+
+    Guarda i campi con cui il database descrive la relazione (`category`,
+    `relation_type`, `transformation`, `notes`) e — solo quando il brano che
+    deriva è l'ALTRO (`direzione="source"`) — anche i marcatori nel titolo
+    dell'altro brano: un "(Remix)" nella canzone che campiona la nostra È un
+    remix di questa, mentre un "(Remix)" nel brano CAMPIONATO non dice niente
+    sul nostro brano (è solo il titolo della fonte).
+    """
+    testo = " ".join(str(rel.get(k) or "") for k in
+                     ("category", "relation_type", "transformation", "notes")).lower()
+    categoria = str(rel.get("category") or "").strip().upper()
+    if _RE_MARCATORE_REMIX.search(testo):
+        return "remix"
+    if categoria in REL_CATEGORIE_COVER or _RE_MARCATORE_COVER.search(testo):
+        return "cover"
+    titolo = str(rel.get("other_title") or "").lower()
+    if direzione == "source":
+        if _RE_MARCATORE_REMIX.search(titolo):
+            return "remix"
+        if _RE_MARCATORE_COVER.search(titolo):
+            return "cover"
+    return "sample"
+
+
+def ruolo_relazione(gruppo, direzione):
+    """La frase da mostrare sulla riga: chi fa cosa, vista da questa canzone."""
+    derivato = direzione == "derivative"
+    if gruppo == "remix":
+        return "questa canzone è un remix dell'altra" if derivato else "l'altra è un remix di questa"
+    if gruppo == "cover":
+        return "questa canzone è una cover dell'altra" if derivato else "l'altra è una cover di questa"
+    return "questa canzone campiona l'altra" if derivato else "l'altra campiona questa"
+
+
+def titolo_base(titolo):
+    """Titolo ridotto all'osso per confrontare le versioni dello stesso brano.
+
+    Vengono tolte SOLO le annotazioni fra parentesi («(Remix)», «(feat. Tizio)»,
+    «[HQ Lyrics]», «(Official Video)»…), non tutto quello che sta fra parentesi:
+    «Sam (Is Dead)» resta «sam is dead» (le parole contano), mentre «Mosh
+    (Remix)», «MOSH [Live]» e «Eminem - Without Me (Official Video)» diventano
+    «mosh» e «eminem without me». Poi via la punteggiatura e i marcatori sciolti.
+    """
+    t = str(titolo or "").lower()
+
+    def _dentro(m):
+        contenuto = m.group(1)
+        return " " if _RE_PARENTESI_ANNOTAZIONE.search(contenuto) else " " + contenuto + " "
+
+    t = re.sub(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", _dentro, t)
+    t = _RE_VARIANTE_TITOLO.sub(" ", t)
+    t = re.sub(r"[^a-z0-9]+", " ", t)
+    return " ".join(t.split())
+
+
+def artisti_diversi(a, b):
+    """True se i due crediti indicano artisti diversi (confronto per parti:
+    «Eminem / D12» e «D12» condividono D12, quindi non sono diversi)."""
+    def parti(x):
+        return {p.strip().lower() for p in
+                re.split(r"\s*(?:/|,|;|\||\+|&)\s*", str(x or "")) if p.strip()}
+    pa, pb = parti(a), parti(b)
+    return bool(pa and pb and not (pa & pb))
+
+
+def possibili_varianti(song, brani, limite=25):
+    """Le altre versioni dello stesso brano già in libreria, riconosciute dal titolo.
+
+    Il database non tiene le cover e i remix in una tabella propria: o li racconta
+    una relazione (sample_relations), oppure si riconoscono dal titolo. Qui si
+    cercano i brani con lo stesso titolo base che hanno un marcatore di variante
+    («(Remix)», «[Cover]», «Live»…) o un artista diverso: sono CANDIDATI da
+    guardare a occhio, non una verità del database (per questo la pagina li tiene
+    in un blocco separato e dice sempre il perché).
+    """
+    base = titolo_base(song.get("title"))
+    if len(base) < 3:
+        return []
+    nostro_artista = song.get("artist") or ""
+    segnaposto = is_placeholder_artist(nostro_artista)
+    fuori = []
+    for b in brani:
+        if str(b.get("id")) == str(song.get("id")):
+            continue
+        if titolo_base(b.get("title")) != base:
+            continue
+        marcatori = sorted({m for m in _RE_VARIANTE_TITOLO.findall(str(b.get("title") or "").lower())})
+        motivo = ""
+        if marcatori:
+            motivo = "nel titolo: " + " / ".join(marcatori)
+        elif not segnaposto and artisti_diversi(nostro_artista, b.get("artist")):
+            motivo = "artista diverso: " + str(b.get("artist") or "")
+        if not motivo:
+            continue
+        fuori.append({
+            "id": b.get("id"), "title": b.get("title"), "artist": b.get("artist"),
+            "album": b.get("album"), "year": b.get("year"),
+            "local_file": b.get("local_file"), "motivo": motivo,
+        })
+    fuori.sort(key=lambda x: (str(x.get("artist") or "").lower(), str(x.get("title") or "").lower()))
+    return fuori[:limite]
+
+
+def _url_stem(folder, filename):
+    """URL di uno stem (cartella e nome possono avere spazi e punti: vanno quotati)."""
+    return ("/stream-stem/%s/%s" % (urllib.parse.quote(str(folder or "")),
+                                    urllib.parse.quote(str(filename or ""))),
+            "/download-stem/%s/%s" % (urllib.parse.quote(str(folder or "")),
+                                      urllib.parse.quote(str(filename or ""))))
+
+
+def _scheda_stem(conn, song):
+    """Gli stem del brano: sessioni e tracce dal database + quello che c'è su disco.
+
+    `stem_sessions` dice come è stata fatta la separazione (Demucs) e
+    `stem_tracks` elenca i file (voce, batteria, basso, altro). I file vengono
+    anche controllati su disco (`exists`): se qualcuno li ha cancellati la
+    pagina lo dice invece di far cliccare su un player vuoto.
+    """
+    sessions = rows2list(conn.execute(
+        "SELECT * FROM stem_sessions WHERE song_id=? ORDER BY created_at DESC", (song["id"],)))
+    totale = mancanti = 0
+    registrati = set()
+    for sess in sessions:
+        tracce = rows2list(conn.execute(
+            "SELECT * FROM stem_tracks WHERE session_id=? ORDER BY stem_type", (sess["id"],)))
+        for t in tracce:
+            percorso = str(t.get("file_path") or "")
+            t["filename"] = os.path.basename(percorso)
+            t["folder"] = os.path.basename(os.path.dirname(percorso))
+            t["exists"] = bool(percorso) and os.path.exists(percorso)
+            t["size_on_disk"] = os.path.getsize(percorso) if t["exists"] else None
+            if t["exists"]:
+                t["url"], t["download_url"] = _url_stem(t["folder"], t["filename"])
+                registrati.add(t["filename"])
+            totale += 1
+            if not t["exists"]:
+                mancanti += 1
+        sess["tracks"] = tracce
+    # Cartella su disco: Demucs la nomina come il file di partenza senza
+    # estensione. Serve a mostrare gli stem separati anche quando il job è
+    # partito senza `song_id` (quindi senza riga in stem_sessions).
+    disco = None
+    base_file = os.path.splitext(os.path.basename(str(song.get("local_file") or "")))[0]
+    if base_file:
+        cartella = os.path.join(STEMS_DIR, "htdemucs", base_file)
+        if os.path.isdir(cartella):
+            files = []
+            for nome in sorted(os.listdir(cartella)):
+                percorso = os.path.join(cartella, nome)
+                if not os.path.isfile(percorso):
+                    continue
+                url, dl = _url_stem(base_file, nome)
+                files.append({
+                    "filename": nome,
+                    "stem_type": os.path.splitext(nome)[0].lower(),
+                    "size_on_disk": os.path.getsize(percorso),
+                    "registrato": nome in registrati,
+                    "url": url, "download_url": dl,
+                })
+            if files:
+                disco = {"folder": base_file, "files": files,
+                         "non_registrati": [f["filename"] for f in files if not f["registrato"]]}
+    return {
+        "sessions": sessions,
+        "count_tracks": totale,
+        "count_missing": mancanti,
+        "on_disk": disco,
+        "has_stems": bool(totale or (disco and disco["files"])),
+    }
+
+
+@app.route("/db/songs/<song_id>/scheda", methods=["GET"])
+def db_song_scheda(song_id):
+    """Tutto quello che il database sa di una canzone: stem, remix e cover,
+    campionamenti WhoSampled e analisi audio. Usato dalla pagina /scheda."""
+    with get_db() as conn:
+        song = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+        if not song:
+            return jsonify({"error": "Non trovata"}), 404
+        stems = _scheda_stem(conn, song)
+        altrove = ("sr.*, alt.title AS other_title, alt.artist AS other_artist, "
+                   "alt.year AS other_year, alt.id AS other_id, "
+                   "alt.local_file AS other_local_file, alt.whosampled_url AS other_whosampled_url")
+        derivate = rows2list(conn.execute(
+            "SELECT " + altrove + " FROM sample_relations sr JOIN songs alt ON alt.id=sr.source_song_id "
+            "WHERE sr.derivative_song_id=? ORDER BY alt.artist, alt.title", (song_id,)))
+        fonti = rows2list(conn.execute(
+            "SELECT " + altrove + " FROM sample_relations sr JOIN songs alt ON alt.id=sr.derivative_song_id "
+            "WHERE sr.source_song_id=? ORDER BY alt.artist, alt.title", (song_id,)))
+        gruppi = {"samples_used": [], "sampled_by": [], "remixes": [], "covers": []}
+        for riga, direzione in ([(r, "derivative") for r in derivate] +
+                                [(r, "source") for r in fonti]):
+            riga["direzione"] = direzione
+            riga["gruppo"] = classifica_relazione(riga, direzione)
+            riga["ruolo"] = ruolo_relazione(riga["gruppo"], direzione)
+            if riga["gruppo"] == "remix":
+                gruppi["remixes"].append(riga)
+            elif riga["gruppo"] == "cover":
+                gruppi["covers"].append(riga)
+            elif direzione == "derivative":
+                gruppi["samples_used"].append(riga)
+            else:
+                gruppi["sampled_by"].append(riga)
+        brani = rows2list(conn.execute(
+            "SELECT id, title, artist, album, year, local_file FROM songs"))
+        varianti = possibili_varianti(song, brani)
+        analisi = rows2list(conn.execute(
+            "SELECT * FROM audio_analyses WHERE song_id=? ORDER BY analyzed_at DESC", (song_id,)))
+    return jsonify({
+        "song": song,
+        "stems": stems,
+        "samples_used": gruppi["samples_used"],
+        "sampled_by": gruppi["sampled_by"],
+        "remixes": gruppi["remixes"],
+        "covers": gruppi["covers"],
+        "varianti": varianti,
+        "analyses": analisi,
+        "whosampled_url": song.get("whosampled_url") or "",
+        "counts": {
+            "stem_sessions": len(stems["sessions"]),
+            "stem_tracks": stems["count_tracks"],
+            "stem_missing": stems["count_missing"],
+            "samples_used": len(gruppi["samples_used"]),
+            "sampled_by": len(gruppi["sampled_by"]),
+            "remixes": len(gruppi["remixes"]),
+            "covers": len(gruppi["covers"]),
+            "varianti": len(varianti),
+            "analyses": len(analisi),
+        },
+    })
 
 # ── DB: STATS ─────────────────────────────────────────────────────────────────
 @app.route("/db/stats", methods=["GET"])

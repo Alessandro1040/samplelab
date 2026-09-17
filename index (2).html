@@ -267,6 +267,8 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
 .db-play-btn{background:transparent;border:1px solid var(--border);color:var(--accent);font-family:'Space Mono',monospace;font-size:11px;border-radius:4px;padding:2px 8px;cursor:pointer;transition:all .15s;white-space:nowrap;min-width:34px}
 .db-play-btn:hover{color:#080808;background:var(--accent);border-color:var(--accent)}
 .db-stem-btn:hover{color:var(--accent);border-color:var(--accent)}
+/* stesso aspetto dei pulsanti Stem/Edit, ma è un link alla scheda della canzone */
+a.db-stem-btn{display:inline-block;text-decoration:none}
 .db-del-btn{background:transparent;border:1px solid rgba(255,69,69,.3);color:var(--red);font-family:'Space Mono',monospace;font-size:9px;border-radius:4px;padding:2px 7px;cursor:pointer;transition:all .15s;white-space:nowrap}
 .db-del-btn:hover{background:var(--red);color:#000}
 .db-add-song-panel{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:18px;margin-top:20px}
@@ -4335,6 +4337,7 @@ function renderDbTable(songs){
   ${s.stem_count>0?`<span class="db-rel-badge" style="color:var(--accent)">✂️ ${s.stem_count}</span>`:`<button class="db-stem-btn" onclick="quickStem('${s.id}','${escA(s.local_file||'')}')">✂️ Stem</button>`}
   <button class="db-stem-btn" onclick="openDbEditor('${s.id}')">✏️ Edit</button>
   ${s.local_file?`<button class="db-stem-btn" onclick="openInSampler('${s.id}')" title="Apri nel sampler FL-Studio: griglia/metronomo/TAP per controllare il BPM vero">🎛 Sampler</button>`:''}
+  <a class="db-stem-btn" href="scheda.html?song=${encodeURIComponent(s.id)}" title="Apri la scheda della canzone: le tracce stem di cui è composta, i remix e le cover, i campionamenti WhoSampled">📄 Scheda</a>
 </td>
       <td>${s.relation_count>0?`<span class="db-rel-badge">🔗 ${s.relation_count}</span>`:`<span style="color:var(--muted);font-size:10px">—</span>`}</td>
       <td>

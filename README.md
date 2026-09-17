@@ -75,6 +75,13 @@ con `(2)` nella cartella locale:
 - `test_sql_guard.py` — test del **pannello SQL/script** (cosa si può eseguire:
   solo SELECT/UPDATE; `replace(...)` ammesso come funzione, `REPLACE INTO`
   bloccato): `python3 -m unittest -v test_sql_guard`
+- `scheda.html` — **scheda di una canzone** (pagina `/scheda`, pulsante **📄 Scheda**
+  nella tabella del database): stem, remix e cover, campionamenti WhoSampled e
+  analisi audio di quel brano (vedi la sezione *Scheda canzone* qui sotto)
+- `test_scheda_canzone.py` — test della **scheda canzone**: classificazione di
+  sample/remix/cover, funzioni pure della pagina in JavaScriptCore, mixer degli
+  stem con un DOM finto, endpoint vero su un database di prova:
+  `python3 -m unittest -v test_scheda_canzone`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -171,6 +178,52 @@ evidenziarli, non è codice nostro):
    **nome** YAMNet, non il timbro. (I valori sono pensati in Hz ma usati come
    indici: la correzione è convertire Hz→bin con `freqs` e limitare l'indice.)
 
+
+## Scheda canzone (pagina `/scheda`) — tutto quello che il database sa di un brano
+
+Nella tabella del **Database** (pagina `/`) ogni riga ha il pulsante **📄 Scheda**:
+apre `scheda.html?song=<id>`, una schermata dedicata a quella canzone con quattro
+riquadri, riempiti **solo** con i dati del database.
+
+| Riquadro | Cosa mostra | Da dove viene |
+|---|---|---|
+| ✂️ **Tracce di cui è composta** | gli stem (voce, batteria, basso, altro) con player, mute, volume e download; **▶ Suona tutti insieme** li fa partire sincronizzati, per sentire il brano ricomposto | `stem_sessions` + `stem_tracks`, più la cartella `stems/htdemucs/<nome>` se il job era partito senza `song_id` |
+| ♻️ **Remix e cover** | i remix e le cover registrati, con il verso della relazione, più un blocco separato di **candidati** riconosciuti dal titolo | `sample_relations` (`category` VOCAL_COVER / FULL_REMAKE / INSTRUMENT_REMAKE, oppure «remix» in categoria/trasformazione/note) |
+| 🎚 **Campionamenti (WhoSampled)** | cosa campiona questa canzone e chi campiona questa canzone, con gli intervalli e i link WhoSampled/YouTube | `sample_relations` (`derivative_song_id` = chi usa il sample, `source_song_id` = la fonte campionata) |
+| 🧠 **Analisi audio** | BPM, tonalità e confidenza salvati per il brano | `audio_analyses` |
+
+Dettagli che servono a fidarsi di quello che si vede:
+
+- i file degli stem sono **controllati su disco**: se qualcuno li ha cancellati
+  la riga dice «file mancante» invece di far cliccare su un player vuoto;
+- la cartella degli stem cerca lo **stesso nome che usa l'app** per Demucs
+  (`os.path.splitext(filename)[0]`, dentro `do_stems`): le tracce che non hanno
+  una riga in `stem_tracks` compaiono lo stesso, marcate «solo su disco»;
+- i **candidati** di remix/cover sono indizi (stesso titolo base + un marcatore
+  «remix/cover/live…», oppure artista diverso): la pagina lo scrive a chiare
+  lettere, non sono relazioni registrate;
+- gli intervalli dei campionamenti sono mostrati **dal punto di vista di questa
+  canzone** («questa canzone: 0:12 → 0:34 · l'altra: 0:02 → 0:25»);
+- la pagina si aggiorna da sola quando cambia la firma di `/db/changed`, **ma non
+  mentre gli stem suonano** (ricostruirebbe gli `<audio>` e la riproduzione si
+  interromperebbe);
+- dal riquadro degli stem, se è vuoto, si può lanciare la separazione
+  (**✂️ Separa gli stem ora**): riusa `/separate` e segue il job con `/status/<id>`.
+
+Endpoint usati dalla pagina:
+
+| Endpoint | Metodo | Cosa fa |
+|---|---|---|
+| `/scheda` | GET | la pagina (si apre con `?song=<id>`) |
+| `/db/songs/<song_id>/scheda` | GET | i dati della scheda (404 se la canzone non esiste) |
+
+Test: `test_scheda_canzone.py` (38 test) — funzioni pure Python
+(`classifica_relazione`, `titolo_base`, `possibili_varianti`…), funzioni pure
+della pagina **eseguite davvero** in JavaScriptCore, il **mixer con un DOM
+finto** (sync, mute, volume, stop), il cablaggio (pulsante in tabella, sezioni,
+handler esposti su `window`) e l'endpoint vero su un **database di prova** (stem
+con file mancanti, una relazione per gruppo, analisi, candidati) senza toccare la
+libreria: `python3 -m unittest -v test_scheda_canzone`.
 
 ## MIDI Studio (porta 5080) — estrai MIDI da un audio e confronta due MIDI
 
@@ -867,4 +920,39 @@ Da tenere presente nelle sessioni di lavoro successive:
   dal pannello (carica, Esegui Python) quando si vuole.
 
 
+
+
+- **SCHEDA CANZONE (18/09/2026).** Nella tabella del database ogni riga ha il
+  pulsante **📄 Scheda**: è un link a `scheda.html?song=<id>` (non un `onclick`,
+  così si può aprire anche in una scheda nuova del browser). La schermata
+  `/scheda` mette insieme gli **stem** (`stem_sessions` + `stem_tracks` + la
+  cartella di Demucs), i **remix/cover** e i **campionamenti WhoSampled**
+  (`sample_relations`) e le **analisi audio** (`audio_analyses`), con un mixer
+  per far suonare gli stem insieme. Due decisioni da ricordare:
+  1. `classifica_relazione` decide sample / remix / cover guardando `category`,
+     `relation_type`, `transformation` e `notes`; il **titolo dell'altra canzone
+     conta solo quando è l'altra a derivare** (un «(Remix)» nel brano *campionato*
+     non dice niente sul nostro brano).
+  2. `titolo_base` / `possibili_varianti` (i candidati per titolo) tolgono **solo
+     le annotazioni** fra parentesi («(Remix)», «[HQ Lyrics]», «(Official
+     Video)»…), così «Sam (Is Dead)» resta «sam is dead» (le parole contano): la
+     prima versione buttava via tutta la parentesi e produceva candidati falsi.
+  Le funzioni richiamate dagli `onclick` scritti nell'HTML sono esposte su
+  `window`, perché dentro la funzione anonima della pagina non sarebbero
+  raggiungibili (è lo stesso motivo per cui in `browse.html` il pulsante
+  «↑/↓ Crescente» non risponde: **bug noto, non corretto qui**).
+  Verifiche del 18/09/2026: **38 test nuovi** (`test_scheda_canzone.py`) e **183
+  test** di suite; app riavviata (backend toccato: rotta `/scheda` ed endpoint
+  `/db/songs/<id>/scheda`), pagine `/` `/browse` `/onyx` `/scheda` → 200; la
+  scheda caricata in **Chrome reale** (headless, `--dump-dom`) su una canzone
+  vera: hero, riquadri, messaggi dei gruppi vuoti e candidato *off the wall remix*
+  (trovato davvero dal titolo) resi correttamente; con una cartella Demucs di
+  prova (`stems/htdemucs/<nome>`, poi rimossa) la pagina ha mostrato le 4 tracce
+  «solo su disco» con player, mute, volume e download, e
+  `/stream-stem/<cartella>/vocals.mp3` + `/download-stem/...` → 200. La
+  separazione degli stem veri **non è stata eseguita** (richiede minuti): in
+  libreria `stem_*` è ancora a 0, quindi la scheda mostra «✂️ Separa gli stem ora»
+  al posto delle tracce.
+  Nota: `/tmp/samplelab.log` resta **vuoto** all'avvio perché l'output di Python è
+  bufferizzato quando è rediretto su file (comportamento preesistente).
 

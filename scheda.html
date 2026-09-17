@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SampleLab (2) — Scheda canzone</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+:root{--bg:#080808;--surface:#111111;--surface2:#1a1a1a;--border:#252525;--border2:#333333;--text:#e8e8e8;--muted:#666666;--dim:#444444;--accent:#c8f000;--accent2:#7b5ea7;--accent3:#2dd4bf;--red:#ff4545}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Space Grotesk',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:90px}
+a{color:var(--accent)}
+header{display:flex;align-items:center;gap:16px;padding:20px 32px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100;flex-wrap:wrap}
+.logo{font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent);text-decoration:none;letter-spacing:-.5px}
+.logo span{color:var(--muted);font-weight:400}
+.breadcrumb{font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:50vw}
+.breadcrumb .sep{color:var(--dim);margin:0 6px}
+.back-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 14px;cursor:pointer;text-decoration:none;transition:border-color .15s;margin-left:auto;white-space:nowrap}
+.back-btn:hover{border-color:var(--accent);color:var(--accent)}
+.wrap{padding:24px 32px;max-width:1180px}
+/* ── testata della canzone ───────────────────────────────────────────── */
+.hero{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin-bottom:22px}
+.hero-top{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.hero-art{width:96px;height:96px;border-radius:10px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:30px;font-weight:700;color:#080808;position:relative;overflow:hidden}
+.hero-art::after{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(0,0,0,.55) 0 22%,transparent 23%)}
+.hero-main{flex:1;min-width:260px}
+.hero-eyebrow{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.hero-title{font-size:26px;font-weight:700;line-height:1.2;word-break:break-word;margin-bottom:6px}
+.hero-artist{font-size:14px;color:var(--accent3);margin-bottom:10px}
+.hero-artist a{color:var(--accent3);text-decoration:none}
+.hero-artist a:hover{text-decoration:underline}
+.hero-artist .sep{color:var(--dim);margin:0 5px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--surface2);border:1px solid var(--border2);border-radius:20px;padding:4px 11px;font-family:'Space Mono',monospace;font-size:10px;color:var(--text);text-decoration:none}
+.chip:hover{border-color:var(--accent);color:var(--accent)}
+.chip.ok{color:#0b0b0b;background:var(--accent);border-color:var(--accent)}
+.chip.warn{color:var(--red);border-color:rgba(255,69,69,.35)}
+.chip.dim{color:var(--muted)}
+.hero-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.hero-links a,.hero-links button{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:7px 12px;cursor:pointer;text-decoration:none;transition:all .15s}
+.hero-links a:hover,.hero-links button:hover{border-color:var(--accent);color:var(--accent)}
+/* ── riquadri delle sezioni ──────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:18px}
+.card-title{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--text);margin-bottom:4px}
+.card-sub{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:14px}
+.count{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent);margin-left:6px}
+.empty{font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);border:1px dashed var(--border2);border-radius:8px;padding:16px;text-align:center;line-height:1.7}
+.empty b{color:var(--text)}
+.empty button{margin-top:10px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:7px 12px;cursor:pointer}
+.empty button:hover{border-color:var(--accent);color:var(--accent)}
+.row{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.row:last-child{border-bottom:none}
+.row-main{flex:1;min-width:190px}
+.row-title{font-size:13px;font-weight:600;word-break:break-word}
+.row-title a{color:var(--text);text-decoration:none}
+.row-title a:hover{color:var(--accent)}
+.row-sub{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);margin-top:3px;word-break:break-word}
+.row-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.icon-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center}
+.icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+.icon-btn.on{background:var(--accent);color:#080808;border-color:var(--accent)}
+.icon-btn.off{color:var(--red);border-color:rgba(255,69,69,.35)}
+.mini{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-decoration:none;border:1px solid var(--border2);border-radius:6px;padding:5px 8px}
+.mini:hover{border-color:var(--accent);color:var(--accent)}
+.tag{font-family:'Space Mono',monospace;font-size:9px;border-radius:4px;padding:2px 6px;border:1px solid var(--border2);color:var(--muted)}
+.tag.ver{color:var(--accent);border-color:rgba(200,240,0,.35)}
+.tag.warn{color:var(--red);border-color:rgba(255,69,69,.35)}
+.group-title{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:14px 0 4px}
+.group-title:first-child{margin-top:0}
+.byte{font-family:'Space Mono',monospace;font-size:10px;color:var(--dim);min-width:64px;text-align:right}
+input[type=range]{width:82px;accent-color:var(--accent)}
+.mixer{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:12px 32px;display:none;align-items:center;gap:14px;z-index:200;flex-wrap:wrap}
+.mixer.visible{display:flex}
+.mixer-info{font-size:13px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mixer button{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 12px;cursor:pointer}
+.mixer button:hover{border-color:var(--accent);color:var(--accent)}
+.status{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent3);margin-top:10px;line-height:1.6}
+.hint{font-size:12px;color:var(--muted);margin-top:18px;line-height:1.7}
+.hint b{color:var(--accent3);font-weight:600}
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/">SampleLab <span>(2)</span></a>
+  <div class="breadcrumb"><span id="bc-type">Canzone</span><span class="sep">/</span><span id="bc-value">—</span></div>
+  <a class="back-btn" href="/">← Torna alla app</a>
+</header>
+
+<div class="wrap">
+  <div class="hero" id="hero"><div class="empty">Caricamento della scheda…</div></div>
+
+  <section class="card" id="card-stem">
+    <div class="card-title">✂️ Tracce di cui è composta<span class="count" id="n-stem"></span></div>
+    <div class="card-sub">Gli stem separati con Demucs (voce, batteria, basso, altro) registrati nel database per questa canzone, più quelli eventualmente già su disco. Con <b>▶ Suona tutti insieme</b> partono sincronizzati, per sentire il brano ricomposto.</div>
+    <div id="stem-body"></div>
+  </section>
+
+  <section class="card" id="card-varianti">
+    <div class="card-title">♻️ Remix e cover<span class="count" id="n-varianti"></span></div>
+    <div class="card-sub">I remix e le cover di questa canzone registrati nel database (tabella <b>sample_relations</b>) e, in un blocco a parte, i <b>candidati</b> riconosciuti dal titolo fra i brani già in libreria: quelli sono solo da guardare a occhio.</div>
+    <div id="varianti-body"></div>
+  </section>
+
+  <section class="card" id="card-sample">
+    <div class="card-title">🎚 Campionamenti (WhoSampled)<span class="count" id="n-sample"></span></div>
+    <div class="card-sub">Cosa campiona questa canzone e chi campiona questa canzone, con i timestamp e i link a WhoSampled e YouTube salvati nel database.</div>
+    <div id="sample-body"></div>
+  </section>
+
+  <section class="card" id="card-analisi">
+    <div class="card-title">🧠 Analisi audio<span class="count" id="n-analisi"></span></div>
+    <div class="card-sub">BPM, tonalità e confidenza salvati nella tabella <b>audio_analyses</b> per questo brano.</div>
+    <div id="analisi-body"></div>
+  </section>
+
+  <div class="hint">💡 Questa scheda mostra <b>solo quello che è nel database</b>: gli stem compaiono dopo una separazione (✂️ Stem dalla tabella o dal pulsante qui sopra), i campionamenti dopo averli salvati dallo scraper WhoSampled, i remix e le cover quando una relazione li descrive così. La pagina si aggiorna da sola quando il database cambia.</div>
+</div>
+
+<div class="mixer" id="mixer">
+  <span class="mixer-info" id="mixer-info">Stem</span>
+  <button id="mixer-play" onclick="mixerToggle()">▶ Suona tutti insieme</button>
+  <button onclick="mixerStop()">⏹ Stop</button>
+  <span class="byte" id="mixer-time">0:00</span>
+  <button class="icon-btn" onclick="mixerStop()" title="Ferma gli stem e nascondi la barra">✕</button>
+</div>
+
+<script>
+(function(){
+'use strict';
+// ─── parametri, stato ─────────────────────────────────────────────────
+const params=new URLSearchParams(location.search);
+const songId=(params.get('song')||'').trim();
+let scheda=null;              // risposta di /db/songs/<id>/scheda
+let lastDbSig='';             // firma di /db/changed (aggiornamento automatico)
+const stemAudio={};           // indice riga -> <audio> dello stem
+let stemRows=[];              // righe degli stem come le disegna renderStem()
+let mixerAttivo=false, mixerTimer=null;
+
+// ─── utilità (come nelle altre pagine: browse.html / index (2).html) ───
+function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function fmtTime(sec){if(sec==null||sec===''||isNaN(sec))return'—';const m=Math.floor(sec/60);return m+':'+String(Math.floor(sec%60)).padStart(2,'0')}
+function artistHref(a){return a?'browse.html?artist='+encodeURIComponent(a):''}
+function albumHref(a){return a?'browse.html?album='+encodeURIComponent(a):''}
+function schedaHref(id){return 'scheda.html?song='+encodeURIComponent(id||'')}
+// Multi-artista: un link per ogni artista (stessa regola di browse.html).
+function artistChipsHtml(artist){
+  const parts=String(artist||'').split(/\s*(?:\s+\/\s*|\s*\/\s+|,|;|\||\+|&|feat\.?|ft\.?|\bwith\b)\s*/gi).map(a=>a.trim()).filter(Boolean);
+  if(!parts.length) return '<span class="tag">nessun artista</span>';
+  return parts.map(a=>`<a class="chip" href="${artistHref(a)}" title="Tutte le canzoni di ${esc(a)}">${esc(a)}</a>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// FUNZIONI PURE — provate davvero da test_scheda_canzone.py con
+// JavaScriptCore (`osascript -l JavaScript`), senza aprire il browser.
+// ═══════════════════════════════════════════════════════════════════════
+const ETICHETTE_STEM={vocals:'🎤 Voce',drums:'🥁 Batteria',bass:'🎸 Basso',other:'🎹 Altro'};
+const ORDINE_STEM={vocals:0,drums:1,bass:2,other:3};
+
+function etichettaStem(tipo){
+  const t=String(tipo??'').trim().toLowerCase();
+  if(!t) return '🎵 Traccia';
+  if(ETICHETTE_STEM[t]) return ETICHETTE_STEM[t];
+  return '🎵 '+t.charAt(0).toUpperCase()+t.slice(1);
+}
+function ordineStem(tipo){
+  const t=String(tipo??'').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(ORDINE_STEM,t)?ORDINE_STEM[t]:9;
+}
+function formattaByte(n){
+  const v=Number(n);
+  if(!isFinite(v)||v<=0) return '—';
+  const unita=['B','KB','MB','GB'];let i=0,x=v;
+  while(x>=1024&&i<unita.length-1){x/=1024;i++}
+  return (i===0?String(Math.round(x)):x.toFixed(1).replace('.',','))+' '+unita[i];
+}
+// Intervallo di un timestamp: "0:12 → 0:34", "da 0:12", "fino a 0:34" o "" (niente).
+function formattaIntervallo(a,b){
+  const ha=(a!==null&&a!==undefined&&a!==''&&isFinite(Number(a)));
+  const hb=(b!==null&&b!==undefined&&b!==''&&isFinite(Number(b)));
+  if(!ha&&!hb) return '';
+  if(ha&&hb) return fmtTime(Number(a))+' → '+fmtTime(Number(b));
+  return ha?('da '+fmtTime(Number(a))):('fino a '+fmtTime(Number(b)));
+}
+function etichettaCategoria(cat){
+  const c=String(cat??'').trim().toUpperCase();
+  const m={SAMPLE:'Sample',SAMPLES:'Sample',STEM_REUSE:'Element reuse',BEAT_CHANGE:'Beat change',
+           VOCAL_COVER:'Cover',FULL_REMAKE:'Reinterpretazione',INSTRUMENT_REMAKE:'Strumentale remake',
+           COVER:'Cover',COVERS:'Cover',REMIX:'Remix'};
+  if(!c) return 'Sample';
+  return m[c]||(c.charAt(0)+c.slice(1).toLowerCase());
+}
+function etichettaFonte(fonte){
+  const f=String(fonte??'').trim().toLowerCase();
+  if(!f) return '—';
+  const m={librosa:'🎛️ librosa',tunebat:'🌐 Tunebat',ffmpeg:'🔊 ffmpeg',genius:'✍️ Genius',
+           whosampled:'🔗 WhoSampled',demucs:'✂️ Demucs'};
+  return m[f]||f;
+}
+// Stem da mostrare: prima le tracce registrate nel database (stem_tracks),
+// poi quelle trovate solo su disco (cartella di Demucs). Ordinate voce,
+// batteria, basso, altro: come si guarda un mixer.
+function righeStem(p){
+  const out=[];
+  const st=(p&&p.stems)||{};
+  const sessions=Array.isArray(st.sessions)?st.sessions:[];
+  sessions.forEach((s,si)=>{
+    const tracce=Array.isArray(s.tracks)?s.tracks:[];
+    tracce.forEach(t=>{
+      out.push({
+        chiave:(s.id||('s'+si))+':'+(t.filename||t.id||''),
+        tipo:String(t.stem_type||'').toLowerCase(),
+        etichetta:etichettaStem(t.stem_type),
+        filename:t.filename||'',
+        url:t.url||'', download_url:t.download_url||'',
+        esiste:!!t.exists,
+        byte:(t.size_on_disk==null?t.file_size_bytes:t.size_on_disk),
+        origine:'database', registrato:true,
+        sessione_id:s.id||'', modello:s.model_name||'', stato:s.status||'',
+        creato:s.created_at||''
+      });
+    });
+  });
+  const disco=st.on_disk;
+  if(disco&&Array.isArray(disco.files)){
+    // Solo i file NON registrati: quelli già in stem_tracks li mostra la riga
+    // del database (che sa tipo, sessione e modello), altrimenti la stessa
+    // traccia comparirebbe due volte.
+    disco.files.filter(f=>!f.registrato).forEach(f=>{
+      out.push({
+        chiave:'disco:'+(f.filename||''),
+        tipo:String(f.stem_type||'').toLowerCase(),
+        etichetta:etichettaStem(f.stem_type),
+        filename:f.filename||'',
+        url:f.url||'', download_url:f.download_url||'',
+        esiste:true, byte:f.size_on_disk,
+        origine:'disco', registrato:!!f.registrato,
+        sessione_id:'', modello:'', stato:'', creato:''
+      });
+    });
+  }
+  out.sort((a,b)=>(ordineStem(a.tipo)-ordineStem(b.tipo))||String(a.filename).localeCompare(String(b.filename)));
+  return out;
+}
+
+// I due intervalli di una relazione visti da QUESTA canzone: "mio" è il
+// timestamp sul nostro brano, "altro" quello sull'altro (che sia la fonte
+// campionata o la canzone che ci campiona).
+function intervalliRelazione(r){
+  const derivato=(r&&r.direzione)==='derivative';
+  const mio=derivato
+    ? formattaIntervallo(r?r.timestamp_derivative_start:null, r?r.timestamp_derivative_end:null)
+    : formattaIntervallo(r?r.timestamp_source_start:null, r?r.timestamp_source_end:null);
+  const altro=derivato
+    ? formattaIntervallo(r?r.timestamp_source_start:null, r?r.timestamp_source_end:null)
+    : formattaIntervallo(r?r.timestamp_derivative_start:null, r?r.timestamp_derivative_end:null);
+  return {mio, altro};
+}
+
+// Una relazione pronta da disegnare (titolo, artista, ruolo, badge, link).
+function rigaRelazione(r){
+  const iv=intervalliRelazione(r);
+  const derivato=(r&&r.direzione)==='derivative';
+  const dettagli=[];
+  if(iv.mio) dettagli.push('questa canzone: '+iv.mio);
+  if(iv.altro) dettagli.push('l\'altra: '+iv.altro);
+  return {
+    id:r?r.id:'',
+    titolo:(r&&r.other_title)||'(senza titolo)',
+    artista:(r&&r.other_artist)||'',
+    anno:(r&&r.other_year)||'',
+    altro_id:(r&&r.other_id)||'',
+    gruppo:(r&&r.gruppo)||'sample',
+    ruolo:(r&&r.ruolo)||'',
+    categoria:etichettaCategoria(r?r.category:''),
+    verificato:!!(r&&(r.verified_by_user===1||r.verified_by_user===true)),
+    ws_url:(r&&(r.ws_url||r.other_whosampled_url))||'',
+    yt_url:(r&&(derivato?r.yt_url_source:r.yt_url_derivative))||'',
+    intervallo:dettagli.join(' · '),
+    note:(r&&r.notes)||''
+  };
+}
+
+// Le quattro liste della scheda, raggruppate come vanno mostrate (remix, cover,
+// campionamenti usati, brani che campionano questa). `vuoto` è il messaggio da
+// leggere quando il gruppo non ha niente: mai una lista vuota senza spiegazione.
+function blocchiRelazioni(p){
+  const p0=p||{};
+  return [
+    {chiave:'remixes',titolo:'♻️ Remix',vuoto:'Nessun remix registrato per questa canzone.',
+     righe:(p0.remixes||[]).map(rigaRelazione)},
+    {chiave:'covers',titolo:'🎤 Cover',vuoto:'Nessuna cover registrata per questa canzone.',
+     righe:(p0.covers||[]).map(rigaRelazione)},
+    {chiave:'samples_used',titolo:'🎚 Questa canzone campiona',vuoto:'Non risulta che questa canzone campioni altri brani.',
+     righe:(p0.samples_used||[]).map(rigaRelazione)},
+    {chiave:'sampled_by',titolo:'📥 Questa canzone è campionata da',vuoto:'Nessun brano in database campiona questa canzone.',
+     righe:(p0.sampled_by||[]).map(rigaRelazione)}
+  ];
+}
+
+// I candidati trovati dal titolo: sono indizi, la pagina dice sempre il perché.
+function righeVarianti(p){
+  return ((p&&p.varianti)||[]).map(v=>({
+    id:v.id||'', titolo:v.title||'', artista:v.artist||'', album:v.album||'',
+    anno:v.year||'', motivo:v.motivo||'', in_libreria:!!v.local_file
+  }));
+}
+// ═══════════════════════════════════════════════════════════════════════
+// DISEGNO DELLA PAGINA
+// ═══════════════════════════════════════════════════════════════════════
+function renderHero(){
+  const s=(scheda&&scheda.song)||{};
+  const c=(scheda&&scheda.counts)||{};
+  const lettera=(String(s.title||'♪').trim().charAt(0)||'♪').toUpperCase();
+  document.getElementById('bc-value').textContent=s.title||'—';
+  document.title='SampleLab (2) — '+(s.title||'Scheda canzone');
+  const chips=[];
+  if(s.album) chips.push(`<a class="chip" href="${albumHref(s.album)}" title="Tutte le canzoni dell'album">💿 ${esc(s.album)}</a>`);
+  if(s.year) chips.push(`<span class="chip dim">📅 ${esc(s.year)}</span>`);
+  if(s.duration) chips.push(`<span class="chip dim">⏱ ${fmtTime(s.duration)}</span>`);
+  if(s.bpm) chips.push(`<span class="chip ${s.bpm_verified?'ok':'dim'}" title="BPM${s.bpm_verified?' verificato':' da verificare'}">🥁 ${esc(s.bpm)} BPM</span>`);
+  if(s.musical_key) chips.push(`<span class="chip ${s.key_verified?'ok':'dim'}">🎼 ${esc(s.musical_key)}</span>`);
+  if(s.genre) chips.push(`<span class="chip dim">🏷 ${esc(s.genre)}</span>`);
+  if(s.producers) chips.push(`<span class="chip dim">🎛 ${esc(String(s.producers).replace(/[\[\]"]/g,''))}</span>`);
+  chips.push(`<span class="chip">✂️ ${c.stem_tracks||0} stem</span>`);
+  chips.push(`<span class="chip">🎚 ${(c.samples_used||0)+(c.sampled_by||0)} campionamenti</span>`);
+  chips.push(`<span class="chip">♻️ ${(c.remixes||0)+(c.covers||0)} remix/cover</span>`);
+
+  const links=[];
+  if(s.local_file) links.push(`<a href="/stream/${encodeURIComponent(s.local_file)}" target="_blank" title="Apri il file audio">▶ Ascolta il file</a>`);
+  if(s.youtube_url) links.push(`<a href="${esc(s.youtube_url)}" target="_blank">📺 YouTube</a>`);
+  if(s.genius_url) links.push(`<a href="${esc(s.genius_url)}" target="_blank">✍️ Genius</a>`);
+  if(s.whosampled_url) links.push(`<a href="${esc(s.whosampled_url)}" target="_blank" title="La pagina WhoSampled di questa canzone">🔗 WhoSampled</a>`);
+  else links.push(`<a href="https://www.whosampled.com/search/?q=${encodeURIComponent((s.artist||'')+' '+(s.title||''))}" target="_blank" title="Cerca questa canzone su WhoSampled (il link non è salvato nel database)">🔎 Cerca su WhoSampled</a>`);
+  if(s.tunebat_url) links.push(`<a href="${esc(s.tunebat_url)}" target="_blank">📊 Tunebat</a>`);
+  links.push(`<button onclick="ricaricaScheda()" title="Rileggi il database">🔄 Aggiorna</button>`);
+
+  const verifica=[];
+  for(const [campo,nome] of [['title_verified','titolo'],['artist_verified','artisti'],['bpm_verified','BPM'],['key_verified','tonalità'],['lyrics_verified','testo']]){
+    verifica.push(`<span class="chip ${s[campo]?'ok':'dim'}">${s[campo]?'✓':'·'} ${nome}</span>`);
+  }
+
+  document.getElementById('hero').innerHTML=`
+    <div class="hero-top">
+      <div class="hero-art" style="background:linear-gradient(135deg,var(--accent),var(--accent3))">${esc(lettera)}</div>
+      <div class="hero-main">
+        <div class="hero-eyebrow">Scheda canzone</div>
+        <div class="hero-title">${esc(s.title||s.local_file||'Senza titolo')}</div>
+        <div class="hero-artist">${artistChipsHtml(s.artist)}</div>
+        <div class="chips">${chips.join('')}</div>
+      </div>
+    </div>
+    <div class="hero-links">${links.join('')}</div>
+    <div class="chips" style="margin-top:10px">${verifica.join('')}</div>
+    ${s.local_file?`<div class="hero-file">📁 downloads/${esc(s.local_file)}</div>`:''}`;
+}
+
+function renderStem(){
+  const body=document.getElementById('stem-body');
+  const c=(scheda&&scheda.counts)||{};
+  const s=(scheda&&scheda.song)||{};
+  stemRows=righeStem(scheda);
+  document.getElementById('n-stem').textContent=stemRows.length?
+    `${stemRows.length} tracce${c.stem_sessions?` · ${c.stem_sessions} sessioni`:''}`:'';
+  if(!stemRows.length){
+    body.innerHTML=`<div class="empty">Nessuno stem per questa canzone.<br>`+
+      (s.local_file?'La separazione crea <b>voce, batteria, basso, altro</b> (Demucs) e li registra nel database.'
+                   :'Il brano non ha un file locale: prima scarica l\'audio, poi si possono separare gli stem.')+
+      (s.local_file?`<br><button onclick="avviaSeparazione()">✂️ Separa gli stem ora</button>`:'')+`</div>`+
+      (c.stem_missing?`<div class="status">⚠ ${c.stem_missing} file registrati non sono più su disco.</div>`:'');
+    return;
+  }
+  body.innerHTML=stemRows.map((r,i)=>`
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">${r.etichetta}${r.esiste?'':' <span class="tag warn">file mancante</span>'}${r.registrato?'':' <span class="tag">solo su disco</span>'}</div>
+        <div class="row-sub">${esc(r.filename)} · ${formattaByte(r.byte)}${r.origine==='disco'?' · cartella di Demucs':' · dal database'}</div>
+      </div>
+      <div class="row-tools">
+        ${r.esiste?`
+          <button class="icon-btn" id="stem-play-${i}" onclick="stemPlay(${i})" title="Ascolta solo questa traccia">▶</button>
+          <button class="icon-btn" id="stem-mute-${i}" onclick="stemMuto(${i})" title="Muta / riattiva (serve a suonare tutti insieme)">🔊</button>
+          <input type="range" min="0" max="100" value="100" oninput="stemVolume(${i},this.value)" title="Volume di questa traccia">
+          <a class="mini" href="${esc(r.download_url)}" title="Scarica la traccia">⬇</a>`:
+          `<span class="tag warn">non riproducibile</span>`}
+      </div>
+      ${r.esiste?`<audio id="stem-audio-${i}" src="${esc(r.url)}" preload="none" style="display:none"></audio>`:''}
+    </div>`).join('')+
+    (c.stem_missing?`<div class="status">⚠ ${c.stem_missing} file registrati non sono più su disco: la riga lo dice e non fa cliccare a vuoto.</div>`:'')+
+    (stemRows.some(r=>!r.registrato)?`<div class="status">Nota: le tracce «solo su disco» sono nella cartella di Demucs ma non hanno una riga in <b>stem_tracks</b>.</div>`:'');
+}
+// Una riga di relazione (remix, cover o campionamento), in entrambe le direzioni.
+function rigaRelazioneHtml(r){
+  const link=[]; 
+  if(r.ws_url) link.push(`<a class="mini" href="${esc(r.ws_url)}" target="_blank" title="Pagina WhoSampled">🔗 WhoSampled</a>`);
+  if(r.yt_url) link.push(`<a class="mini" href="${esc(r.yt_url)}" target="_blank" title="Video YouTube salvato nel database">📺 YouTube</a>`);
+  if(r.altro_id) link.push(`<a class="mini" href="${schedaHref(r.altro_id)}" title="Apri la scheda di quest'altra canzone">📄 Scheda</a>`);
+  return `
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">${r.altro_id?`<a href="${schedaHref(r.altro_id)}">${esc(r.titolo)}</a>`:esc(r.titolo)}${r.artista?` <span class="row-sub" style="display:inline">— ${esc(r.artista)}</span>`:''}</div>
+        <div class="row-sub">${esc(r.ruolo)}${r.anno?` · ${esc(r.anno)}`:''}${r.intervallo?` · ${esc(r.intervallo)}`:''}${r.note?` · ${esc(r.note)}`:''}</div>
+      </div>
+      <div class="row-tools">
+        <span class="tag">${esc(r.categoria)}</span>
+        <span class="tag ${r.verificato?'ver':''}">${r.verificato?'✓ verificato a mano':'da verificare'}</span>
+        ${link.join('')}
+      </div>
+    </div>`;
+}
+
+function renderRelazioni(){
+  const blocchi=blocchiRelazioni(scheda);
+  const c=(scheda&&scheda.counts)||{};
+  const varianti=righeVarianti(scheda);
+  const trovare=chiave=>blocchi.find(b=>b.chiave===chiave)||{vuoto:'',righe:[]};
+
+  // ── Remix e cover ──
+  const bloccoVarianti=document.getElementById('varianti-body');
+  const remix=trovare('remixes'), cover=trovare('covers');
+  document.getElementById('n-varianti').textContent=
+    `${remix.righe.length+cover.righe.length} relazioni · ${varianti.length} candidati`;
+  let html='';
+  if(!remix.righe.length&&!cover.righe.length){
+    html+=`<div class="empty">Nessun remix e nessuna cover <b>registrati</b> per questa canzone.<br>Si popolano salvando una relazione dal pannello <b>Salva coppia</b> o da uno script SQL (<b>sample_relations</b>: categoria VOCAL_COVER, FULL_REMAKE, INSTRUMENT_REMAKE oppure «remix» nel campo categoria/trasformazione/note).</div>`;
+  }else{
+    for(const b of [remix,cover]){
+      if(!b.righe.length) continue;
+      html+=`<div class="group-title">${b.titolo} <span class="count">${b.righe.length}</span></div>`;
+      html+=b.righe.map(rigaRelazioneHtml).join('');
+    }
+  }
+  if(varianti.length){
+    html+=`<div class="group-title">🔎 Possibili versioni in libreria (riconosciute dal titolo) <span class="count">${varianti.length}</span></div>`;
+    html+=varianti.map(v=>`
+      <div class="row">
+        <div class="row-main">
+          <div class="row-title"><a href="${schedaHref(v.id)}">${esc(v.titolo)}</a>${v.artista?` <span class="row-sub" style="display:inline">— ${esc(v.artista)}</span>`:''}</div>
+          <div class="row-sub">${esc(v.motivo)}${v.anno?` · ${esc(v.anno)}`:''}${v.album?` · ${esc(v.album)}`:''}</div>
+        </div>
+        <div class="row-tools">
+          <span class="tag">candidato, non confermato</span>
+          ${v.in_libreria?'<span class="tag ver">file in libreria</span>':'<span class="tag">senza file locale</span>'}
+          <a class="mini" href="${schedaHref(v.id)}">📄 Scheda</a>
+        </div>
+      </div>`).join('');
+    html+=`<div class="status">Sono indizi trovati dal titolo (stesso titolo base + «remix/cover/live…» o artista diverso): servono a controllare a occhio, NON sono relazioni registrate.</div>`;
+  }
+  bloccoVarianti.innerHTML=html;
+
+  // ── Campionamenti (WhoSampled) ──
+  const bloccoSample=document.getElementById('sample-body');
+  const usati=trovare('samples_used'), subiti=trovare('sampled_by');
+  document.getElementById('n-sample').textContent=
+    `${usati.righe.length+subiti.righe.length} relazioni: ${usati.righe.length} usati · ${subiti.righe.length} che la usano`;
+  let sh='';
+  for(const b of [usati,subiti]){
+    sh+=`<div class="group-title">${b.titolo} <span class="count">${b.righe.length}</span></div>`;
+    sh+=b.righe.length?b.righe.map(rigaRelazioneHtml).join(''):
+        `<div class="empty">${b.vuoto}${(scheda&&scheda.whosampled_url)?'<br>Su WhoSampled la canzone ha una pagina: <a href="'+esc(scheda.whosampled_url)+'" target="_blank">apri ↗</a>':''}</div>`;
+  }
+  sh+=`<div class="status">I campionamenti arrivano dallo scraper WhoSampled (tabella <b>sample_relations</b>): chi deriva è indicato da <b>derivative_song_id</b>, la fonte campionata da <b>source_song_id</b>. I timestamp sono quelli sulle due canzoni.</div>`;
+  bloccoSample.innerHTML=sh;
+}
+
+function renderAnalisi(){
+  const body=document.getElementById('analisi-body');
+  const righe=(scheda&&scheda.analyses)||[];
+  document.getElementById('n-analisi').textContent=righe.length?`${righe.length}`:'';
+  if(!righe.length){
+    body.innerHTML=`<div class="empty">Nessuna analisi salvata per questa canzone.<br>Si aggiungono analizzando il brano (BPM/tonalità): finiscono in <b>audio_analyses</b> con la loro confidenza.</div>`;
+    return;
+  }
+  body.innerHTML=righe.map(a=>`
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">${a.bpm?esc(a.bpm)+' BPM':'BPM non salvato'}${a.musical_key?' · '+esc(a.musical_key):''}</div>
+        <div class="row-sub">${etichettaFonte(a.source)} · ${esc(a.analyzed_at||'')}${a.confidence?` · confidenza ${Math.round(a.confidence*100)}%`:''}</div>
+      </div>
+    </div>`).join('');
+}
+// ═══════════════════════════════════════════════════════════════════════
+// MIXER DEGLI STEM — le tracce partono INSIEME (sincronizzate) o una alla
+// volta; ognuna ha il suo mute e il suo volume.
+// ═══════════════════════════════════════════════════════════════════════
+function audioDi(i){
+  if(!stemAudio[i]){
+    const el=document.getElementById('stem-audio-'+i);
+    if(el) stemAudio[i]=el;
+  }
+  return stemAudio[i]||null;
+}
+function stemInRiproduzione(){
+  return stemRows.map((_,i)=>audioDi(i)).filter(a=>a&&!a.paused&&!a.ended);
+}
+function aggiornaBottoniStem(){
+  stemRows.forEach((_,i)=>{
+    const b=document.getElementById('stem-play-'+i);
+    const a=audioDi(i);
+    if(b&&a) b.textContent=(!a.paused&&!a.ended)?'⏸':'▶';
+  });
+  const play=document.getElementById('mixer-play');
+  if(play) play.textContent=stemInRiproduzione().length?'⏸ Pausa gli stem':'▶ Suona tutti insieme';
+  const info=document.getElementById('mixer-info');
+  if(info) info.textContent=stemRows.length?('🎚 '+stemRows.length+' tracce: '+stemRows.map(r=>r.etichetta.replace(/^\S+\s/,'')).join(' · ')):'';
+}
+function mostraMixer(){ document.getElementById('mixer').classList.add('visible'); }
+function stemPlay(i){
+  const a=audioDi(i);
+  if(!a) return;
+  if(!a.paused){ a.pause(); aggiornaBottoniStem(); return; }
+  stemRows.forEach((_,j)=>{ if(j!==i&&stemAudio[j]) stemAudio[j].pause(); });
+  a.muted=false;
+  const b=document.getElementById('stem-mute-'+i);
+  if(b){ b.classList.remove('off'); b.textContent='🔊'; }
+  a.play().catch(()=>{});
+  mostraMixer();
+  aggiornaBottoniStem();
+}
+function stemMuto(i){
+  const a=audioDi(i);
+  const b=document.getElementById('stem-mute-'+i);
+  if(!a||!b) return;
+  a.muted=!a.muted;
+  b.classList.toggle('off',a.muted);
+  b.textContent=a.muted?'🔇':'🔊';
+  b.title=a.muted?'Riattiva questa traccia':'Muta questa traccia (serve a suonare tutti insieme)';
+}
+function stemVolume(i,v){
+  const a=audioDi(i);
+  if(a) a.volume=Math.max(0,Math.min(1,Number(v)/100));
+}
+function mostraTempo(){
+  const attivi=stemInRiproduzione();
+  const el=document.getElementById('mixer-time');
+  if(!el) return;
+  if(!attivi.length){ aggiornaBottoniStem(); return; }
+  el.textContent=fmtTime(attivi[0].currentTime)+' / '+fmtTime(attivi[0].duration);
+}
+function mixerToggle(){
+  const attivi=stemInRiproduzione();
+  if(attivi.length){
+    attivi.forEach(a=>a.pause());
+    aggiornaBottoniStem();
+    return;
+  }
+  const pronti=stemRows.map((_,i)=>audioDi(i)).filter(Boolean);
+  if(!pronti.length) return;
+  const t=pronti[0].currentTime||0;
+  pronti.forEach(a=>{ try{a.currentTime=t}catch(_){}});
+  pronti.forEach(a=>{ a.muted=false; a.play().catch(()=>{}); });
+  stemRows.forEach((_,i)=>{
+    const b=document.getElementById('stem-mute-'+i);
+    if(b){ b.classList.remove('off'); b.textContent='🔊'; }
+  });
+  mostraMixer();
+  if(!mixerTimer) mixerTimer=setInterval(mostraTempo,500);
+  aggiornaBottoniStem();
+}
+function mixerStop(){
+  stemRows.forEach((_,i)=>{
+    const a=audioDi(i);
+    if(!a) return;
+    a.pause();
+    try{a.currentTime=0}catch(_){}
+  });
+  if(mixerTimer){ clearInterval(mixerTimer); mixerTimer=null; }
+  document.getElementById('mixer').classList.remove('visible');
+  aggiornaBottoniStem();
+}
+// ═══════════════════════════════════════════════════════════════════════
+// SEPARAZIONE DEGLI STEM (dal pulsante della sezione vuota)
+// ═══════════════════════════════════════════════════════════════════════
+async function avviaSeparazione(){
+  const s=(scheda&&scheda.song)||{};
+  if(!s.local_file){ alert('Il brano non ha un file locale: prima scarica l\'audio.'); return; }
+  if(!confirm(`Separare gli stem di "${s.local_file}"? Richiede alcuni minuti (Demucs).`)) return;
+  const body=document.getElementById('stem-body');
+  body.innerHTML='<div class="status">⏳ Separazione avviata…</div>';
+  let job=null;
+  try{
+    job=await fetch('/separate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({filename:s.local_file,song_id:songId})}).then(r=>r.json());
+  }catch(e){ body.innerHTML=`<div class="status">❌ Errore nell'avvio: ${esc(e.message)}</div>`; return; }
+  if(!job||!job.job_id){
+    body.innerHTML=`<div class="status">❌ ${esc((job&&job.error)||'l\'app non ha accettato la separazione')}</div>`;
+    return;
+  }
+  const stato=document.createElement('div');
+  stato.className='status';
+  body.appendChild(stato);
+  const timer=setInterval(async()=>{
+    let j=null;
+    try{ j=await fetch('/status/'+encodeURIComponent(job.job_id)).then(r=>r.json()); }catch(_){ return; }
+    const pct=(j&&j.progress&&j.progress.percent)||(j&&j.progress_percent);
+    stato.innerHTML=`⏳ Job ${esc(job.job_id)}: ${esc((j&&j.status)||'?')}${pct?' · '+esc(pct)+'%':''} — quando finisce la pagina si aggiorna da sola.`;
+    if(j&&(j.status==='done'||j.status==='error')){
+      clearInterval(timer);
+      if(j.status==='error'){ stato.innerHTML=`❌ Separazione fallita: ${esc(j.error||'errore')}`; return; }
+      stato.innerHTML='✓ Separazione completata: ricarico la scheda…';
+      setTimeout(caricaScheda,800);
+    }
+  },3000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CARICAMENTO E AGGIORNAMENTO AUTOMATICO
+// ═══════════════════════════════════════════════════════════════════════
+function renderTutto(){
+  renderHero(); renderStem(); renderRelazioni(); renderAnalisi(); aggiornaBottoniStem();
+}
+async function caricaScheda(){
+  if(!songId){
+    document.getElementById('hero').innerHTML=
+      '<div class="empty">Nessuna canzone indicata.<br>Apri questa pagina dal pulsante <b>📄 Scheda</b> di una riga della tabella del database, oppure aggiungi <b>?song=&lt;id&gt;</b> all\'indirizzo.</div>';
+    return;
+  }
+  let risposta=null;
+  try{
+    risposta=await fetch('/db/songs/'+encodeURIComponent(songId)+'/scheda').then(r=>r.json());
+  }catch(e){
+    document.getElementById('hero').innerHTML=`<div class="empty">❌ Non riesco a leggere la scheda: ${esc(e.message)}</div>`;
+    return;
+  }
+  if(!risposta||risposta.error){
+    document.getElementById('hero').innerHTML=`<div class="empty">❌ ${esc((risposta&&risposta.error)||'Canzone non trovata nel database')}</div>`;
+    return;
+  }
+  scheda=risposta;
+  renderTutto();
+}
+function ricaricaScheda(){ mixerStop(); caricaScheda(); }
+
+// Il database cambia di continuo (download, Verifica, script SQL): la pagina
+// ascolta la firma leggera /db/changed e si ridisegna solo quando cambia.
+// NON si ridisegna mentre gli stem suonano: ricostruirebbe gli <audio> e la
+// riproduzione si interromperebbe a metà.
+let attesaRicaricamento=false;
+async function autoAggiorna(){
+  if(!songId) return;
+  if(stemInRiproduzione().length){ attesaRicaricamento=true; return; }
+  try{
+    const sig=await fetch('/db/changed').then(r=>r.json());
+    const sigStr=JSON.stringify(sig||{});
+    if(!lastDbSig){ lastDbSig=sigStr; return; }
+    if(sigStr===lastDbSig&&!attesaRicaricamento) return;
+    lastDbSig=sigStr;
+    attesaRicaricamento=false;
+    await caricaScheda();
+  }catch(_){}
+}
+
+// Le funzioni richiamate dagli onclick scritti nell'HTML devono stare su window:
+// dentro questa funzione anonima non sarebbero raggiungibili dalla pagina (è lo
+// stesso motivo per cui in browse.html il pulsante ↑/↓ Crescente non risponde).
+Object.assign(window,{mixerToggle,mixerStop,stemPlay,stemMuto,stemVolume,
+                      avviaSeparazione,ricaricaScheda});
+
+caricaScheda();
+setInterval(autoAggiorna,4000);
+
+
+
+
+
+
+})();
+</script>
+</body>
+</html>
