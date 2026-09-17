@@ -114,7 +114,7 @@ Dall'alto verso il basso il modale è organizzato in **nove fasce**:
 ├─────────────────────────────────────────────────────────────────────┤
 │ Zoom  − ────────●────────────  +   1×              ⟳ Segui         │  3
 ├─────────────────────────────────────────────────────────────────────┤
-│ Visualizza griglia │ Adatta alla griglia │ 1 bar ▾ │ 120.00 BPM │   │  4
+│ Griglia on │ Adatta alla griglia │ 1 bar ▾ │ 120.00 BPM │   │  4
 │ x (es. 2,3) │ Moltiplica                                            │
 ├─────────────────────────────────────────────────────────────────────┤
 │ 0 Offset │ Battute Sel. 4 │ Diventa Bar N° 1 │ Allinea griglia      │  5
@@ -218,7 +218,7 @@ DJ Shocca, BPM **60.1** nel database).
 
 | Controllo | Cosa fa |
 |---|---|
-| **Visualizza / Nascondi griglia** | disegna (o toglie) le linee verticali sul righello e sulla forma d'onda; quelle più marcate sono le **battute**. L'etichetta dice sempre lo stato in cui passi. |
+| **Griglia on / off** | accende e spegne le linee verticali sul righello e sulla forma d'onda (quelle più marcate sono le **battute**). L'etichetta dice lo **stato**, non l'azione: `Griglia on` quando le linee ci sono, `Griglia off` quando sono nascoste — e il pulsante è evidenziato quando è accesa. Il suggerimento (tooltip) dice cosa fa il clic: *«Griglia accesa — clic per spegnerla»*. |
 | **Adatta alla griglia** | prende **IN** e **OUT** e li porta sul punto più vicino della griglia (snap). È il "raddrizza la selezione" dopo averla trascinata a orecchio. *Se la griglia è spenta o il BPM è 0 non fa niente*: non c'è niente su cui agganciare. Nella prova a 120 BPM: IN 10,3 → **10** e OUT 13,9 → **14**; con offset 0,7 gli agganci stanno a 0,7 + multipli del passo (10,3 → **10,7**). |
 | **unità della griglia** | `1/4 bar` = un quarto, `1/2 bar` = due quarti, `1 bar` = una battuta 4/4 (**predefinito**), `2 bar` = due battute, `4 bar` = quattro battute. Cambia **linee, righello e snap**: il **metronomo no**, che ha un'unità sua (§5.5). |
 | **BPM** | il tempo in battiti al minuto, con passi di 0,1. Quando confermi il valore (Invio o uscendo dal campo): la selezione si riaggancia alla nuova griglia, il metronomo si risincronizza e l'azione finisce nello storico (**Undo**). All'apertura arriva dal database. |
@@ -385,7 +385,7 @@ esattamente le stesse cose:
 | BPM iniziale | **quello del database** (novità 17/09/2026) | 120: lì il tempo si misura, non si eredita |
 | Clic sulla selezione | sposta solo il playhead | sposta il playhead **e avvia la riproduzione** |
 | **Scarica selezione** | simulato (scarica il file intero) | **taglio reale** col backend (ffmpeg) |
-| Etichetta del pulsante griglia | `Visualizza griglia` / `Nascondi griglia` | `Griglia` |
+| Etichetta del pulsante griglia | `Griglia on` / `Griglia off` (stato) | `Griglia on` / `Griglia off` (stato) |
 | Avviso "il sample non è in questo file" | compare se il punto d'apertura non esiste | idem, con il messaggio esteso |
 
 In pratica: **col modale si misura il tempo della libreria** (è ciò per cui è
@@ -430,22 +430,22 @@ sono quelli di `index (2).html` (il contenuto della textarea inizia alla riga
 | Cosa | Dove |
 |---|---|
 | Modale del sampler | `index (2).html` riga **780** (`#audio-editor-modal` + `iframe#audio-editor-iframe`) |
-| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **790–2889** (`<textarea id="audio-editor-src">`) |
-| Apertura del modale | `index (2).html` riga **5201**: `openAudioEditor(url, filename, startSec, bpm)` |
-| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5224**: `openInSampler(songIdOFile, opts)` |
-| Pulsante nella riga del database | dentro `renderDbTable` (riga **4281**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit) |
-| Ricezione dal player (`openSampler`) | `index (2).html` riga **2981** |
-| Link diretti `?tab=` / `?sampler=` / `?sampler_file=` | `index (2).html` riga **3017** |
+| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **790–2898** (`<textarea id="audio-editor-src">`) |
+| Apertura del modale | `index (2).html` riga **5210**: `openAudioEditor(url, filename, startSec, bpm)` |
+| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5233**: `openInSampler(songIdOFile, opts)` |
+| Pulsante nella riga del database | dentro `renderDbTable` (riga **4290**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit) |
+| Ricezione dal player (`openSampler`) | `index (2).html` riga **2990** |
+| Link diretti `?tab=` / `?sampler=` / `?sampler_file=` | `index (2).html` riga **3026** |
 | Voce di menu nel player | `onyx_whosampled.html` riga **2478**, con `samplerUrlFor` (**2489**), `dbSongIdFor` (**2497**), `openInSampler` (**2516**) |
 | Handshake col documento (`{action:'load', url, filename, startSec, bpm}`) | documento del sampler, ricezione del messaggio (in coda allo script) |
-| Griglia: passo, snap, unità | `getGridStep` **2169** · `snapToGrid` **2174** · `snapTrimToGrid` **2211** · `setBpm` **2181** · `setGridOffset` **2193** · `setGridSubdivision` **2203** |
-| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1719** · `alignGridToSelection` **1727** |
-| BPM dai battiti e dal fattore | `bpmDaTap` **2229** (media pura) · `tapTempo` **2250** · `updateTapLabel` **2243** · `multiplyBpm` **2272** |
-| Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **2301** (pura) · `accentoBattuta` **2311** (pura) · `etichettaUnita` **2320** (pura) · `getMetroStep` **2330** · `updateMetroStatus` **2336** · `setMetroSubdivision` **2343** · `toggleMetronome` **2351** · `checkMetronome` **2368** · `flashMetronome` **2396** |
-| Disegno della griglia e del righello | `updateGridUI` **2409** · `updateRuler` **2435** |
-| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2504** · `deselectBar` **2522** · `updateBarSelectionUI` **2537** · `_startCellBorderDrag` **2577** · `_moveCellBorderDrag` **2605** |
-| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2680** · `onAudioLayerMouseDown` **2689** · `startPlayheadDrag` **2780** · `applyHandleDrag` **2080** · `startSelDrag` **2093** · `resetTrimStart` **2814** |
-| Zoom, scorrimento, trasporto | `setZoom` **1890** · `adjustZoom` **1908** · `onTrimWheel` **1932** · `togglePlay` **1945** · `toggleFollow` **1763** |
+| Griglia: passo, snap, unità, etichetta on/off | `getGridStep` **2178** · `snapToGrid` **2183** · `snapTrimToGrid` **2220** · `setBpm` **2190** · `setGridOffset` **2202** · `setGridSubdivision` **2212** · `etichettaGriglia` **1709** · `toggleGridVisibility` **1713** |
+| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1728** · `alignGridToSelection` **1736** |
+| BPM dai battiti e dal fattore | `bpmDaTap` **2238** (media pura) · `tapTempo` **2259** · `updateTapLabel` **2252** · `multiplyBpm` **2281** |
+| Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **2310** (pura) · `accentoBattuta` **2320** (pura) · `etichettaUnita` **2329** (pura) · `getMetroStep` **2339** · `updateMetroStatus` **2345** · `setMetroSubdivision` **2352** · `toggleMetronome` **2360** · `checkMetronome` **2377** · `flashMetronome` **2405** |
+| Disegno della griglia e del righello | `updateGridUI` **2418** · `updateRuler` **2444** |
+| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2513** · `deselectBar` **2531** · `updateBarSelectionUI` **2546** · `_startCellBorderDrag` **2586** · `_moveCellBorderDrag` **2614** |
+| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2689** · `onAudioLayerMouseDown` **2698** · `startPlayheadDrag` **2789** · `applyHandleDrag` **2089** · `startSelDrag` **2102** · `resetTrimStart` **2823** |
+| Zoom, scorrimento, trasporto | `setZoom` **1899** · `adjustZoom` **1917** · `onTrimWheel` **1941** · `togglePlay` **1954** · `toggleFollow` **1772** |
 | Storico (Undo/Redo) | `pushHistory` **1465** · `applyHistoryState` **1498** · `undoAction` **1521** · `redoAction` **1528** |
 | Caricamento del brano | `initPlayer` **1620** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
 | Taglio reale (player delle card) | `index (2).html` `downloadTrim` → `POST /trim` → `GET /status/<job_id>` → `GET /download-file/<nome>` (in `app (2).py`: righe **2528**, **2395**, **2308**) |
@@ -505,7 +505,10 @@ parte pura (`stepMetronomo`, `accentoBattuta`, `etichettaUnita`) e 15/15 in
 Chrome, dove i colpi vengono **contati davvero** intercettando
 `playMetronomeClick`: a 120 BPM in due battute escono **8 colpi** con `ogni 1/4`,
 4 con `ogni 2/4`, 2 con `ogni battuta`, 1 con `ogni 2 battute` — e la **griglia
-resta a 1 battuta** (2 s) mentre il metronomo batte i quarti.
+resta a 1 battuta** (2 s) mentre il metronomo batte i quarti. Il **pulsante della
+griglia** ha 14/14 controlli suoi: etichetta di stato (`Griglia on` → `Griglia
+off`), evidenziazione, tooltip, e la griglia che passa da **85 linee a 0** e
+ritorno.
 
 
 

@@ -1311,7 +1311,7 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
       </div>
 
       <div class="grid-row">
-        <button class="grid-btn active" id="grid-btn-main" onclick="toggleGridVisibility('main')">Visualizza griglia</button>
+        <button class="grid-btn active" id="grid-btn-main" onclick="toggleGridVisibility('main')" title="Griglia accesa — clic per spegnerla">Griglia on</button>
         <button class="btn-snap-grid" onclick="snapSelectionToGrid('main')">Adatta alla griglia</button>
 
         <select class="grid-select" id="grid-sel-main" onchange="setGridSubdivision('main',this.value)">
@@ -1703,6 +1703,13 @@ function initPlayer(key, url, startSec) {
 }
 
 // ─── GRID VISIBILITY / SNAP / ALIGN ──────────────────────────
+// Etichetta del pulsante della griglia: dice lo STATO (non l'azione) — prima
+// era "Visualizza griglia" quando la griglia era già accesa e "Nascondi
+// griglia" quando era spenta: due nomi invertiti (segnalato il 17/09/2026).
+function etichettaGriglia(attiva) {
+  return attiva ? 'Griglia on' : 'Griglia off';
+}
+
 function toggleGridVisibility(key) {
   const p = players[key];
   if (!p) return;
@@ -1710,7 +1717,9 @@ function toggleGridVisibility(key) {
   const btn = document.getElementById(`grid-btn-${key}`);
   if (btn) {
     btn.classList.toggle('active', p.gridEnabled);
-    btn.textContent = p.gridEnabled ? 'Visualizza griglia' : 'Nascondi griglia';
+    btn.textContent = etichettaGriglia(p.gridEnabled);
+    btn.title = p.gridEnabled ? 'Griglia accesa — clic per spegnerla'
+                              : 'Griglia spenta — clic per accenderla';
   }
   p.nextMetroBeatTime = null;
   fullRedraw(key);
@@ -3634,7 +3643,7 @@ function buildPlayerHTML(key,label,filename){
     <span class="zoom-val" id="zoom-val-${key}">1×</span>
   </div>
   <div class="grid-row">
-    <button class="grid-btn active" id="grid-btn-${key}" onclick="toggleGrid('${key}')">Griglia</button>
+    <button class="grid-btn active" id="grid-btn-${key}" onclick="toggleGrid('${key}')" title="Griglia accesa — clic per spegnerla">Griglia on</button>
     <select class="grid-select" id="grid-sel-${key}" onchange="setGridSubdivision('${key}',this.value)">
       <option value="0.25">1/4 bar</option><option value="0.5">1/2 bar</option>
       <option value="1" selected>1 bar</option><option value="2">2 bar</option><option value="4">4 bar</option>
@@ -3809,7 +3818,7 @@ function updateGridUI(key){
 function setBpm(key,val){const p=players[key];if(!p)return;p.bpm=parseFloat(val)||0;if(p.gridEnabled){snapTrimToGrid(key);updateTrimUI(key)}updateGridUI(key);updateRuler(key);updateBarSelection(key)}
 function setGridOffset(key,val){const p=players[key];if(!p)return;p.gridOffset=parseFloat(val)||0;if(p.gridEnabled){snapTrimToGrid(key);updateTrimUI(key)}updateGridUI(key);updateRuler(key);updateBarSelection(key)}
 function setGridSubdivision(key,val){const p=players[key];if(!p)return;p.gridSubdivision=parseFloat(val)||1;if(p.gridEnabled){snapTrimToGrid(key);updateTrimUI(key)}updateGridUI(key)}
-function toggleGrid(key){const p=players[key];if(!p)return;p.gridEnabled=!p.gridEnabled;document.getElementById(`grid-btn-${key}`)?.classList.toggle("active",p.gridEnabled);if(p.gridEnabled){snapTrimToGrid(key);updateTrimUI(key)}updateGridUI(key)}
+function toggleGrid(key){const p=players[key];if(!p)return;p.gridEnabled=!p.gridEnabled;const b=document.getElementById(`grid-btn-${key}`);if(b){b.classList.toggle("active",p.gridEnabled);b.textContent=p.gridEnabled?"Griglia on":"Griglia off";b.title=p.gridEnabled?"Griglia accesa — clic per spegnerla":"Griglia spenta — clic per accenderla"}if(p.gridEnabled){snapTrimToGrid(key);updateTrimUI(key)}updateGridUI(key)}
 function updateRuler(key){
   const p=players[key],ri=document.getElementById(`ri-${key}`);
   if(!ri||!p||!p.audio.duration){if(ri)ri.innerHTML='';return;}

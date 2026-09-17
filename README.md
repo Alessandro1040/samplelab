@@ -460,6 +460,17 @@ Da tenere presente nelle sessioni di lavoro successive:
   ⚠️ Le righe con `title` NULL restano (dati da decidere): il codice ora non ci
   sbatte più, ma la riga di *Apex* va rinominata (vedi **🎛 Sampler** o *✏️ Edit*).
 
+- **PULSANTE DELLA GRIGLIA: ETICHETTA DI STATO (17/09/2026).** Il pulsante diceva
+  **"Visualizza griglia"** quando la griglia era *già accesa* e **"Nascondi
+  griglia"** quando era *spenta*: due nomi invertiti rispetto a quello che fa il
+  clic (segnalato da Alessandro). Ora dice lo **stato** — **`Griglia on`** /
+  **`Griglia off`** — è evidenziato quando è accesa e il tooltip dice cosa farà il
+  clic («Griglia accesa — clic per spegnerla» / «Griglia spenta — clic per
+  accenderla»). Stessa etichetta anche nel player delle card dei sample.
+  Verificato in Chrome (14/14): stato iniziale `Griglia on` con la griglia
+  disegnata (**85 linee**), un clic → `Griglia off` e **0 linee** sull'onda
+  (griglia davvero nascosta), secondo clic → di nuovo `Griglia on` con 85 linee,
+  tooltip e classe `active` coerenti in tutti i casi.
 - **METRONOMO CON UNITÀ SUA (17/09/2026).** Il metronomo del sampler non segue più
   la griglia: ha una **tendina dedicata** con **ogni 1/4** (predefinito), `ogni 2/4`,
   `ogni 3/4`, `ogni battuta`, `ogni 2 battute`, `ogni 4 battute`. Prima seguiva la
