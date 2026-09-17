@@ -491,3 +491,46 @@ Da tenere presente nelle sessioni di lavoro successive:
   ⚠️ I brani **senza** Eminem e con altri featuring sono rimasti come erano
   (es. `Murder, Murder Lyrics (HD)`): la riparazione ha toccato solo i danni.
 
+- **ANNO VUOTO E ALBUM «Mus» — CORRETTI (17/09/2026).** Premendo *Verifica* su un
+  brano compariva la data di Genius ("September 2, 2025") ma **non l'anno**, e
+  l'album restava **"Mus"**. Erano tre difetti distinti:
+  1. **L'anno non veniva ricavato dalla data.** Genius dà solo `release_date`
+     come testo: la Verifica salvava la data e lasciava `year` vuoto (13 righe in
+     libreria). Ora `_year_from_date()` in `app (2).py` ricava l'anno da qualunque
+     formato ("September 2, 2025" → 2025, "2002-10-28" → 2002) e la Verifica lo
+     scrive, dicendolo in interfaccia.
+  2. **Un album falso bloccava quello vero.** La Verifica completava l'album
+     *solo se vuoto*: con "Mus" dentro, il nome di Genius non entrava mai. Ora
+     `_album_segnaposto()` riconosce i valori che non sono album (Mus/Music/
+     Album sconosciuto/Unknown…) e in quel caso la Verifica scrive quello di
+     Genius — senza toccare gli album veri, anche se corti ("2001", "BV3").
+  3. **Da dove venivano "Mus" e il «Genius non ha trovato».** Nel player il
+     caricamento per **cartella** usava il nome della cartella come album
+     (`album = parts[parts.length - 2]`) → **168 righe con album "Mus"**; e la
+     ricerca Genius includeva l'artista **anche quando è il segnaposto "Brano
+     locale"** (query «Brano locale The Sauce…» → **zero risultati**), che è il
+     motivo per cui sui brani locali la Verifica non trovava né album né data.
+     Fix: `albumDaCartella()` / `albumPerDb()` in `onyx_whosampled.html` (i nomi
+     generici di cartella e l'etichetta "Album sconosciuto" non entrano più nel
+     database) e in `fetch_genius()` l'artista segnaposto non entra più nella
+     query.
+  Verifiche del 17/09/2026: *Verifica* reale su **The Apple** (Eminem) → `year`
+  da `None` a **2011** e album da `Mus` a **King Mathers**, con i messaggi
+  «Anno ricavato dalla data (December 18, 2011): 2011» e «Album da Genius: King
+  Mathers»; in Chrome la riga del database e il modale ✏️ Edit mostrano anno
+  `2011` + album `King Mathers` (7/7 controlli Selenium); 12/12 controlli in
+  JavaScriptCore sulle funzioni dell'album; **6/6 blocchi `<script>`** delle due
+  pagine compilati; **14 + 26 + 22 test** OK (i 6 nuovi test su anno/album sono in
+  `test_verify_genius.py`). Backfill delle righe già in libreria: **25 anni**
+  sistemati (13 ricavati dalle date già presenti, gli altri 12 arrivati con le
+  date nuove) e **18 album** completati con **guardie strette** (artista
+  compatibile, oppure stesso URL Genius già salvato: es. *Bounce* → *There Goes
+  the Neighborhood*, *Pyro* e *In My Baggie* → *88 Milligrams*, *5 AM* → *MM,
+  Vol. 1*); le altre **151** righe (149 con `Mus` + 2 vuote) restano col
+  segnaposto perché su Genius non hanno una pagina — 46 di queste hanno anche un
+  artista segnaposto, quindi non c'è nemmeno un nome su cui cercare.
+  ⚠️ Lezione: una prima passata più permissiva (col solo titolo) aveva preso
+  l'album di un **omonimo** ("Cha-Ching" → album di *Unique Salonga*): è stata
+  **annullata** dal backup (`/tmp/samplelab_pre_backfill_2114.db`) prima di
+  rifarla con le guardie. Meglio un segnaposto che l'album di un'altra canzone.
+

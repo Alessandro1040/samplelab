@@ -806,6 +806,29 @@ function normalizeName(str) {
 }
 
 // ──────────────────────────────────────────────
+//  ALBUM: la cartella NON è un album
+// ──────────────────────────────────────────────
+// Quando si carica una CARTELLA, il nome della cartella veniva usato come album:
+// così 168 canzoni si erano ritrovate l'album "Mus" (era il nome della cartella
+// trascinata) e la Verifica non lo correggeva, perché il campo non era vuoto.
+// Questi nomi generici non sono album e non vanno salvati.
+const CARTELLE_NON_ALBUM = ["mus", "music", "musica", "download", "downloads",
+                            "desktop", "audio", "brani", "mp3", "samplelab",
+                            "nuova cartella", "new folder"];
+const ETICHETTE_NON_ALBUM = ["album sconosciuto", "unknown album", "unknown", "various"];
+function albumDaCartella(nome){
+  const n = String(nome || "").trim();
+  return CARTELLE_NON_ALBUM.indexOf(n.toLowerCase()) >= 0 ? "" : n;
+}
+// Valore da mandare al database: l'etichetta di comodo del player e i nomi
+// generici di cartella non sono dati, quindi restano fuori dal DB.
+function albumPerDb(v){
+  const a = String(v || "").trim();
+  if (!a || ETICHETTE_NON_ALBUM.indexOf(a.toLowerCase()) >= 0) return "";
+  return albumDaCartella(a);
+}
+
+// ──────────────────────────────────────────────
 //  METADATI REALI (tag ID3 / MP4 / Vorbis) nel file
 // ──────────────────────────────────────────────
 // Legge i tag scritti dentro il file audio (quelli che l'app Musica di macOS
@@ -887,7 +910,8 @@ function handleAudioFiles(files) {
     if (file.webkitRelativePath) {
       const parts = file.webkitRelativePath.split('/');
       if (parts.length > 1) {
-        album = parts[parts.length - 2];
+        const dallaCartella = albumDaCartella(parts[parts.length - 2]);
+        if (dallaCartella) album = dallaCartella;
       }
     }
 
@@ -1963,7 +1987,7 @@ async function analyzeTrack(trackId) {
         const res = await fetch('/db/from_onyx', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: track.name, artist: track.artist, album: track.album || '',
+            title: track.name, artist: track.artist, album: albumPerDb(track.album),
             album_artist: track.album_artist || '', composer: track.composer || '',
             genre: track.genre || '', year: track.year || '',
             bpm: track.bpm ? parseFloat(track.bpm) : null,
@@ -2657,7 +2681,7 @@ async function syncOnyxTracksToDb(nBefore){
       await dbPut('tracks', t);
       const res = await fetch('/db/from_onyx', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({title: t.name, artist: t.artist, album: t.album,
+        body: JSON.stringify({title: t.name, artist: t.artist, album: albumPerDb(t.album),
                               album_artist: t.album_artist||'', composer: t.composer||'',
                               genre: t.genre||'', year: t.year, track_number: t.track_number||'',
                               bpm: t.bpm?parseFloat(t.bpm):null, musical_key: t.musical_key||'',

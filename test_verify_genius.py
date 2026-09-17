@@ -49,6 +49,36 @@ def app_is_up(url):
         return False
 
 
+class TestAnnoEAlbumPuri(unittest.TestCase):
+    """Verifiche del 17/09/2026: dopo la Verifica la riga aveva la data di Genius
+    ("September 2, 2025") ma la casella **anno** vuota, e l'album restava il
+    segnaposto "Mus" (il nome della cartella di caricamento)."""
+
+    def test_anno_da_data_inglese(self):
+        self.assertEqual(APP._year_from_date("September 2, 2025"), 2025)
+
+    def test_anno_da_data_iso(self):
+        self.assertEqual(APP._year_from_date("2002-10-28"), 2002)
+
+    def test_anno_da_data_con_anno_a_inizio(self):
+        self.assertEqual(APP._year_from_date("1998, April 1"), 1998)
+
+    def test_anno_assente(self):
+        self.assertIsNone(APP._year_from_date(""))
+        self.assertIsNone(APP._year_from_date(None))
+        self.assertIsNone(APP._year_from_date("senza data"))
+        self.assertIsNone(APP._year_from_date("12/34"))
+
+    def test_album_segnaposto_riconosce_i_falsi(self):
+        for v in ("Mus", "  mus ", "Music", "Album sconosciuto", "", None, "N/A"):
+            self.assertTrue(APP._album_segnaposto(v), f"{v!r} doveva essere un segnaposto")
+
+    def test_album_segnaposto_non_tocca_gli_album_veri(self):
+        # anche corti, ma reali: non devono essere sovrascritti
+        for v in ("2001", "BV3", "King Mathers", "17", "SOS"):
+            self.assertFalse(APP._album_segnaposto(v), f"{v!r} è un album vero")
+
+
 class TestCreditiPuri(unittest.TestCase):
     def test_credits_missing_vero_se_manca_un_nome(self):
         self.assertTrue(APP._credits_missing("Chris Webby", ["Chris Webby", "ANoyd"]))

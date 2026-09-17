@@ -703,6 +703,29 @@ def _credits_missing(current, names):
             return True
     return False
 
+# ── ANNO E ALBUM (dai dati di Genius) ────────────────────────────────────────
+# Genius dà la data come testo ("September 2, 2025") e NON l'anno: se non lo si
+# ricava, la colonna `year` resta vuota anche quando la data c'è (segnalato il
+# 17/09/2026: 13 righe con data e anno vuoto).
+_ANNO_RE = re.compile(r'\b(1[89]\d{2}|2[01]\d{2})\b')
+def _year_from_date(value):
+    """'September 2, 2025' → 2025 · '2002-10-28' → 2002 · None se non c'è."""
+    m = _ANNO_RE.search(str(value or ""))
+    return int(m.group(1)) if m else None
+
+# Valori che NON sono il nome di un album: segnaposto delle etichette/degli
+# store o del caricamento per cartella (il player usava il nome della cartella:
+# 168 brani si erano ritrovati l'album "Mus"). Con uno di questi Genius può
+# scrivere sopra; un album "vero", anche corto (es. "2001"), non si tocca.
+_ALBUM_SEGNAPOSTO = {"", "mus", "music", "musica", "album", "album sconosciuto",
+                     "sconosciuto", "unknown", "unknown album", "various",
+                     "various artists", "-", "--", "n/a", "na", "single",
+                     "singolo", "download", "downloads", "desktop", "audio",
+                     "brani", "mp3", "samplelab"}
+def _album_segnaposto(v):
+    """True se il campo album è vuoto o è un segnaposto (non un album vero)."""
+    return str(v or "").strip().lower() in _ALBUM_SEGNAPOSTO
+
 def fetch_genius(artist, title):
     """Fetch da Genius: URL, titolo, artista, produttori, compositori (writers),
     album, artista album, data e cover.
@@ -720,7 +743,13 @@ def fetch_genius(artist, title):
             "Origin": "https://genius.com",
             "Referer": "https://genius.com/"
         }
-        q = urllib.parse.quote(f"{artist} {title}")
+        # L'artista segnaposto ("Brano locale", "Artista sconosciuto"…) NON va
+        # messo nella query: la search API rispondeva **zero** risultati
+        # ("Brano locale The Sauce…"), ed è il motivo per cui sui brani locali la
+        # Verifica non trovava né album né data (segnalato il 17/09/2026). Col
+        # solo titolo la soglia è più alta e il titolo deve combaciare (sotto).
+        artista_query = "" if is_placeholder_artist(artist) else (artist or "")
+        q = urllib.parse.quote(f"{artista_query} {title}".strip())
         url = f"https://genius.com/api/search/multi?q={q}"
         req = urllib.request.Request(url, headers=headers)
         time.sleep(0.5)  # Evita rate limit
@@ -3059,12 +3088,27 @@ def verify_song(song_id):
             if genius.get("producers") and _credits_missing(s.get("producers"), genius["producers"]):
                 updates["producers"] = json.dumps(genius["producers"], ensure_ascii=False)
                 messages.append("🎛 Produttori da Genius: " + ", ".join(genius["producers"]))
-            if genius.get("release_date") and not s.get("release_date"):
+            # DATA: Genius la dà come testo ("September 2, 2025").
+            data_eff = s.get("release_date") or ""
+            if genius.get("release_date") and not data_eff:
                 updates["release_date"] = genius["release_date"]
+                data_eff = genius["release_date"]
                 messages.append("Data rilascio trovata su Genius")
-            if genius.get("album") and not s.get("album"):
-                updates["album"] = genius["album"]
-                messages.append("Album trovato su Genius")
+            # ANNO: va ricavato dalla data, altrimenti la casella "anno" resta
+            # vuota mentre la data c'è (segnalato il 17/09/2026).
+            if data_eff and not str(s.get("year") or "").strip():
+                anno = _year_from_date(data_eff)
+                if anno:
+                    updates["year"] = anno
+                    messages.append(f"Anno ricavato dalla data ({data_eff}): {anno}")
+            # ALBUM: si completa se manca o se è un segnaposto ("Mus", che era il
+            # nome della cartella di caricamento): un falso album corto non deve
+            # bloccare quello vero di Genius.
+            album_attuale = str(s.get("album") or "").strip()
+            if genius.get("album") and (not album_attuale or _album_segnaposto(album_attuale)):
+                if normalize(genius["album"]) != normalize(album_attuale):
+                    updates["album"] = genius["album"]
+                    messages.append(f"Album da Genius: {genius['album']}")
             # COMPOSITORI (i "writer" di Genius): si completano se manca qualcuno.
             if genius.get("composers") and _credits_missing(s.get("composer"), genius["composers"]):
                 updates["composer"] = ", ".join(genius["composers"])
