@@ -68,6 +68,10 @@ con `(2)` nella cartella locale:
   quadrata in stile vinile + numeri di traccia per l'album), funzioni pure
   `monogramma`, `tintaDa`, `durataEstesa`, `riassuntoArtista`, `riassuntoAlbum`:
   `python3 -m unittest -v test_player_hero`
+- `test_nowbar_scroll.py` — test del clic sulla **barra in basso del player**
+  (pagina `/onyx`): si apre la scheda dell'album o dell'artista E la lista
+  scorre fino alla canzone in ascolto, che lampeggia; funzione pura
+  `indiceBrano`: `python3 -m unittest -v test_nowbar_scroll`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -201,7 +205,7 @@ sintassi JS, handler inline verso funzioni inesistenti, un `const` che si
 auto-inizializzava, delta-time negativi che corrompevano i `.mid`): la copia
 servita dall'app è corretta e l'elenco dei fix è in `midi_studio/README.md`.
 
-## Note operative e stato corrente (11/09/2026, aggiornate al 17/09/2026)
+## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
 
@@ -771,4 +775,45 @@ Da tenere presente nelle sessioni di lavoro successive:
   invisibili (`#1a1a1a` su `#111` → ora `#222` con bordo più chiaro e pallino
   colorato). README aggiornato (elenco file + questa nota). Screenshot delle due
   schede in `~/Desktop/SampleLab_schede_player/`.
+- **IL CLIC SULLA BARRA IN BASSO PORTA PROPRIO SULLA CANZONE (18/09/2026,
+  notte).** Richiesta di Alessandro: «se io clicco su una canzone mentre la sto
+  ascoltando, in basso a sinistra, dovrebbe rimandarmi proprio all'esatta
+  canzone, non solo all'album, cioè all'album ma nel punto in cui compare la
+  canzone, non all'inizio dell'album». Prima `nowbarOpenAlbum()` chiamava solo
+  `setAlbumFilter(t.album)` (e `nowbarOpenArtist()` solo `setArtistFilter`): la
+  scheda si apriva, ma `renderTracks()` riscrive **la lista da capo** e
+  `.tracks-area` resta al punto di scorrimento di prima → la canzone in ascolto
+  poteva restare **fuori schermo** (misurato: album «Mus», 146 brani, riga
+  all'indice 135 con `scrollTop` 0). Ora **entrambi** i clic, dopo il filtro,
+  chiamano `evidenziaBrano(t.id)`, che:
+  1. controlla con la funzione pura **`indiceBrano(lista, id)`** che la canzone
+     sia davvero fra quelle mostrate (id inesistente → nessuno scorrimento);
+  2. trova la riga (`.track-row[data-track-id]`, attributo nuovo sulla riga) e
+     la porta **al centro** della parte visibile della lista
+     (`scrollIntoView({block:"center", behavior:"smooth"})` — la sola area che
+     scorre è `.tracks-area`, la scheda sta fuori e **resta a vista**);
+  3. la fa **lampeggiare** (`.trovato` + `@keyframes branoTrovato`, 1,6 s:
+     lime nella scheda artista, teal in quella album) con `lampeggiaRiga()`,
+     riavviabile — e riaccesa **quando la lista si ferma** (poll su `scrollTop`),
+     perché con le liste lunghe lo scorrimento fluido dura più del lampeggio.
+     Questo difetto l'ha trovato il test, non l'occhio: la pulsazione finiva
+     prima che la riga arrivasse.
+  Verifiche del 18/09/2026: **`test_nowbar_scroll.py`** (nuovo) → 8 test: 10 casi
+  sulla funzione pura eseguiti davvero in JavaScriptCore (primo/in mezzo/ultimo,
+  assente, id vuoto/nullo/undefined, lista vuota o nulla, doppioni, id numerico)
+  più i controlli di cablaggio (riga con `data-track-id`, scroll sull'area
+  giusta, stile `.trovato`, i due clic che filtrano **e** evidenziano
+  nell'ordine giusto); **94 test** della suite (tutti OK); in **Chrome reale**
+  (Selenium, app viva, dentro l'iframe `#onyx-frame` di `/?tab=player`) **26/26**:
+  A/B col vecchio comportamento (riga fuori vista), clic sul titolo → scheda
+  album «Mus» con 146 brani, riga all'indice 135 **dentro** l'area,
+  scostamento dal centro **0 px**, `scrollTop` da 0 a 7414, lampeggio in corso
+  alla partenza **e** all'arrivo, cover ancora visibile; clic sull'artista →
+  scheda di Eminem con 227 righe, riga all'indice 225, **48 px** dal centro,
+  `scrollTop` 16267; fine del lampeggio dopo 2 s; id inesistente → `false` e
+  lista ferma; brano senza album → non apre niente e non solleva errori. 3/3
+  blocchi `<script>` compilati in JavaScriptCore. Solo la pagina del player è
+  cambiata (`onyx_whosampled.html`, servita da `send_file`): **nessuna modifica
+  al backend, nessun riavvio**.
+
 

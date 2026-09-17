@@ -246,6 +246,17 @@ body.album-view .track-album{display:none;}
 .track-row{display:grid;grid-template-columns:40px 30px 1fr 130px 70px 50px 40px;gap:8px;padding:8px 12px;border-radius:8px;cursor:pointer;align-items:center;transition:background .15s;position:relative;}
 .track-row:hover{background:rgba(255,255,255,0.04);}
 .track-row.playing{background:rgba(255,255,255,0.03);}
+/* La riga "trovata": il clic sulla barra in basso (titolo -> album, artista ->
+   artista) apre la scheda E porta la canzone in ascolto al centro della lista,
+   con un lampeggio d'accento (lime nella scheda artista, teal in quella
+   album: --flash e' la terna rgb, cosi' i colori restano quelli del tema). */
+.track-row.trovato{--flash:200,240,0;animation:branoTrovato 1.6s ease-out;z-index:1;}
+body.album-view .track-row.trovato{--flash:45,212,191;}
+@keyframes branoTrovato{
+  0%{background:rgba(var(--flash),.16);box-shadow:inset 0 0 0 1px rgba(var(--flash),.85);}
+  55%{background:rgba(var(--flash),.07);box-shadow:inset 0 0 0 1px rgba(var(--flash),.4);}
+  100%{background:transparent;box-shadow:none;}
+}
 .track-num-cell{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;}
 .track-num{font-size:14px;color:var(--text3);text-align:center;font-weight:500;}
 .track-row.playing .track-num{color:var(--text);}
@@ -2624,7 +2635,7 @@ function renderTracks() {
     }
 
     return `
-      <div class="track-row ${isActive ? "playing" : ""}" ondblclick="playTrack(${i})" oncontextmenu="showTrackCtxMenu(event,'${t.id}')">
+      <div class="track-row ${isActive ? "playing" : ""}" data-track-id="${t.id}" ondblclick="playTrack(${i})" oncontextmenu="showTrackCtxMenu(event,'${t.id}')">
         <div class="track-num-cell">
           <div class="track-num">${isActive ? `<div class="eq-bars ${isPlaying ? "playing" : ""}" style="display:flex"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>` : numero}</div>
           ${playHoverBtn}
@@ -2786,17 +2797,85 @@ function renderNowBar(t) {
   document.getElementById("nowArtist").textContent = t.artist;
 }
 
-// Click sul titolo nella barra in basso del player → apre l'album di appartenenza.
+// Indice di un brano nella lista passata (cercato per id), -1 se non c'è.
+// Funzione pura: la usa evidenziaBrano per sapere se la canzone in ascolto è
+// davvero fra quelle mostrate (dopo un filtro potrebbe non esserci).
+function indiceBrano(lista, id){
+  const brani = lista || [];
+  const cercato = String(id === undefined || id === null ? "" : id);
+  if(!cercato) return -1;
+  for(let i = 0; i < brani.length; i++){
+    const t = brani[i] || {};
+    const suo = String(t.id === undefined || t.id === null ? "" : t.id);
+    if(suo && suo === cercato) return i;
+  }
+  return -1;
+}
+
+// Lampeggio della riga: una pulsazione d'accento, riavviabile (se è già
+// accesa, riparte da capo invece di non fare nulla).
+function lampeggiaRiga(riga){
+  if(!riga) return;
+  riga.classList.remove("trovato");
+  void riga.offsetWidth;                      // riavvia l'animazione
+  riga.classList.add("trovato");
+  clearTimeout(lampeggiaRiga._timer);
+  lampeggiaRiga._timer = setTimeout(() => riga.classList.remove("trovato"), 2000);
+}
+
+// Porta la riga della canzone indicata DENTRO la parte visibile della lista
+// (al centro) e la fa lampeggiare. Serve al clic sulla barra in basso: apre la
+// scheda dell'album o dell'artista, ma deve far vedere PROPRIO quella canzone
+// — non l'inizio dell'elenco, che è quello che succedeva prima.
+// La lista che scorre è .tracks-area (#tracksArea): la scheda (cover, titolo,
+// chip) sta fuori e resta a vista. Ritorna true se la riga è stata trovata.
+function evidenziaBrano(id){
+  const brano = String(id === undefined || id === null ? "" : id);
+  if(!brano || indiceBrano(visibleTracks(), brano) < 0) return false;
+  const area = document.getElementById("tracksArea");
+  if(!area) return false;
+  let riga = null;
+  area.querySelectorAll(".track-row[data-track-id]").forEach(r => {
+    if(!riga && r.getAttribute("data-track-id") === brano) riga = r;
+  });
+  if(!riga) return false;
+  try{ riga.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  catch(e){ riga.scrollIntoView(); }          // browser senza opzioni
+  lampeggiaRiga(riga);
+  // Nelle liste lunghe lo scorrimento fluido dura più di un lampeggio: quando
+  // la lista si ferma la riga si riaccende, così la pulsazione si vede
+  // arrivare (e non solo partire).
+  clearInterval(evidenziaBrano._poll);
+  evidenziaBrano._ultimoScroll = null;
+  evidenziaBrano._poll = setInterval(() => {
+    if(!riga.isConnected){ clearInterval(evidenziaBrano._poll); return; }
+    const pos = area.scrollTop;
+    if(pos === evidenziaBrano._ultimoScroll){                 // la lista è ferma
+      clearInterval(evidenziaBrano._poll);
+      lampeggiaRiga(riga);
+      return;
+    }
+    evidenziaBrano._ultimoScroll = pos;
+  }, 120);
+  return true;
+}
+
+// Click sul titolo nella barra in basso del player → apre l'album di
+// appartenenza E porta la canzone in ascolto sotto gli occhi (prima si
+// apriva la lista e basta: si atterrava in un punto qualsiasi dell'album).
 function nowbarOpenAlbum(){
   const t = currentTrackId ? tracks.find(x => x.id === currentTrackId) : null;
   if(!t || !t.album) return;
   setAlbumFilter(t.album);
+  evidenziaBrano(t.id);
 }
-// Click sull'artista nella barra in basso del player → tutte le canzoni dell'artista.
+// Click sull'artista nella barra in basso del player → tutte le canzoni
+// dell'artista, con la canzone in ascolto portata in vista allo stesso modo.
 function nowbarOpenArtist(){
   const t = currentTrackId ? tracks.find(x => x.id === currentTrackId) : null;
   if(!t || !t.artist) return;
   setArtistFilter(t.artist);
+  evidenziaBrano(t.id);
 }
 
 audio.addEventListener("play",  () => pushPlaybackState(true));
