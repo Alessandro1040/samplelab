@@ -72,6 +72,9 @@ con `(2)` nella cartella locale:
   (pagina `/onyx`): si apre la scheda dell'album o dell'artista E la lista
   scorre fino alla canzone in ascolto, che lampeggia; funzione pura
   `indiceBrano`: `python3 -m unittest -v test_nowbar_scroll`
+- `test_sql_guard.py` — test del **pannello SQL/script** (cosa si può eseguire:
+  solo SELECT/UPDATE; `replace(...)` ammesso come funzione, `REPLACE INTO`
+  bloccato): `python3 -m unittest -v test_sql_guard`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -815,5 +818,53 @@ Da tenere presente nelle sessioni di lavoro successive:
   blocchi `<script>` compilati in JavaScriptCore. Solo la pagina del player è
   cambiata (`onyx_whosampled.html`, servita da `send_file`): **nessuna modifica
   al backend, nessun riavvio**.
+- **PANNELLO SQL: `replace()` ERA BLOCCATO — E IL RECUPERO DEGLI ARTISTI
+  «MULTIPLI» (18/09/2026).** Alessandro: «perché l'artista Rihanna / Eminem
+  continua a comparire dopo aver runnato la query per dividere gli artisti con
+  /?» e «mandami una query python da mettere nel posto adeguato nel file html ed
+  eseguire». Due cose distinte, risolte entrambe:
+  1. **Perché non cambiava niente.** Il pannello vieta le parole di
+     `SQL_FORBIDDEN`, fra cui `REPLACE` (serve a bloccare `REPLACE INTO`), e il
+     controllo colpiva anche la **funzione** `replace(...)`: la query naturale
+     (`UPDATE songs SET artist = replace(artist, ',', ' / ')`) veniva rifiutata
+     con «Operazione non consentita» e **non arrivava mai al database**. Ora
+     `sql_consentita()` (funzione pura nuova) considera vietata una parola solo
+     se è un **comando**, cioè non seguita da parentesi: `replace(...)` passa,
+     `REPLACE INTO …` resta bloccato. Per la riga specifica c'era anche un
+     secondo motivo: il vecchio script del pannello («📋 Script "/" artisti»)
+     normalizzava **solo la spaziatura** degli slash (`50 Cent/Eminem` →
+     `50 Cent / Eminem`), quindi su `Rihanna / Eminem` — già nel formato giusto
+     — non aveva nulla da fare.
+  2. **Il pulsante ora carica uno script completo** («📋 Script artisti
+     multipli» → `loadArtistiMultipliScript()`, nel pannello *Esegui query /
+     script personalizzati*): porta a `A / B / C` tutte le varianti — `&`,
+     virgola, `;`, `|`, `+`, `feat.`/`ft.`/`with` e gli slash con spazi — con
+     `APPLICA = True/False` in cima per l'anteprima, `conn.commit()` e
+     annullabile con ↩️ Undo. **Non tocca i nomi veri** (`Tyler, The Creator`,
+     `AC/DC`, `The High & Mighty`, `The Mamas & The Papas`, `Sway & King Tech`,
+     `Royal & the Serpent`) e toglie il segnaposto `Brano locale` quando è
+     insieme a un artista vero. Aggiorna `updated_at`, così le pagine
+     ricaricano da sole (cambia la firma di `/db/changed`).
+  Verifiche del 18/09/2026: lo script eseguito **su una copia** del database con
+  l'**ambiente vero del pannello** (`exec` con `conn` e i builtins ridotti — il
+  primo tentativo è caduto su `any()`, che lì non esiste: trovato dal test, non
+  dall'occhio): **38 righe** da correggere su 890 (`Brano locale, Eminem` →
+  `Eminem` per 11 righe, `Mark Moore, Eminem` → `Mark Moore / Eminem`, `Onyx
+  Feat. 50 Cent, X-1` → `Onyx / 50 Cent / X-1`, `Macklemore & Ryan Lewis /
+  Macklemore / Ryan Lewis` → `Macklemore / Ryan Lewis`, `Eminem ft Royce Da 59 &
+  Mr Porter freestyle` → `Eminem / Royce Da 59 / Mr Porter freestyle`…), con
+  `Rihanna / Eminem`, `AC/DC` e `Tyler, The Creator` **intatti**; la prima
+  versione sbagliava tre nomi veri (`The High & Mighty`, `The Mamas & The
+  Papas`, `Sway & King Tech`) e li ha corretti l'anteprima, non la libreria.
+  Nuovo test `test_sql_guard.py` (8 test: funzione pura + cablaggio + endpoint
+  vivo, con i comandi distruttivi indirizzati a una tabella inesistente) e
+  **102 test** di suite. Il testo dello script dentro l'HTML è verificato con un
+  giro di andata/ritorno (`String.raw`: dal template si rilegge lo script
+  **byte per byte**) e i 3 blocchi `<script>` di `index (2).html` compilano.
+  L'app è stata riavviata (backend toccato) e la guardia provata sull'endpoint
+  vivo: `SELECT replace(...)` → 200, `REPLACE INTO`/`INSERT`/`DELETE`/`DROP` →
+  400. **Lo script non è ancora stato eseguito sulla libreria vera**: si lancia
+  dal pannello (carica, Esegui Python) quando si vuole.
+
 
 

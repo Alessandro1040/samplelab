@@ -3584,6 +3584,24 @@ def db_from_onyx():
 # (/db/schema), così pagina e backend restano d'accordo su cosa è permesso.
 SQL_ALLOWED = ["SELECT", "UPDATE"]
 SQL_FORBIDDEN = ["DROP", "ALTER", "CREATE", "DELETE", "INSERT", "TRUNCATE", "REPLACE"]
+
+
+def sql_consentita(sql):
+    """Il pannello SQL può eseguire questa query? Ritorna "" se va bene,
+    altrimenti il messaggio d'errore da mostrare.
+
+    Consentite solo SELECT e UPDATE. Una parola vietata conta se è un COMANDO,
+    non se è una funzione: così `replace(testo, ' / ', ' , ')` — che serve a
+    correggere gli artisti e i titoli — passa, mentre `REPLACE INTO …` resta
+    bloccato (dopo la parola non c'è una parentesi).
+    """
+    sql_upper = sql.upper().strip()
+    if not any(sql_upper.startswith(w) for w in SQL_ALLOWED):
+        return "Sono consentite solo " + " e ".join(SQL_ALLOWED)
+    for w in SQL_FORBIDDEN:
+        if re.search(rf"\b{w}\b(?!\s*\()", sql_upper):
+            return "Operazione non consentita"
+    return ""
 # Variabili disponibili dentro lo script Python (stesse di `safe_globals`) e
 # funzioni di base; SCRIPT_TIMEOUT è il tempo massimo di esecuzione.
 SCRIPT_GLOBALS = ["conn", "db_path", "re", "time", "json", "sqlite3", "os", "math", "hashlib"]
@@ -3671,11 +3689,10 @@ def execute_custom():
 
     # ── Query SQL ──
     if sql:
+        problema = sql_consentita(sql)
+        if problema:
+            return jsonify({"error": problema}), 400
         sql_upper = sql.upper().strip()
-        if not any(sql_upper.startswith(w) for w in SQL_ALLOWED):
-            return jsonify({"error": "Sono consentite solo " + " e ".join(SQL_ALLOWED)}), 400
-        if any(re.search(rf"\b{w}\b", sql_upper) for w in SQL_FORBIDDEN):
-            return jsonify({"error": "Operazione non consentita"}), 400
         try:
             if sql_upper.startswith("SELECT"):
                 with get_db() as conn:

@@ -626,7 +626,7 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
         <textarea id="custom-script" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px;font-family:'Space Mono',monospace;font-size:12px;resize:vertical" placeholder="# Esempio (SICURO): mostra le canzoni con un nome dentro il titolo&#10;# Non modifica niente: per correggere usa &#9999;&#65039; Edit nella pagina (o il README).&#10;rows = conn.execute(&quot;SELECT id, title, artist FROM songs WHERE title LIKE '%Eminem%'&quot;).fetchall()&#10;for r in rows:&#10;    print(r['id'], '|', r['title'], '|', r['artist'])&#10;print('Trovate:', len(rows))&#10;# Per spostare un pezzo di testo da un campo a un altro (es. un artista dal titolo)&#10;# usa &#10145;&#65039; Sposta qui sopra: fa l'anteprima e si annulla con &#8617;&#65039; Undo."></textarea>
         <div style="display:flex;gap:8px;margin-top:6px">
           <button class="btn-sm" onclick="runCustomScript()">▶ Esegui Python</button>
-          <button class="btn-sm" onclick="loadSlashArtistScript()">📋 Script "/" artisti</button>
+          <button class="btn-sm" onclick="loadArtistiMultipliScript()" title="carica lo script che porta gli artisti multipli al formato «A / B / C» (&, virgola, feat./ft., with e gli slash con gli spazi sbagliati); poi si esegue con ▶ Esegui Python">📋 Script artisti multipli</button>
         </div>
       </div>
     </div>
@@ -4845,46 +4845,87 @@ async function doMoveField(){
   loadDb(); refreshHistoryBadge();
 }
 
-function loadSlashArtistScript() {
-  document.getElementById('custom-script').value =
-`# Divide gli artisti con "/" in artisti separati: "A/B/C" -> "A / B / C".
-# Lo slash e' separatore se ha spazi attorno OPPURE almeno un lato e' lungo (>4):
-# cosi' "AC/DC" resta un nome unico, mentre "50 Cent/Eminem" diventa 2 artisti.
-cursor = conn.cursor()
-rows = cursor.execute("SELECT id, artist FROM songs WHERE artist LIKE '%/%'").fetchall()
+function loadArtistiMultipliScript() {
+  document.getElementById('custom-script').value = String.raw`
+# ── ARTISTI: un solo formato, quello che l'app riconosce ─────────────────────
+# Porta gli artisti multipli al formato "A / B / C": unisce le varianti
+# (& · virgola · ; · | · + · feat. · ft. · with) e sistema gli slash con gli
+# spazi sbagliati ("A  /  B" -> "A / B"). Lo slash è separatore SOLO se ha
+# almeno uno spazio attorno: "AC/DC" resta un nome unico.
+# NON tocca i nomi veri con virgola o & (Tyler, The Creator · The Mamas & The
+# Papas · Sway & King Tech) e toglie il segnaposto "Brano locale" quando è
+# insieme a un artista vero.
+APPLICA = True        # False = mostra e basta (anteprima), True = scrive davvero
 
-def split_slash(artista):
-    out = []
-    for p in artista.split('/'):
-        cur = p.strip()
-        if not cur:
-            continue
-        if not out:
-            out.append(cur)
-            continue
-        prev = out[-1]
-        spazi = bool(re.search(r'\\s', prev)) or bool(re.search(r'\\s', cur))
-        lungo = max(len(prev), len(cur)) > 4
-        if spazi or lungo:
-            out.append(cur)
-        else:
-            out[-1] = prev + '/' + cur  # es. AC/DC resta unito
-    return out
+NOMI_INTERI = {"tyler, the creator", "earth, wind & fire", "ac/dc",
+               "kool & the gang", "simon & garfunkel", "hall & oates",
+               # nomi veri con la «&» presenti in questa libreria
+               "the high & mighty", "the mamas & the papas",
+               "sway & king tech", "royal & the serpent"}
+SEGNAPOSTO = {"", "brano locale", "sconosciuto", "unknown", "artista sconosciuto"}
+SEPARATORI = [r"\s+/\s+", r"\s+/\s*", r"\s*/\s+",          # prima gli slash
+              r"\s+feat\.?\s+", r"\s+ft\.?\s+", r"\s+with\s+",
+              r"\s*&\s*", r"\s*,\s*", r"\s*;\s*", r"\s*\|\s*", r"\s*\+\s*"]
 
-count = 0
+
+def artisti(valore):
+    """Da una stringa agli artisti che contiene (con le regole dell'app)."""
+    testo = str(valore or "").strip()
+    if testo.lower() in NOMI_INTERI:
+        return [testo]
+    pezzi = [testo]
+    for sep in SEPARATORI:
+        nuovi = []
+        for p in pezzi:
+            if p.lower() in NOMI_INTERI:
+                nuovi.append(p)
+            else:
+                nuovi.extend(re.split(sep, p, flags=re.I))
+        pezzi = nuovi
+    fuori, visti = [], set()
+    for p in pezzi:
+        a = re.sub(r"\s+", " ", p).strip(" \t-–—/")
+        if not a or a.lower() in SEGNAPOSTO or a.lower() in visti:
+            continue
+        visti.add(a.lower())
+        fuori.append(a)
+    return fuori
+
+
+cursore = conn.cursor()
+righe = cursore.execute(
+    "SELECT id, artist FROM songs WHERE artist IS NOT NULL AND TRIM(artist) <> ''"
+).fetchall()
+
 modifiche = []
-for rid, artista in rows:
-    nuovo = ' / '.join(split_slash(artista))
-    if nuovo != artista:
-        cursor.execute("UPDATE songs SET artist=?, updated_at=datetime('now') WHERE id=?", (nuovo, rid))
-        count += 1
-        modifiche.append((artista, nuovo))
-conn.commit()
-print("Aggiornate", count, "canzoni:")
-for vecchio, nuovo in modifiche[:20]:
+for rid, artista in righe:
+    separatore = False
+    for sep in SEPARATORI:
+        if re.search(sep, artista, flags=re.I):
+            separatore = True
+            break
+    if not separatore:
+        continue                       # nessun separatore: non e' roba nostra
+    nuovo = " / ".join(artisti(artista))
+    if nuovo and nuovo != artista:
+        modifiche.append((rid, artista, nuovo))
+
+print(f"Righe esaminate: {len(righe)} · da correggere: {len(modifiche)}")
+for _rid, vecchio, nuovo in modifiche[:20]:
     print("  " + repr(vecchio) + "  ->  " + repr(nuovo))
-if count > 20:
-    print("  ... e altre " + str(count - 20))`;
+if len(modifiche) > 20:
+    print(f"  ... e altre {len(modifiche) - 20}")
+
+if APPLICA:
+    for rid, _vecchio, nuovo in modifiche:
+        cursore.execute(
+            "UPDATE songs SET artist=?, updated_at=datetime('now') WHERE id=?",
+            (nuovo, rid),
+        )
+    conn.commit()
+    print(f"✅ Aggiornate {len(modifiche)} canzoni (si annulla con ↩️ Undo)")
+else:
+    print("👁 Anteprima: nessuna scrittura. Metti APPLICA = True e ri-esegui.")`;
 }
 
 async function refreshHistoryBadge(){
