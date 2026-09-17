@@ -35,6 +35,10 @@ con `(2)` nella cartella locale:
 - `browse.html` — interfaccia di navigazione libreria
 - `onyx_whosampled.html` — scraping WhoSampled
 - `samplelab (2).db` — database SQLite della libreria
+- `README_sampler.md` — **guida utente del sampler** (il trimmer FL-Studio della
+  pagina `/`: griglia, BPM, offset, Battute Sel., Diventa Bar N°, Allinea griglia,
+  TAP, metronomo, undo/redo, taglio): come aprirlo, ogni controllo spiegato e la
+  matematica della griglia coi numeri misurati
 - `fortissimo_compare_v3.py` — modello **Fortissimo Compare v3**: confronto tra
   due output `AudioAnalysis` (MIDI + one-shot), score [0,1]
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
@@ -66,6 +70,19 @@ con `(2)` nella cartella locale:
 - **ffmpeg** (`brew install ffmpeg`) per la conversione dei formati
 - **Google Chrome** per lo scraping con `undetected_chromedriver`
 - **librosa + numpy** opzionali ma consigliati per l'analisi audio
+
+## Sampler (griglia FL-Studio) — pagina `/`
+
+Il **sampler** è il trimmer in stile FL-Studio della pagina principale: forma
+d'onda con la griglia sovrapposta, righello numerato per battute, metronomo, TAP,
+offset, *Battute Sel.* / *Diventa Bar N°*, **Allinea griglia** e Undo/Redo. Si
+apre su una canzone dal pulsante **🎛 Sampler** (tab 🗄️ Database), dalla voce
+**🎛 Apri nel sampler** del menu del player, oppure dal link `/?sampler=<id>`
+(anche `/?sampler_file=<nome file>`) — e arriva con il **BPM del database già
+impostato**, così si vede e si sente subito se quel valore è quello vero.
+
+Guida completa, controllo per controllo (con la matematica della griglia e i
+numeri misurati): **[`README_sampler.md`](README_sampler.md)**.
 
 ## Fortissimo Compare (pagina `/fortissimo`)
 
