@@ -437,3 +437,40 @@ Da tenere presente nelle sessioni di lavoro successive:
   ⚠️ Le righe con `title` NULL restano (dati da decidere): il codice ora non ci
   sbatte più, ma la riga di *Apex* va rinominata (vedi **🎛 Sampler** o *✏️ Edit*).
 
+- **TITOLI ROVINATI DALLA SOSTITUZIONE "TOGLI EMINEM" — RIPARATI (17/09/2026).**
+  Una sostituzione fatta sulla colonna `title` (intento: "Eminem sta nell'artista,
+  non nel titolo") aveva lasciato **26 titoli mutilati + la riga di *Apex* col
+  titolo vuoto**:
+  - **12 con la parentesi aperta** — `Rock City (feat.`, `We Shine (Feat.`,
+    `Rush Ya Clique (feat.`, `Here Comes the Weekend (feat.`, `Watch Deez (feat.`,
+    `Symphony In H (feat.`, `Homicide (feat.`, `Macosa (feat.`, `Fuck Off (feat.`,
+    `Turn Me Loose (feat.`, `Flawless Victory (feat.`, `Don't Aproach Me (feat.`;
+  - **5 con il separatore orfano** — `My Name (feat.& Nate Dogg)`,
+    `You Hear Me (feat.& Pauly Yams)`, `Remember The Name (feat.& 50 Cent)`,
+    `You Must Be Crazy (feat., Hot Karl & Dree)`,
+    `… (Funkmaster Flex & Big Kap Feat.and Dr. Dre)`;
+  - **9 con parole spezzate o frammenti appesi** — `Eminems Freestyle…` →
+    `s Freestyle That Got Him…`, `Airplanes part II (Eminem Solo)` →
+    `Airplanes part IISolo)`, `The Warning -(Music & Lyrics)`,
+    `“Toy Soldier Remix”(1)`, `50 Cent - Patiently Waiting ft.(Tradução…)`,
+    `Busta Rhymes Feat- I'll Hurt You`, `ft. Nate Dogg Til I Collapse…`,
+    `- Lose Yourself`, `- I Do Pop Pills [Freestyle Friday]`.
+  Riparazione con una **mappa esplicita id → titolo** (nessuna sostituzione
+  automatica), applicata via `PUT /db/songs/<id>` — cioè come si farebbe a mano
+  dalla pagina: i 12 titoli con il solo Eminem diventano il nome del brano, i 5
+  con altri featuring li mantengono (`My Name (feat. Nate Dogg)`), i frammenti
+  ricomposti (`Lose Yourself`, `Airplanes, Part II`, `Busta Rhymes - I'll Hurt
+  You`…). Su *Apex* (`song_7310cfc5145c`) sono stati rimessi titolo, artista,
+  produttori e compositore verificati il 16/09 (`Chris Webby / Ren Thomas /
+  Mickey Factz / ANoyd / Apathy / NEMS`, `["Nox Beatz", "C-Lance"]`). Su
+  *Lose Yourself* è stato azzerato `title_verified`: la verifica precedente era
+  stata fatta su un altro testo. Backup prima dell'intervento:
+  `/tmp/samplelab_pre_riparazione_2023.db`.
+  Verifiche del 17/09/2026: 27 righe aggiornate, **tutte HTTP 200** e
+  **0 artefatti rimasti** (ricontrollo automatico sui pattern dei difetti); in
+  Chrome (Selenium) la ricerca `apex` ritrova **1 riga** con titolo `Apex`,
+  crediti completi e il 🎛 Sampler che si apre su di essa, e la riga riparata
+  mostra `Rush Ya Clique`; log dell'app senza errori.
+  ⚠️ I brani **senza** Eminem e con altri featuring sono rimasti come erano
+  (es. `Murder, Murder Lyrics (HD)`): la riparazione ha toccato solo i danni.
+
