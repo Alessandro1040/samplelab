@@ -744,8 +744,23 @@ def fetch_genius(artist, title):
                 if sc > best_score:
                     best_score = sc
                     best = (res, hit_artist, hit_title)
-        if not best or best_score < 0.55:
-            print(f"[genius] nessuna hit sopra soglia (best={best_score:.2f})")
+        # Soglia 0.55 come nel resto dell'app; più alta (0.75) quando si cerca col
+        # SOLO titolo (artista vuoto o segnaposto), perché lì l'artista non aiuta
+        # il confronto e la search API può proporre un omonimo: caso reale
+        # 16/09/2026, titolo "Apex" senza artista → "Apex Predator" del musical
+        # Mean Girls (i credits di un'altra canzone finivano nel database).
+        artist_missing = (not (artist or "").strip()) or is_placeholder_artist(artist)
+        min_score = 0.75 if artist_missing else 0.55
+        if not best or best_score < min_score:
+            print(f"[genius] nessuna hit sopra soglia (best={best_score:.2f}, soglia {min_score})")
+            return None
+        # Senza artista il match va giudicato sul TITOLO: `match_score` dà 1.0
+        # all'artista vuoto ("" è "contenuto" in qualsiasi nome) e un titolo
+        # contenuto nell'altro prende 0.85+, quindi la soglia da sola non basta.
+        # Qui si accetta solo un titolo (quasi) identico: meglio nessun dato che
+        # i credits di un'altra canzone.
+        if artist_missing and normalize(best[2]) != normalize(title or ""):
+            print(f"[genius] ricerca col solo titolo: scartato '{best[2]}' (richiesto '{title}')")
             return None
         res, hit_artist, hit_title = best
         feat = [a.get("name", "") for a in res.get("featured_artists", [])]

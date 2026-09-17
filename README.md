@@ -346,4 +346,36 @@ Da tenere presente nelle sessioni di lavoro successive:
   ⚠️ Da sapere: la verifica ora **riscrive** `artist`/`producers`/`composer` con
   i dati di Genius quando trova nomi mancanti — le modifiche manuali a questi
   tre campi possono quindi essere sovrascritte rifacendo la verifica.
+- **GLI ARTISTI COMPLETI NON COMPARIVANO NEL PLAYER — CORRETTO (16/09/2026,
+  sera).** Dopo la verifica il *database* aveva tutti i crediti, ma aprendo il
+  modale info del player (quello con i `🔗 Genius` / `🔗 WhoSampled`) si vedeva
+  ancora **solo "Chris Webby"**. Due cause:
+  1. il player tiene una **copia propria** dei brani (IndexedDB) e il modale
+     leggeva da lì, non dal database; salvando il form, il valore vecchio veniva
+     anche riscritto nel DB;
+  2. il "smart parsing" del player (`fetchGeniusMetadata`) interrogava Genius con
+     **il solo titolo** e salvava **solo `primary_artist`**, cancellando i
+     featuring dall'artista.
+  Fix:
+  1. `onyx_whosampled.html` — `openEditTrackModal` scarica la riga aggiornata da
+     `/db/songs/<id>` e mostra anche **🎛 Produttori** e **✍️ Compositore**
+     (prima solo i due link), allineando la copia locale **senza** riscrivere il
+     database (niente più salvataggi di valori vecchi);
+  2. `fetchGeniusMetadata` usa l'endpoint **locale `/genius`** (stessa origine)
+     e scrive **tutti** gli artisti + compositore; l'artista passato è quello
+     del brano, svuotato se è un segnaposto (`artistForGenius`);
+  3. `fetch_genius` (backend): quando si cerca **col solo titolo** (artista
+     vuoto o segnaposto) si accetta solo un **titolo (quasi) identico** —
+     `match_score` dà 1.0 all'artista vuoto (`""` è contenuto in qualsiasi
+     nome), quindi la soglia da sola non bastava: *Apex* senza artista matchava
+     **"Apex Predator"** del musical *Mean Girls* (credits di un'altra canzone
+     nel database).
+  Verifiche del 16/09/2026: `/genius` senza artista + "Apex" → **nessun match**;
+  con "Chris Webby" → 6 artisti + produttori `["Nox Beatz","C-Lance"]`; con il
+  solo titolo *"Apex Predator"* → la canzone giusta; le due funzioni JS
+  (`artistForGenius`, `producersText`) testate **in esecuzione reale** con
+  JavaScriptCore (8/8) e **tutti i blocchi `<script>`** delle due pagine
+  compilati senza errori (6/6, `new Function`); verifica reale su *Apex* →
+  artista completo in DB e nel player dopo il refresh; 56 test OK.
+  ⚠️ Ricaricare la pagina (Cmd+Shift+R) per prendere il JS nuovo.
 

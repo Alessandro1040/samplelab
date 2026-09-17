@@ -1117,26 +1117,39 @@ function sampleBuffer(buffer, n) {
   return samples;
 }
 
+// L'artista da mandare a /genius: i segnaposto ("Brano locale", "Artista
+// sconosciuto"…) non aiutano il match e vanno tolti (col solo titolo il server
+// usa una soglia più alta, così non pesca un omonimo).
+function artistForGenius(artist){
+  const a = String(artist || "").trim().toLowerCase();
+  const segnaposto = ["", "brano", "brano locale", "artista sconosciuto", "unknown", "unknown artist", "local", "n/a"];
+  return segnaposto.includes(a) ? "" : String(artist || "").trim();
+}
+
 async function fetchGeniusMetadata(track) {
-  const query = encodeURIComponent(track.name);
+  // Usa l'endpoint LOCALE /genius (stessa origine dell'app): restituisce TUTTI
+  // gli artisti (primary + featuring), i produttori e i compositori.
+  // Prima questa funzione interrogava l'API di Genius tramite un proxy esterno
+  // e salvava SOLO `primary_artist`, cancellando i featuring dall'artista del
+  // brano (era il motivo per cui l'artista diventava "Chris Webby" e basta).
   try {
-    const url = `https://api.allorigins.win/raw?url=https://genius.com/api/search/multi?q=${query}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    if (data.response && data.response.sections) {
-      const hits = data.response.sections.find(s => s.type === "song");
-      if (hits && hits.hits.length > 0) {
-        const result = hits.hits[0].result;
-        const prevName = track.name, prevArtist = track.artist;
-        track.name = result.title || track.name;
-        track.artist = result.primary_artist.name || track.artist;
-        await dbPut("tracks", track);
-        renderTracks();
-        if (currentTrackId === track.id) renderNowBar(track);
-        notifyDbTrackUpdated(track, prevName, prevArtist);
-      }
-    }
+    const res = await fetch('/genius', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artist: artistForGenius(track.artist), title: track.name || '' })
+    }).then(r => r.json());
+    if (!res || !res.title) return;
+    const prevName = track.name, prevArtist = track.artist;
+    track.name = res.title || track.name;
+    const artists = (res.artists && res.artists.length) ? res.artists : (res.artist ? [res.artist] : []);
+    if (artists.length) track.artist = artists.join(' / ');
+    if (res.album) track.album = res.album;
+    if (res.release_date) track.release_date = res.release_date;
+    if (res.genius_url) track.geniusUrl = res.genius_url;
+    if (res.composers && res.composers.length) track.composer = res.composers.join(', ');
+    await dbPut("tracks", track);
+    renderTracks();
+    if (currentTrackId === track.id) renderNowBar(track);
+    notifyDbTrackUpdated(track, prevName, prevArtist);
   } catch (e) {
     console.log("Smart parsing failed for:", track.name, e);
   }
@@ -1697,28 +1710,76 @@ function addSampleUsageRow() {
   renderSampleList('editSampleUsagesList', _tempSamples.usages, 'usages');
 }
 
+// "["Nox Beatz", "C-Lance"]" → "Nox Beatz, C-Lance" (in database i produttori
+// sono salvati come JSON).
+function producersText(p){
+  if(!p) return "";
+  let t=String(p);
+  try{ const a=JSON.parse(t); if(Array.isArray(a)) t=a.join(", "); }catch(_){}
+  return t.trim();
+}
+
 function openEditTrackModal(trackId) {
   editTrackId = trackId;
   const track = tracks.find(t => t.id === trackId);
   if (!track) return;
-  document.getElementById("editTrackName").value = track.name || "";
-  document.getElementById("editTrackArtist").value = track.artist || "";
-  document.getElementById("editTrackAlbum").value = track.album || "";
-  document.getElementById("editTrackYear").value = track.year || "";
-  document.getElementById("editTrackLyrics").value = track.lyrics || "";
+  const fill = (t) => {
+    document.getElementById("editTrackName").value = t.name || "";
+    document.getElementById("editTrackArtist").value = t.artist || "";
+    document.getElementById("editTrackAlbum").value = t.album || "";
+    document.getElementById("editTrackYear").value = t.year || "";
+    document.getElementById("editTrackLyrics").value = t.lyrics || "";
+  };
+  const urlsHtml = (t, credits) => {
+    let h = "";
+    if (t.geniusUrl) h += `<div>🔗 Genius: <a href="${escHtml(t.geniusUrl)}" target="_blank" style="color:var(--text2);">${escHtml(t.geniusUrl)}</a></div>`;
+    if (t.whosampledUrl) h += `<div>🔗 WhoSampled: <a href="${escHtml(t.whosampledUrl)}" target="_blank" style="color:var(--text2);">${escHtml(t.whosampledUrl)}</a></div>`;
+    return h + (credits || "");
+  };
+  fill(track);
   
   _tempSamples.sources = JSON.parse(JSON.stringify(track.sampleSources || []));
   _tempSamples.usages = JSON.parse(JSON.stringify(track.sampleUsages || []));
   renderSampleList('editSampleSourcesList', _tempSamples.sources, 'sources');
   renderSampleList('editSampleUsagesList', _tempSamples.usages, 'usages');
   
-  let urlHtml = "";
-  if (track.geniusUrl) urlHtml += `<div>🔗 Genius: <a href="${escHtml(track.geniusUrl)}" target="_blank" style="color:var(--text2);">${escHtml(track.geniusUrl)}</a></div>`;
-  if (track.whosampledUrl) urlHtml += `<div>🔗 WhoSampled: <a href="${escHtml(track.whosampledUrl)}" target="_blank" style="color:var(--text2);">${escHtml(track.whosampledUrl)}</a></div>`;
-  document.getElementById("editTrackUrls").innerHTML = urlHtml;
+  document.getElementById("editTrackUrls").innerHTML = urlsHtml(track, "");
   
   openModal("editTrackModal");
   setTimeout(() => document.getElementById("editTrackName").focus(), 50);
+
+  // Il player tiene una COPIA dei brani (IndexedDB) e il database può essere più
+  // aggiornato (es. dopo una "Verifica", che ora salva TUTTI gli artisti e i
+  // produttori). Senza questo refresh il modale mostrava ancora l'artista
+  // vecchio ("Chris Webby" invece dei crediti completi) e, salvando il form, il
+  // valore vecchio veniva riscritto nel database.
+  (async () => {
+    try {
+      const dbId = track.dbSongId || '';
+      if (!dbId) return;
+      const row = await fetch('/db/songs/' + encodeURIComponent(dbId)).then(r => r.json());
+      if (!row || !row.id || editTrackId !== trackId) return;
+      const fresh = {
+        name: row.title || track.name, artist: row.artist || track.artist,
+        album: row.album || '', year: row.year || '', lyrics: row.lyrics || track.lyrics,
+        geniusUrl: row.genius_url || track.geniusUrl,
+        whosampledUrl: row.whosampled_url || track.whosampledUrl,
+      };
+      fill(fresh);
+      let credits = "";
+      const prod = producersText(row.producers);
+      if (prod) credits += `<div>🎛 Produttori: <span style="color:var(--text2);">${escHtml(prod)}</span></div>`;
+      if (row.composer) credits += `<div>✍️ Compositore: <span style="color:var(--text2);">${escHtml(row.composer)}</span></div>`;
+      document.getElementById("editTrackUrls").innerHTML = urlsHtml(fresh, credits);
+      // allinea la copia locale del player (senza riscrivere il database)
+      track.name = fresh.name; track.artist = fresh.artist;
+      track.album = fresh.album; track.year = fresh.year;
+      track.geniusUrl = fresh.geniusUrl; track.whosampledUrl = fresh.whosampledUrl;
+      await dbPut("tracks", track);
+      renderTracks();
+      if (currentTrackId === track.id) renderNowBar(track);
+    } catch (_) {}
+  })();
 }
 
 async function confirmEditTrack() {
