@@ -42,6 +42,8 @@ con `(2)` nella cartella locale:
   (`python3 -m unittest -v test_fortissimo_compare`)
 - `test_download_fallback.py` — test del recupero dei download (solo file creati
   dal job, mai l'audio di un altro sample): `python3 -m unittest -v test_download_fallback`
+- `test_verify_genius.py` — test del recupero crediti da Genius (tutti gli
+  artisti, produttori, compositori): `python3 -m unittest -v test_verify_genius`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -311,4 +313,37 @@ Da tenere presente nelle sessioni di lavoro successive:
   (senza `[id]`) e vanno considerati "di una cover sola": i nuovi download
   creano file nuovi col nome completo, quindi in `downloads/` possono convivere
   il vecchio e il nuovo nome dello stesso brano.
+- **ARTISTI E PRODUTTORI DA GENIUS — COMPLETATI (16/09/2026).** Premendo
+  *Verifica* su un brano (es. *Apex* di Chris Webby) il database registrava solo
+  l'**artista principale** e spesso **nessun produttore**. Due cause:
+  1. il campo `artist` veniva riempito con `genius["artist"]` (solo il primary) e
+     **solo se `artist_verified` era 0**, quindi una riga già verificata non si
+     completava mai più;
+  2. i produttori arrivano solo dall'API della singola canzone
+     (`/api/songs/<id>`), che a volte risponde vuoto o 429 e **non veniva
+     ritentata** (misurato: 7 brani verificati su 54 senza produttori e 5 senza
+     compositori).
+  Fix in `app (2).py`:
+  1. `fetch_genius` restituisce anche **`artists`** (primary + feat., senza
+     duplicati e nell'ordine di Genius), ritenta una volta l'API della canzone e
+     pulisce i nomi con `_unique_names`;
+  2. la verifica scrive in `artist` **tutti** i crediti separati da `" / "` (il
+     formato del resto della libreria) e **completa** `producers` e `composer`
+     quando manca qualche nome, senza duplicare né cancellare ciò che c'è
+     (`_credits_missing`): rifare la verifica su una riga vecchia la completa;
+  3. le ricerche successive (YouTube/WhoSampled/Tunebat) usano il **solo artista
+     principale**, non l'elenco completo dei crediti.
+  Verifiche del 16/09/2026: `/genius` su *Apex* → 6 artisti (Chris Webby / Ren
+  Thomas / Mickey Factz / ANoyd / Apathy / NEMS), produttori `["Nox Beatz",
+  "C-Lance"]`, 6 compositori; *Verifica* reale su quella riga → messaggio
+  `🎤 Artisti completati da Genius: Chris Webby / Ren Thomas / Mickey Factz /
+  ANoyd / Apathy / NEMS` (mancava ANoyd) e riga aggiornata in DB; backfill sulle
+  righe già verificate → **7→5 senza produttori e 5→3 senza compositori** (le
+  altre non hanno crediti su Genius, e una è stata saltata perché il suo URL
+  Genius punta a una pagina di traduzione). Test nuovo
+  `test_verify_genius.py` (6 puri + 2 di rete):
+  `python3 -m unittest -v test_verify_genius`.
+  ⚠️ Da sapere: la verifica ora **riscrive** `artist`/`producers`/`composer` con
+  i dati di Genius quando trova nomi mancanti — le modifiche manuali a questi
+  tre campi possono quindi essere sovrascritte rifacendo la verifica.
 

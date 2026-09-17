@@ -675,6 +675,30 @@ def estimate_metadata_local(filename):
     return analyze_audio_ffmpeg(fp)
 
 # ── GENIUS ────────────────────────────────────────────────────────────────────
+def _unique_names(names):
+    """Elenco di nomi pulito: via i caratteri invisibili di Genius, senza vuoti
+    e senza duplicati (case-insensitive), mantenendo l'ordine di arrivo."""
+    out, seen = [], set()
+    for n in names or []:
+        n = re.sub(r'[\u200e\u200f\u202a-\u202e\u2066-\u2069]', '', (n or "")).strip()
+        k = normalize(n)
+        if n and k and k not in seen:
+            seen.add(k)
+            out.append(n)
+    return out
+
+def _credits_missing(current, names):
+    """True se tra i crediti di Genius (`names`) ce n'è almeno uno che NON
+    compare in `current` (il valore già salvato, anche come JSON tipo
+    '["Nox Beatz", "C-Lance"]'). Serve a riempire i crediti mancanti senza
+    riscrivere/cancellare ciò che c'è già (aggiornamento idempotente)."""
+    have = normalize(current or "")
+    for n in names or []:
+        nn = normalize(n)
+        if nn and nn not in have:
+            return True
+    return False
+
 def fetch_genius(artist, title):
     """Fetch da Genius: URL, titolo, artista, produttori, compositori (writers),
     album, artista album, data e cover.
@@ -724,12 +748,16 @@ def fetch_genius(artist, title):
             print(f"[genius] nessuna hit sopra soglia (best={best_score:.2f})")
             return None
         res, hit_artist, hit_title = best
+        feat = [a.get("name", "") for a in res.get("featured_artists", [])]
         song = {
             "genius_url": res.get("url"),
             "title": hit_title,
             "artist": hit_artist,
+            # TUTTI gli artisti (primary + feat.) nell'ordine di Genius: è questo
+            # elenco che finisce nel campo `artist` del database.
+            "artists": _unique_names([hit_artist] + feat),
             "score": round(best_score, 3),
-            "featured_artists": [a.get("name", "") for a in res.get("featured_artists", [])],
+            "featured_artists": feat,
             "producers": [p.get("name", "") for p in res.get("producer_artists", [])],
             "composers": [],
             "album_artist": "",
@@ -737,28 +765,44 @@ def fetch_genius(artist, title):
             "album": (res.get("album") or {}).get("name", ""),
             "cover_art": res.get("header_image_thumbnail_url", ""),
         }
-        # API della singola canzone: compositori, produttori, album artist
+        # API della singola canzone: compositori (writer), produttori, album
+        # artist, feat. ufficiali. Questa chiamata è l'unica fonte dei produttori:
+        # quando Genius risponde vuoto o 429 i crediti restavano vuoti, quindi si
+        # ritenta una volta (caso reale 16/09/2026: 7 brani verificati su 54
+        # senza produttori e 5 senza compositori).
         sid = res.get("id")
-        if sid:
+        for attempt in (1, 2):
+            if not sid:
+                break
             try:
-                time.sleep(0.3)
+                time.sleep(0.3 if attempt == 1 else 1.5)
                 req2 = urllib.request.Request(f"https://genius.com/api/songs/{sid}", headers=headers)
                 with urllib.request.urlopen(req2, timeout=15) as r2:
                     sdata = json.loads(r2.read()).get("response", {}).get("song", {})
-                if sdata:
-                    song["composers"] = [a.get("name", "") for a in sdata.get("writer_artists", [])]
-                    prods2 = [a.get("name", "") for a in sdata.get("producer_artists", [])]
-                    if prods2:
-                        song["producers"] = prods2
-                    alb = sdata.get("album") or {}
-                    if alb.get("name"):
-                        song["album"] = alb["name"]
-                    if (alb.get("artist") or {}).get("name"):
-                        song["album_artist"] = alb["artist"]["name"]
-                    if sdata.get("release_date_for_display"):
-                        song["release_date"] = sdata["release_date_for_display"]
+                if not sdata:
+                    continue
+                writers = _unique_names([a.get("name", "") for a in sdata.get("writer_artists", [])])
+                prods = _unique_names([a.get("name", "") for a in sdata.get("producer_artists", [])])
+                feat2 = _unique_names([a.get("name", "") for a in sdata.get("featured_artists", [])])
+                if writers:
+                    song["composers"] = writers
+                if prods:
+                    song["producers"] = prods
+                if feat2:
+                    song["featured_artists"] = feat2
+                    song["artists"] = _unique_names([hit_artist] + feat2)
+                alb = sdata.get("album") or {}
+                if alb.get("name"):
+                    song["album"] = alb["name"]
+                if (alb.get("artist") or {}).get("name"):
+                    song["album_artist"] = alb["artist"]["name"]
+                if sdata.get("release_date_for_display"):
+                    song["release_date"] = sdata["release_date_for_display"]
+                if writers or prods:
+                    break
+                print(f"[genius song api] risposta senza crediti (tentativo {attempt}/2)")
             except Exception as e:
-                print(f"[genius song api] {e}")
+                print(f"[genius song api] tentativo {attempt}/2: {e}")
         return song
     except Exception as e:
         print(f"[genius] Error: {e}")
@@ -2812,6 +2856,7 @@ def verify_song(song_id):
     _set_verify_status(song_id, 1, 6, "Ricerca canzone su Genius…")
     updates = {}
     messages = []
+    primary_for_search = ""      # solo artista principale, per le ricerche successive
 
     # Versione "pulita" di titolo/artista per la ricerca web: via il numeretto
     # iniziale di traccia ('1 - TRE STRONZI' → 'TRE STRONZI'), i trattini inutili
@@ -2954,10 +2999,28 @@ def verify_song(song_id):
                 updates["title"] = genius["title"]
                 updates["title_verified"] = 1
                 messages.append("Titolo trovato su Genius")
-            if not s.get("artist_verified") and genius.get("artist"):
-                updates["artist"] = genius["artist"]
-                updates["artist_verified"] = 1
-                messages.append("Artista trovato su Genius")
+            # ARTISTI: Genius elenca il primary + i feat. (chiave "artists"); nel
+            # campo `artist` del DB devono comparire TUTTI, separati da " / "
+            # (formato del resto della libreria), non solo il primo. Se il brano
+            # era già verificato ma l'elenco è incompleto (vecchie verifiche che
+            # salvavano il solo primary, o un feat. mancante) si completa adesso:
+            # l'aggiornamento è idempotente e non concatena doppioni.
+            genius_artists = genius.get("artists") or ([genius["artist"]] if genius.get("artist") else [])
+            if genius_artists:
+                prev_artist = (s.get("artist") or "").strip()
+                missing_artists = _credits_missing(prev_artist, genius_artists)
+                if missing_artists:
+                    updates["artist"] = " / ".join(genius_artists)
+                    if prev_artist:
+                        messages.append(f"🎤 Artisti completati da Genius: {updates['artist']}")
+                    else:
+                        messages.append(f"🎤 Artisti da Genius: {updates['artist']}")
+                if missing_artists or not s.get("artist_verified"):
+                    updates["artist_verified"] = 1
+            if genius.get("artist"):
+                # Le ricerche successive (YouTube/WhoSampled/Tunebat) vanno fatte
+                # col solo artista principale, non con l'elenco completo.
+                primary_for_search = genius["artist"]
             # Il testo viene cercato se manca o se è "sporco" (es. vecchi fetch del
             # player con '8 Contributors', 'Read More', descrizioni di Genius...).
             existing_lyrics = (s.get("lyrics") or "")
@@ -2972,18 +3035,21 @@ def verify_song(song_id):
                     updates["lyrics"] = lyrics
                     updates["lyrics_verified"] = 1
                     messages.append("Testo trovato su Genius")
-            if genius.get("producers"):
-                updates["producers"] = json.dumps(genius["producers"])
-                messages.append(f"Produttori trovati: {len(genius['producers'])}")
+            # PRODUTTORI: li fornisce l'API della singola canzone; si salvano come
+            # JSON (formato già in uso) e si completano se ne manca qualcuno.
+            if genius.get("producers") and _credits_missing(s.get("producers"), genius["producers"]):
+                updates["producers"] = json.dumps(genius["producers"], ensure_ascii=False)
+                messages.append("🎛 Produttori da Genius: " + ", ".join(genius["producers"]))
             if genius.get("release_date") and not s.get("release_date"):
                 updates["release_date"] = genius["release_date"]
                 messages.append("Data rilascio trovata su Genius")
             if genius.get("album") and not s.get("album"):
                 updates["album"] = genius["album"]
                 messages.append("Album trovato su Genius")
-            if genius.get("composers") and not s.get("composer"):
+            # COMPOSITORI (i "writer" di Genius): si completano se manca qualcuno.
+            if genius.get("composers") and _credits_missing(s.get("composer"), genius["composers"]):
                 updates["composer"] = ", ".join(genius["composers"])
-                messages.append(f"Compositore trovato su Genius: {updates['composer']}")
+                messages.append("✍️ Compositore da Genius: " + ", ".join(genius["composers"]))
             if genius.get("album_artist") and not s.get("album_artist"):
                 updates["album_artist"] = genius["album_artist"]
                 messages.append(f"Artista album trovato su Genius: {genius['album_artist']}")
@@ -2996,10 +3062,12 @@ def verify_song(song_id):
         messages.append(f"⚠️ Genius: errore ({str(e)[:50]})")
 
     # Titolo/artista "effettivi" da usare nelle ricerche successive (YouTube,
-    # WhoSampled, Tunebat): se titolo/artista sono stati corretti (da Genius o
-    # da YouTube) si usano i nuovi; altrimenti la versione "pulita" (senza
-    # numeretto iniziale di traccia/trattini) che ha più probabilità di match.
-    search_artist = updates.get("artist") or base_artist
+    # WhoSampled, Tunebat): il campo `artist` può elencare TUTTI i crediti
+    # ("A / B / C") e come query farebbe fallire i match, quindi per le ricerche
+    # si usa il solo artista principale (quello di Genius, o il primo del DB).
+    if not primary_for_search:
+        primary_for_search = (base_artist or "").split(" / ")[0].strip() or base_artist
+    search_artist = primary_for_search
     search_title = updates.get("title") or base_title
 
     # ─── BPM & KEY + URL (YouTube / WhoSampled / Tunebat) ──────────
