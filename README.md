@@ -164,7 +164,7 @@ sintassi JS, handler inline verso funzioni inesistenti, un `const` che si
 auto-inizializzava, delta-time negativi che corrompevano i `.mid`): la copia
 servita dall'app è corretta e l'elenco dei fix è in `midi_studio/README.md`.
 
-## Note operative e stato corrente (11/09/2026, aggiornate al 16/09/2026)
+## Note operative e stato corrente (11/09/2026, aggiornate al 17/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
 
@@ -378,4 +378,62 @@ Da tenere presente nelle sessioni di lavoro successive:
   compilati senza errori (6/6, `new Function`); verifica reale su *Apex* →
   artista completo in DB e nel player dopo il refresh; 56 test OK.
   ⚠️ Ricaricare la pagina (Cmd+Shift+R) per prendere il JS nuovo.
+
+- **APRI NEL SAMPLER — CONTROLLO DEL BPM VERO (17/09/2026).** In ogni canzone,
+  nel tab 🗄️ Database e nel player, c'è ora **🎛 Sampler / "🎛 Apri nel sampler"**:
+  apre il brano nel **sampler FL-Studio** (quello che era "Player standalone":
+  griglia, metronomo, TAP, Moltiplica, Segui) con il **BPM del database già
+  dentro la casella**, così si vede e si sente subito se il brano ci sta sopra o
+  se il BPM salvato è sbagliato e va corretto.
+  - `index (2).html`: nuova `openInSampler(songIdOFile)` — risolve la riga per id
+    (`song_…`) o per nome del file locale, apre il modale `#audio-editor-modal`
+    con `openAudioEditor(url, label, startSec, bpm)` (che ora accetta `startSec` e
+    `bpm` e li passa all'editor nel messaggio `load`) e mostra un toast col BPM
+    salvato (`BPM nel database: … (controlla con griglia/TAP)`, oppure "nessun BPM
+    nel database: misuralo con TAP"); il template dell'editor applica il BPM
+    ricevuto (`setBpm('main', …)`). Il pulsante 🎛 Sampler è nella cella azioni di
+    ogni riga **con file locale** (per i brani senza file resta il link YouTube);
+    le novità `startSec`/`bpm` non rompono i chiamanti esistenti.
+  - `onyx_whosampled.html`: voce **"🎛 Apri nel sampler"** nel menu della canzone
+    (⋮ o tasto destro). Dentro SampleLab (iframe) chiede alla pagina padre di
+    aprire il sampler nella stessa finestra (messaggio `openSampler`); con `/onyx`
+    aperto da solo apre una nuova scheda su `/?sampler=<id>` e, se il brano non è
+    nel database, su `/?sampler_file=<nome file>` (`samplerUrlFor`).
+  - Deep link: la pagina principale accetta ora **`?sampler=<id>`** e
+    **`?sampler_file=<file>`** (oltre a `?tab=…`), per aprire il sampler da un
+    bookmark o dal player standalone.
+  - Verifiche del 17/09/2026: prova **reale in Chrome pilotato da Selenium** (8/8) —
+    la riga del DB ha il pulsante (`▶ ⏹ 🎧 ✂️ Stem ✏️ Edit 🎛 Sampler 🔎 Verifica ✕`),
+    il click apre il modale col titolo giusto e, entrando nell'iframe, l'editor ha
+    **`players.main.bpm = 60.1` e la casella 60.1** (*60 Hz II* di DJ Shocca, BPM
+    nel DB 60.1), come col link diretto; nel player la voce è presente nel menu.
+    Percorso `?sampler_file=…` provato a parte (modale + BPM 60.1): OK. Dump DOM
+    reale di `/?tab=database`: **890 righe e 890 pulsanti 🎛 Sampler**. Test in
+    esecuzione reale con JavaScriptCore: 23/23 su `openInSampler`/`openAudioEditor`/
+    `samplerUrlFor`/`dbSongIdFor` (BPM passato all'editor, messaggio al parent,
+    nuova scheda, casi d'errore) e 5/5 sul template della riga del DB (pulsante
+    presente solo con file locale); **8/8 blocchi `<script>`** delle due pagine
+    (template dell'editor incluso) compilati senza errori.
+  - Nota: il BPM serve solo da punto di partenza — il sampler **non** lo riscrive
+    nel database: per salvarlo si usa *✏️ Edit* (o *Verifica*) sulla riga.
+
+- **`/metadata` (BPM/Tonalità) ANDAVA IN 500 — CORRETTO (17/09/2026).** Il log
+  dell'app mostrava `AttributeError: 'NoneType' object has no attribute 'lower'`
+  su `/metadata`: `get_or_create_song_db` confronta i titoli/artisti con
+  `n(s) = re.sub(...).lower()` e in libreria ci sono **3 righe con `title` NULL**
+  (due storiche + una creata oggi rinominando male un brano) → `None.lower()`.
+  Non era un caso limite: la funzione viene chiamata **solo quando BPM/tonalità
+  vengono trovati**, quindi il 500 arrivava proprio quando c'era qualcosa da
+  salvare — e la stessa `get_or_create_song_db` è usata da `/db/from_onyx` e
+  `/db/add_local`. Fix in `app (2).py`: `n()` regge i NULL
+  (`str(s or "").lower()`), con commento sul perché.
+  Verifiche del 17/09/2026: riproduzione **prima del fix** su una **copia** del DB
+  reale → 3 casi su 3 in `AttributeError` (inserimento nuovo brano, match su riga
+  esistente, brano senza artista); dopo il fix → 3/3 OK. Endpoint: `POST /metadata`
+  su *Uncommon Valor: A Vietnam Story* (riga con bpm NULL, quindi niente cache) →
+  **HTTP 200** con `{"bpm": 61.5, "key": "G Minor", "source": "ffmpeg"}` e valori
+  scritti in DB; `bpm`/`musical_key`/`updated_at` rimessi com'erano dopo la prova;
+  log dell'app senza traceback; **22 + 26 + 8 test** delle suite esistenti OK.
+  ⚠️ Le righe con `title` NULL restano (dati da decidere): il codice ora non ci
+  sbatte più, ma la riga di *Apex* va rinominata (vedi **🎛 Sampler** o *✏️ Edit*).
 

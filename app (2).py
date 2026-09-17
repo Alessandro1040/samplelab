@@ -436,7 +436,11 @@ def check_pair_exists_loose(data,song_x_meta,song_yi_meta,category):
 
 # ── SONG HELPERS (SQLite) ────────────────────────────────────────────────────
 def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", duration=None):
-    def n(s): return re.sub(r"[^a-z0-9]","",s.lower())
+    # `n()` deve reggere anche i NULL: dal 17/09/2026 in libreria ci sono righe con
+    # `title` a NULL (es. un brano rinominato male), e `None.lower()` faceva fallire
+    # OGNI chiamata a questa funzione — cioè /metadata, /db/from_onyx e
+    # /db/add_local — con 500, proprio nei casi in cui BPM/tonalità venivano trovati.
+    def n(s): return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
     if youtube_url:
         r = conn.execute("SELECT id FROM songs WHERE youtube_url=?",(youtube_url,)).fetchone()
         if r: return r["id"]

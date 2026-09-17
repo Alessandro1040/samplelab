@@ -780,7 +780,7 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
 <div class="editor-modal" id="audio-editor-modal">
   <div class="editor-modal-inner">
     <div class="editor-modal-header">
-      <span>🎛️ Audio Editor</span>
+      <span id="audio-editor-title">🎛️ Audio Editor</span>
       <button class="editor-modal-close" onclick="closeAudioEditor()">✕ Chiudi</button>
     </div>
     <iframe class="editor-iframe" id="audio-editor-iframe"></iframe>
@@ -2789,6 +2789,9 @@ window.addEventListener('message', function(e) {
       currentAudioUrl = e.data.url;
     }
     initPlayer('main', currentAudioUrl, e.data.startSec || 0);
+    // BPM passato dalla pagina che apre il sampler (dal database): la griglia
+    // parte già su quel valore, così si sente subito se il brano ci sta sopra.
+    if (e.data.bpm) { try { setBpm('main', e.data.bpm); } catch (_) {} }
   }
 });
 </script>
@@ -2886,6 +2889,7 @@ window.addEventListener('message', e => {
   else if(d.action === 'dbTrackUpdated' && d.track){ applyPlayerTrackToDb(d.track); }
   else if(d.action === 'dbTrackDelete' && d.track){ deleteSongFromPlayer(d.track); } // rimosso dal player → elimina dal DB
   else if(d.action === 'dbChanged'){ loadDb(); } // il player ha aggiunto brani → aggiorna il DB
+  else if(d.action === 'openSampler'){ openInSampler(d.songId || d.local_file || ''); } // il player chiede il sampler FL-Studio
   else if(d.action === 'audioplaying'){ pauseAllScraperAudio(e.source); } // un editor embedded ha iniziato: ferma tutto il resto
 });
 
@@ -2911,12 +2915,18 @@ try{
   if(_dbe) _dbe.addEventListener('play', ()=>pauseAllScraperAudio());
 }catch(_){}
 
-// Apre direttamente il tab richiesto (es. /?tab=database)
+// Apre direttamente il tab richiesto (es. /?tab=database) e, se l'URL lo chiede,
+// il sampler su una canzone: /?sampler=<id del database> oppure
+// /?sampler_file=<nome del file locale>. Serve al player Onyx quando è aperto
+// da solo (/onyx), che non ha la pagina principale intorno.
 (function(){
   try{
-    const t = new URLSearchParams(window.location.search).get('tab');
+    const q = new URLSearchParams(window.location.search);
+    const t = q.get('tab');
     if(['scraper','database','player'].includes(t)) switchTab(t);
     else switchTab('player'); // tab predefinito: applica subito la classe anti-scroll
+    const sp = q.get('sampler') || q.get('sampler_file');
+    if(sp) setTimeout(()=>{ openInSampler(sp); }, 150);
   }catch(_){}
 })();
 
@@ -4179,6 +4189,7 @@ function renderDbTable(songs){
       <td>
   ${s.stem_count>0?`<span class="db-rel-badge" style="color:var(--accent)">✂️ ${s.stem_count}</span>`:`<button class="db-stem-btn" onclick="quickStem('${s.id}','${escA(s.local_file||'')}')">✂️ Stem</button>`}
   <button class="db-stem-btn" onclick="openDbEditor('${s.id}')">✏️ Edit</button>
+  ${s.local_file?`<button class="db-stem-btn" onclick="openInSampler('${s.id}')" title="Apri nel sampler FL-Studio: griglia/metronomo/TAP per controllare il BPM vero">🎛 Sampler</button>`:''}
 </td>
       <td>${s.relation_count>0?`<span class="db-rel-badge">🔗 ${s.relation_count}</span>`:`<span style="color:var(--muted);font-size:10px">—</span>`}</td>
       <td>
@@ -5096,17 +5107,62 @@ async function saveDbEditor(){
 }
 
 // ─── AUDIO EDITOR INTEGRATION ─────────────────────────────────
-function openAudioEditor(url, filename) {
+// `startSec` = secondo da cui partire, `bpm` = BPM da mettere nella casella
+// (arrivano dal database quando il sampler viene aperto da una canzone).
+function openAudioEditor(url, filename, startSec, bpm) {
   const modal = document.getElementById('audio-editor-modal');
   const iframe = document.getElementById('audio-editor-iframe');
+  const title = document.getElementById('audio-editor-title');
+  if (title) title.textContent = filename ? ('🎛️ ' + filename) : '🎛️ Audio Editor';
   modal.classList.add('visible');
   const html = document.getElementById('audio-editor-src').value;
   const blob = new Blob([html], {type: 'text/html'});
   const blobUrl = URL.createObjectURL(blob);
   iframe.onload = function() {
-    iframe.contentWindow.postMessage({action: 'load', url: url, filename: filename}, '*');
+    iframe.contentWindow.postMessage({action: 'load', url: url, filename: filename,
+                                      startSec: startSec || 0, bpm: bpm || 0}, '*');
   };
   iframe.src = blobUrl;
+}
+
+// ── APRI NEL SAMPLER (trimmer FL-Studio) ─────────────────────────────────────
+// Apre il file locale di una canzone nel sampler della pagina (lo stesso editor
+// FL-Studio dei sample: griglia, metronomo, TAP, Moltiplica, Segui…) passandogli
+// il BPM salvato nel database: la griglia parte già su quel valore, così si vede
+// e si sente subito se il brano ci sta sopra o se il BPM va corretto.
+// Accetta l'id del database ('song_…') oppure direttamente il nome del file
+// locale: il player Onyx, per i brani non registrati, ha solo il file.
+async function openInSampler(songIdOrFile, opts){
+  opts = opts || {};
+  const arg = String(songIdOrFile || '').trim();
+  if(!arg){ toast('Nessuna canzone da aprire nel sampler','err'); return null; }
+  const isId = /^song_/.test(arg);
+  let song = (allDbSongs||[]).find(s => s.id === arg) ||
+             (allDbSongs||[]).find(s => s.local_file === arg) || null;
+  if(!song){
+    try{
+      if(isId){
+        song = await fetch('/db/songs/'+encodeURIComponent(arg)).then(r=>r.json());
+        if(song && song.error) song = null;
+      }else{
+        const list = await fetch('/db/songs').then(r=>r.json());
+        if(Array.isArray(list)) song = list.find(s => s.local_file === arg) || null;
+      }
+    }catch(_){ song = null; }
+  }
+  // Il file locale: dalla riga del database, oppure quello passato (player Onyx).
+  const localFile = (song && song.local_file) || (isId ? '' : arg);
+  if(!localFile){
+    toast('Questa canzone non ha un file locale: non c\'è niente da aprire nel sampler','err');
+    return null;
+  }
+  const label = (song && (song.title || song.local_file)) || localFile;
+  const bpm = (song && song.bpm) || opts.bpm || 0;
+  openAudioEditor('/stream/'+encodeURIComponent(localFile), label, opts.startSec||0, bpm);
+  toast('🎛️ "'+label+'" aperto nel sampler' +
+        (bpm ? (' — BPM nel database: '+bpm+' (controlla con griglia/TAP)')
+             : ' — nessun BPM nel database: misuralo con TAP'), 'ok');
+  return localFile;
 }
 function closeAudioEditor() {
   document.getElementById('audio-editor-modal').classList.remove('visible');

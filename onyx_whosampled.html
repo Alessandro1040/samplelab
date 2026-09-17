@@ -2475,9 +2475,59 @@ function showTrackCtxMenu(e, trackId) {
     {label: "📁 Aggiungi a playlist", fn: () => openAssignPlaylist(trackId)},
     {label: "🔍 Analizza singolo", fn: () => analyzeTrack(trackId)},
     {label: "✏️ Modifica info avanzata", fn: () => openEditTrackModal(trackId)},
+    {label: "🎛 Apri nel sampler", fn: () => openInSampler(trackId)},
     {sep: true},
     {label: "🗑 Rimuovi brano", fn: () => removeTrackById(trackId, false), danger: true},
   ]);
+}
+
+// ──────────────────────────────────────────────
+//  APRI NEL SAMPLER (trimmer FL-Studio di SampleLab)
+// ──────────────────────────────────────────────
+// URL della pagina principale che apre il sampler su un brano: con l'id del
+// database se c'è, altrimenti col nome del file locale.
+function samplerUrlFor(songId, localFile){
+  if(songId) return '/?sampler=' + encodeURIComponent(songId);
+  if(localFile) return '/?sampler_file=' + encodeURIComponent(localFile);
+  return '';
+}
+
+// Id del brano nel database principale (serve al sampler): lo cerca per file
+// locale, come fa l'analisi, e lo ricorda sul brano.
+async function dbSongIdFor(track){
+  if(!track) return '';
+  if(track.dbSongId) return track.dbSongId;
+  try{
+    const list = await fetch('/db/songs').then(r => r.json());
+    if(Array.isArray(list)){
+      const s = list.find(x =>
+        (track.localFile && x.local_file === track.localFile) ||
+        (x.title === track.name && x.artist === track.artist));
+      if(s) track.dbSongId = s.id;
+    }
+  }catch(_){}
+  return track.dbSongId || '';
+}
+
+// Apre il brano nel sampler FL-Studio (griglia, metronomo, TAP, Moltiplica…)
+// col BPM del database già impostato: così si misura il BPM vero e si vede se
+// il valore salvato ci sta sopra. Dentro SampleLab (iframe) il sampler si apre
+// nella stessa finestra; con /onyx aperto da solo si apre una nuova scheda.
+async function openInSampler(trackId){
+  const track = tracks.find(t => t.id === trackId);
+  if(!track) return;
+  const file = track.localFile || '';
+  if(!file){ alert('Brano senza file locale: impossibile aprire il sampler.'); return; }
+  const id = await dbSongIdFor(track);
+  if(window.self !== window.top){
+    try{
+      window.parent.postMessage({action:'openSampler', songId:id, local_file:file,
+                                 title:track.name||'', bpm:track.bpm||''}, '*');
+      return;
+    }catch(_){}
+  }
+  const url = samplerUrlFor(id, file);
+  if(url) window.open(url, '_blank');
 }
 
 function showPlCtxMenu(e, plId) {
