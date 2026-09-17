@@ -45,6 +45,11 @@ con `(2)` nella cartella locale:
 - `test_sampler_metronomo.py` — test del **metronomo** del sampler (passo fra i
   colpi, accenti, unità: 1/4 · 2/4 · 3/4 · battuta · 2 · 4 battute):
   `python3 -m unittest -v test_sampler_metronomo`
+- `test_sampler_battuta.py` — test della **battuta** nel sampler (🎯 Trova la
+  battuta, trim celeste, 🔁 Battuta, 💾 Salva BPM): l'algoritmo su pattern 4/4
+  sintetici con intro senza batteria, le funzioni pure della pagina in
+  JavaScriptCore, il cablaggio e `POST /beat/bar` sull'app viva:
+  `python3 -m unittest -v test_sampler_battuta`
 - `fortissimo_compare_v3.py` — modello **Fortissimo Compare v3**: confronto tra
   due output `AudioAnalysis` (MIDI + one-shot), score [0,1]
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
@@ -955,4 +960,46 @@ Da tenere presente nelle sessioni di lavoro successive:
   al posto delle tracce.
   Nota: `/tmp/samplelab.log` resta **vuoto** all'avvio perché l'output di Python è
   bufferizzato quando è rediretto su file (comportamento preesistente).
+
+
+- **BPM DALLA BATTUTA — «🎯 Trova la battuta» e trim celeste (18/09/2026).** La
+  stima automatica «🔎 BPM & Key» è stata **tolta da `index (2).html`** (pulsanti e
+  funzione `fetchMetadata`): sbagliava troppo spesso. Al suo posto, nel sampler:
+  **🎯 Trova la battuta** chiama il nuovo `POST /beat/bar` (app (2).py) e mette il
+  risultato nel **trim celeste** — due maniglie libere `BATTUTA` / `FINE BATTUTA`,
+  indipendenti dal trim giallo del sample — da cui nasce il BPM
+  (`60 × quarti ÷ durata`, aggiornato mentre trascini); **🔁 Battuta** fa girare
+  solo quel tratto e **💾 Salva BPM** lo scrive nel database della canzone aperta
+  (e segna `bpm_verified`). Nel flusso «➕ Aggiungi canzone» BPM e tonalità ora
+  arrivano **solo dai tag del file** (`TBPM`/`TKEY`), non più da una stima.
+  Cose imparate misurando (tutte documentate nel codice e in `README_sampler.md`):
+  1. in 4/4 il picco dell'autocorrelazione è del **disegno cassa-rullante** (due
+     quarti): il BPM veniva la metà (un 120 diventava 60,1). Ora il tempo parte dai
+     candidati dell'autocorrelazione **più** il tempo di librosa, e a parità di
+     punteggio vince il periodo **più lungo**, ma solo se è un multiplo intero del
+     migliore;
+  2. i lag a passi di `hop` valgono 23 ms: a 120 BPM un lag di differenza è 5 BPM
+     (*In Da Club*: 123,0 invece di 117,5). Il periodo viene rifinito al
+     millisecondo in una finestra **stretta** (±3%: con ±8% scappava a 133,8);
+  3. l'inviluppo di onset era **un frame avanti** (un colpo a 20,00 s finiva a
+     19,93): ora lo zero in testa lo allinea;
+  4. la soglia dei «quarti a fuoco» era troppo severa (25% del massimo): i quarti
+     deboli della musica vera (*Get Up*: 0,21 contro 0,88) risultavano fuori. Ora è
+     al 12% e misura «la griglia cade su un transiente», non «il colpo è forte».
+  Verifiche del 18/09/2026: **21 test nuovi** (`test_sampler_battuta.py`) e **204
+  test** di suite; app riavviata (backend toccato) e pagine `/` `/browse` `/onyx`
+  `/scheda` → 200; `POST /beat/bar` sull'app viva → 200 con battuta sensata, 404 su
+  file inesistente, 400 senza nome. Sui **segnali sintetici con tempo noto** (4/4 a
+  75/90/120/140 BPM con 20 s di intro senza batteria) il BPM esce entro **0,7** e la
+  battuta comincia dove entrano i tamburi (20,0-22,4 s). Sui **file veri** la
+  proposta è onesta ma non sempre esatta e lo dice: *Get Up* 123,2 BPM con 3/4
+  quarti a fuoco (affidabile), *In Da Club* 120,5 e *21 Questions* 93,0 con
+  l'avviso «controlla a orecchio» (i valori del database per questi due sono
+  117,5 e 86,1, e per *Get Up* 92,3 — un rapporto 3:4: il livello metrico dei pezzi
+  shuffle non è affidabile, ed è per questo che il trim si trascina). Il trim
+  celeste è stato provato **nel DOM vero** (Chrome headless sul documento del
+  sampler con un audio finto: trim disegnato a 47,9 px/7,2 px, BPM 160 ricavato dal
+  trim, casella BPM aggiornata, loop `🔁` attivo). Sistemato anche un difetto che
+  c'era prima: nel sampler aperto da una canzone `p.filename` restava `'audio'`, e
+  «Scarica selezione» non sapeva quale file tagliare.
 

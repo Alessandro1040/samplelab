@@ -1238,6 +1238,45 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
   background:#fff;
   box-shadow:0 0 8px rgba(45,212,191,0.9);
 }
+/* ── Trim CELESTE: la BATTUTA (da qui nasce il BPM) ───────────────────────────
+   È diverso dal trim giallo del sample: il giallo è «cosa ritaglio», il celeste
+   è «quanto dura una battuta». Gli estremi sono liberi (non si agganciano alla
+   griglia): è la battuta a decidere il tempo, non il contrario. */
+.bar-trim-shade-left, .bar-trim-shade-right {
+  position:absolute; top:0; bottom:0;
+  background:rgba(45,212,191,.10);
+  pointer-events:none; z-index:5;
+}
+.bar-trim-selection {
+  position:absolute; top:0; bottom:0;
+  background:rgba(45,212,191,.06);
+  border-top:2px solid #2dd4bf;
+  border-bottom:2px solid #2dd4bf;
+  pointer-events:none; z-index:5;
+}
+.bar-trim-handle {
+  position:absolute; top:0; bottom:0; width:16px;
+  z-index:7; cursor:ew-resize;
+  display:flex; align-items:center; justify-content:center;
+  pointer-events:auto;
+}
+.bar-trim-handle-bar {
+  width:4px; height:100%;
+  background:#2dd4bf; border-radius:2px; position:relative;
+}
+.bar-trim-handle-bar::before {
+  content:''; position:absolute; top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  width:4px; height:26px; background:#fff; border-radius:2px; opacity:.6;
+}
+.bar-trim-handle-label {
+  position:absolute; top:-20px;
+  font-family:'Space Mono', monospace; font-size:9px;
+  color:#2dd4bf; white-space:nowrap;
+  transform:translateX(-50%); left:50%;
+}
+.bar-info { color:#2dd4bf; font-weight:700; }
+.bar-trim-handle.dragging .bar-trim-handle-bar { background:#fff; }
 
 .trim-time-row {
   display:flex; justify-content:space-between; align-items:center;
@@ -1333,6 +1372,7 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
           <div class="loop-toggle">
             <button class="loop-btn active" id="loop-sel-main" onclick="setLoopMode('main','sel')">✂ Sel</button>
             <button class="loop-btn" id="loop-all-main" onclick="setLoopMode('main','all')">⟳ Tutto</button>
+            <button class="loop-btn" id="loop-bar-main" onclick="setLoopMode('main','bar')" title="Ripeti solo la battuta del trim celeste: serve a sentire se gira fluido a tempo">🔁 Battuta</button>
           </div>
           <div class="vol-wrap">
             <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
@@ -1383,6 +1423,8 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
           <input type="number" class="start-bar-input" id="start-bar-main" value="1" step="1" min="1" title="A che numero di battuta deve corrispondere l'inizio">
         </div>
         <button class="btn-align-grid" onclick="alignGridToSelection('main')">Allinea griglia</button>
+        <button class="grid-btn" id="bar-btn-main" onclick="trovaBattuta('main')" title="Trova DOVE comincia la battuta (l'entrata della batteria o il drop) e la fine: la mette nel trim celeste e ne ricava il BPM">🎯 Trova la battuta</button>
+        <button class="grid-btn" id="save-bpm-main" onclick="salvaBpm('main')" title="Salva nel database il BPM misurato sul trim celeste (per la canzone aperta)">💾 Salva BPM</button>
       </div>
 
       <div class="grid-row">
@@ -1430,6 +1472,18 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
                  onmousedown="startCellBorderDrag(event,'main','left')" ontouchstart="startCellBorderDragTouch(event,'main','left')"></div>
             <div class="cell-waveform-border" id="cell-border-right-main" style="display:none"
                  onmousedown="startCellBorderDrag(event,'main','right')" ontouchstart="startCellBorderDragTouch(event,'main','right')"></div>
+            <!-- Trim CELESTE della battuta: estremi liberi, da qui nasce il BPM -->
+            <div class="bar-trim-shade-left" id="btsl-main" style="display:none"></div>
+            <div class="bar-trim-selection" id="bts-main" style="display:none"></div>
+            <div class="bar-trim-shade-right" id="btsr-main" style="display:none"></div>
+            <div class="bar-trim-handle" id="bth-start-main" style="display:none"
+                 onmousedown="startBarTrimDrag(event,'main','start')" ontouchstart="startBarTrimDragTouch(event,'main','start')">
+              <div class="bar-trim-handle-bar"><div class="bar-trim-handle-label">BATTUTA</div></div>
+            </div>
+            <div class="bar-trim-handle" id="bth-end-main" style="display:none"
+                 onmousedown="startBarTrimDrag(event,'main','end')" ontouchstart="startBarTrimDragTouch(event,'main','end')">
+              <div class="bar-trim-handle-bar"><div class="bar-trim-handle-label">FINE BATTUTA</div></div>
+            </div>
           </div>
           <div class="playhead" id="tph-main" style="left:0px" onmousedown="startPlayheadDrag(event,'main')" ontouchstart="startPlayheadDragTouch(event,'main')"></div>
         </div>
@@ -1442,6 +1496,13 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
           &nbsp;|&nbsp; sample: <span id="tt-offset-main">0.00s</span>
           <span id="tt-warn-main" style="display:none;color:var(--red);font-weight:700"></span>
           &nbsp;|&nbsp; <span style="color:var(--metronome-active);" id="metro-status-main">🔇</span>
+        </div>
+        <div class="trim-time-label" style="width:100%;margin-top:2px">
+          <span class="bar-info">🎯 Battuta</span>
+          <span class="bar-info" id="bt-start-main">—</span> &nbsp;→&nbsp;
+          <span class="bar-info" id="bt-end-main">—</span>
+          &nbsp;|&nbsp; <span class="bar-info" id="bt-bpm-main">— BPM</span>
+          &nbsp;|&nbsp; <span id="bt-info-main" style="color:var(--muted)">nessuna battuta: premi 🎯 Trova la battuta (o trascina il bordo celeste)</span>
         </div>
         <button class="btn-reset-handle" onclick="resetTrimStart('main')">⟳ Reset al sample</button>
       </div>
@@ -1632,6 +1693,11 @@ function startAnimationLoop(key) {
       p.audio.currentTime = Math.max(0, p.timelineTime - p.sampleOffset);
       p.nextMetroBeatTime = null; // Ricalcola il metronomo quando loopa indietro
     }
+    if (p.loopMode === 'bar' && p.barStart !== null && p.barEnd !== null && p.timelineTime >= p.barEnd) {
+      p.timelineTime = p.barStart;      // 🔁 Battuta: torna all'inizio della battuta celeste
+      p.audio.currentTime = Math.max(0, p.timelineTime - p.sampleOffset);
+      p.nextMetroBeatTime = null;
+    }
     if (p.loopSel && p.timelineTime < p.trimStart) {
       p.timelineTime = p.trimStart;
       p.audio.currentTime = Math.max(0, p.timelineTime - p.sampleOffset);
@@ -1683,6 +1749,12 @@ function initPlayer(key, url, startSec) {
     waveformLoading: false,
     selectedBarNumber: null,
     selectedBarStartTime: null,
+    barStart: null,          // trim CELESTE: inizio della battuta (secondi di timeline)
+    barEnd: null,            // fine della battuta
+    barQuarti: 4,            // quarti della battuta (da «Battute Sel.»)
+    barInfo: '',             // messaggio dell'ultima ricerca della battuta
+    songId: '',              // canzone del database aperta nel sampler (per 💾 Salva BPM)
+    loopMode: 'sel',         // 'sel' (trim giallo) · 'all' (tutto) · 'bar' (trim celeste)
     tapTimes: [],
     cellBorderDrag: null,
     metronomeEnabled: false,
@@ -2015,12 +2087,226 @@ function setPlayBtn(key, playing) {
   const btn = document.getElementById(`pb-${key}`);
   if (btn) btn.innerHTML = playing ? PAUSE_ICON : PLAY_ICON;
 }
+// ─── BATTUTA (trim CELESTE): da qui nasce il BPM ────────────────
+// Il trim GIALLO è il sample (cosa ritaglio). Il trim CELESTE è LA BATTUTA: dove
+// comincia — l'entrata della batteria, il drop, il primo giro che tiene — e dove
+// finisce. Il BPM è 60 × quarti / durata della battuta: spostando gli estremi
+// cambia il BPM, quindi la decisione è dell'orecchio; 🎯 Trova la battuta dà solo
+// il punto di partenza (e dice quando è poco affidabile).
+
+function bpmDaBattuta(quarti, durata) {
+  const q = parseFloat(quarti), d = parseFloat(durata);
+  if (!isFinite(q) || !isFinite(d) || q <= 0 || d <= 0) return null;
+  const bpm = 60 * q / d;
+  if (bpm < 20 || bpm > 400) return null;
+  return Math.round(bpm * 10) / 10;
+}
+
+function barTrimClamp(inizio, fine, durata, minimo) {
+  const d = Math.max(0, parseFloat(durata) || 0);
+  const m = Math.max(0.02, parseFloat(minimo) || 0.05);
+  let a = Math.max(0, Math.min(d || 1e9, parseFloat(inizio) || 0));
+  let b = Math.max(0, Math.min(d || 1e9, parseFloat(fine) || 0));
+  if (b < a) { const t = a; a = b; b = t; }
+  if (b - a < m) b = Math.min(d || 1e9, a + m);
+  if (b - a < m) a = Math.max(0, b - m);
+  return { start: a, end: b };
+}
+
+function etichettaBattuta(bpm, quarti, durata) {
+  const q = parseInt(quarti, 10) || 4;
+  const d = parseFloat(durata);
+  if (!isFinite(d) || d <= 0) return 'nessuna battuta: premi 🎯 Trova la battuta (o trascina il bordo celeste)';
+  const b = (bpm === null || bpm === undefined) ? bpmDaBattuta(q, d) : bpm;
+  if (b === null || !isFinite(b)) return 'battuta di ' + d.toFixed(2) + ' s · ' + q + ' quarti (BPM fuori misura)';
+  return 'battuta di ' + d.toFixed(2) + ' s · ' + q + ' quarti · ' + String(b).replace('.', ',') + ' BPM';
+}
+
+function quartiBattuta(key) {
+  const el = document.getElementById(`beats-input-${key}`);
+  const q = parseInt(el?.value, 10);
+  return (isFinite(q) && q > 0) ? q : 4;
+}
+
+function aggiornaBattuta(key) {
+  const p = players[key];
+  if (!p) return;
+  const dur = p.audio.duration || 0;
+  const sel = document.getElementById(`bts-${key}`);
+  const sl = document.getElementById(`btsl-${key}`);
+  const sr = document.getElementById(`btsr-${key}`);
+  const hs = document.getElementById(`bth-start-${key}`);
+  const he = document.getElementById(`bth-end-${key}`);
+  const t1 = document.getElementById(`bt-start-${key}`);
+  const t2 = document.getElementById(`bt-end-${key}`);
+  const bpmEl = document.getElementById(`bt-bpm-${key}`);
+  const info = document.getElementById(`bt-info-${key}`);
+  const attiva = p.barStart !== null && p.barStart !== undefined && p.barEnd !== null && dur > 0;
+  for (const el of [sel, sl, sr, hs, he]) { if (el) el.style.display = attiva ? 'block' : 'none'; }
+  if (!attiva) {
+    if (t1) t1.textContent = '—';
+    if (t2) t2.textContent = '—';
+    if (bpmEl) bpmEl.textContent = '— BPM';
+    if (info) info.textContent = etichettaBattuta(null, quartiBattuta(key), 0);
+    return;
+  }
+  const W = getTrimAreaWidth(key);
+  const x1 = secToPx(key, p.barStart), x2 = secToPx(key, p.barEnd);
+  if (sel) { sel.style.left = x1 + 'px'; sel.style.width = Math.max(0, x2 - x1) + 'px'; }
+  if (sl) { sl.style.left = '0px'; sl.style.width = Math.max(0, x1) + 'px'; }
+  if (sr) { sr.style.left = x2 + 'px'; sr.style.width = Math.max(0, W - x2) + 'px'; }
+  if (hs) hs.style.left = (x1 - 8) + 'px';
+  if (he) he.style.left = (x2 - 8) + 'px';
+  const bpm = bpmDaBattuta(p.barQuarti || quartiBattuta(key), p.barEnd - p.barStart);
+  if (t1) t1.textContent = fmtTime(p.barStart);
+  if (t2) t2.textContent = fmtTime(p.barEnd);
+  if (bpmEl) bpmEl.textContent = (bpm === null ? '—' : String(bpm).replace('.', ',')) + ' BPM';
+  if (info) info.textContent = p.barInfo || etichettaBattuta(bpm, p.barQuarti || quartiBattuta(key), p.barEnd - p.barStart);
+}
+
+// Mette la battuta (in secondi di TIMELINE, come IN/OUT) e allinea la casella BPM.
+function impostaBattuta(key, inizio, fine, info, aggiornaBpm) {
+  const p = players[key];
+  if (!p) return null;
+  const dur = p.audio.duration || 0;
+  const q = quartiBattuta(key);
+  const r = barTrimClamp(inizio, fine, dur, 0.05);
+  p.barStart = r.start;
+  p.barEnd = r.end;
+  p.barQuarti = q;
+  p.barInfo = info || '';
+  const bpm = bpmDaBattuta(q, r.end - r.start);
+  if (aggiornaBpm && bpm !== null && Math.abs((p.bpm || 0) - bpm) > 0.05) setBpm(key, bpm);
+  aggiornaBattuta(key);
+  return bpm;
+}
+
+function startBarTrimDrag(e, key, which) {
+  e.preventDefault(); e.stopPropagation();
+  const p = players[key];
+  if (!p || p.barStart === null || p.barStart === undefined) return;
+  p.dragging = 'bar';
+  const el = document.getElementById(`bth-${which}-${key}`);
+  if (el) el.classList.add('dragging');
+  function om(ev) { applyBarTrimDrag(ev.clientX, key, which); }
+  function ou() {
+    p.dragging = null;
+    const h = document.getElementById(`bth-${which}-${key}`);
+    if (h) h.classList.remove('dragging');
+    p.barInfo = '';
+    aggiornaBattuta(key);
+    document.removeEventListener('mousemove', om);
+    document.removeEventListener('mouseup', ou);
+  }
+  document.addEventListener('mousemove', om);
+  document.addEventListener('mouseup', ou);
+}
+
+function startBarTrimDragTouch(e, key, which) {
+  e.preventDefault(); e.stopPropagation();
+  const p = players[key];
+  if (!p || p.barStart === null || p.barStart === undefined) return;
+  p.dragging = 'bar';
+  function om(ev) { applyBarTrimDrag(ev.touches[0].clientX, key, which); }
+  function oe() {
+    p.dragging = null;
+    p.barInfo = '';
+    aggiornaBattuta(key);
+    document.removeEventListener('touchmove', om);
+    document.removeEventListener('touchend', oe);
+  }
+  document.addEventListener('touchmove', om, { passive: false });
+  document.addEventListener('touchend', oe);
+}
+
+// Gli estremi del trim celeste sono LIBERI: niente aggancio alla griglia, perché
+// è la battuta a decidere il tempo (il BPM si aggiorna mentre trascini).
+function applyBarTrimDrag(clientX, key, which) {
+  const p = players[key];
+  if (!p || p.barStart === null || p.barStart === undefined) return;
+  const ta = document.getElementById(`ta-${key}`);
+  const t = pxToSec(key, clientX - (ta ? ta.getBoundingClientRect().left : 0));
+  if (which === 'start') impostaBattuta(key, t, p.barEnd, '', true);
+  else impostaBattuta(key, p.barStart, t, '', true);
+}
+
+// 🎯 Trova la battuta: chiede al backend dove comincia la battuta (primo colpo
+// forte dove il tempo tiene: entrata della batteria o drop), mette il trim celeste
+// lì e ne ricava il BPM. Il backend dice anche quanto è affidabile.
+async function trovaBattuta(key) {
+  const p = players[key];
+  if (!p || !p.filename || p.filename === 'audio') {
+    alert('Non so quale file analizzare: apri il sampler da una canzone del database.');
+    return;
+  }
+  const info = document.getElementById(`bt-info-${key}`);
+  const bottone = document.getElementById(`bar-btn-${key}`);
+  if (info) info.textContent = '⏳ cerco dove comincia la battuta…';
+  if (bottone) bottone.disabled = true;
+  let esito = null;
+  try {
+    esito = await fetch('/beat/bar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: p.filename, quarters: quartiBattuta(key) })
+    }).then(r => r.json());
+  } catch (e) {
+    if (info) info.textContent = '❌ ' + e.message;
+    return;
+  } finally {
+    if (bottone) bottone.disabled = false;
+  }
+  if (!esito || !esito.ok) {
+    if (info) info.textContent = '❌ ' + ((esito && esito.message) || 'non riesco a misurare la battuta');
+    return;
+  }
+  const off = p.sampleOffset || 0;
+  impostaBattuta(key, esito.bar_start + off, esito.bar_end + off, esito.message, true);
+  if (info) info.textContent = esito.message;
+  setLoopMode(key, 'bar');   // la fa girare subito: si sente se è a tempo
+  if (p.timelineTime < p.barStart || p.timelineTime >= p.barEnd) {
+    p.timelineTime = p.barStart;
+    p.audio.currentTime = Math.max(0, p.barStart - off);
+    updatePlayhead(key); updateTimecode(key);
+  }
+  p.audio.play().catch(() => {});
+  setPlayBtn(key, true);
+  if (!p._animId) startAnimationLoop(key);
+}
+
+// 💾 Salva BPM: manda alla pagina (che sa qual è la canzone) il BPM misurato sul
+// trim celeste; la pagina scrive il campo bpm della canzone nel database.
+function salvaBpm(key) {
+  const p = players[key];
+  if (!p) return;
+  const info = document.getElementById(`bt-info-${key}`);
+  if (p.barStart === null || p.barStart === undefined || p.barEnd === null) {
+    if (info) info.textContent = '⚠ prima trova (o trascina) la battuta celeste, poi salva il BPM';
+    return;
+  }
+  const bpm = bpmDaBattuta(p.barQuarti || quartiBattuta(key), p.barEnd - p.barStart);
+  if (bpm === null) {
+    if (info) info.textContent = '⚠ la battuta è troppo lunga o troppo corta per un BPM valido';
+    return;
+  }
+  try {
+    parent.postMessage({ action: 'saveBpm', bpm: bpm, filename: p.filename,
+                         songId: p.songId || '', barStart: p.barStart, barEnd: p.barEnd,
+                         quarters: p.barQuarti || quartiBattuta(key) }, '*');
+    if (info) info.textContent = '💾 BPM ' + String(bpm).replace('.', ',') + ' salvato nel database';
+  } catch (e) {
+    if (info) info.textContent = '❌ non riesco a salvare: ' + e.message;
+  }
+}
+
 function setLoopMode(key, mode) {
   const p = players[key];
   if (!p) return;
-  p.loopSel = (mode === 'sel');
-  document.getElementById(`loop-sel-${key}`)?.classList.toggle('active', p.loopSel);
-  document.getElementById(`loop-all-${key}`)?.classList.toggle('active', !p.loopSel);
+  p.loopMode = (mode === 'all' || mode === 'bar') ? mode : 'sel';
+  p.loopSel = (p.loopMode === 'sel');
+  document.getElementById(`loop-sel-${key}`)?.classList.toggle('active', p.loopMode === 'sel');
+  document.getElementById(`loop-all-${key}`)?.classList.toggle('active', p.loopMode === 'all');
+  document.getElementById(`loop-bar-${key}`)?.classList.toggle('active', p.loopMode === 'bar');
 }
 function setVol(key, val) { const p = players[key]; if (p) p.audio.volume = parseFloat(val); }
 
@@ -2052,6 +2338,7 @@ function updateTrimUI(key) {
   document.getElementById(`tt-end-${key}`).textContent = fmtTime(p.trimEnd);
   document.getElementById(`tt-dur-${key}`).textContent = fmtTime(p.trimEnd - p.trimStart);
   document.getElementById(`tt-offset-${key}`).textContent = (p.sampleOffset >= 0 ? '+' : '') + p.sampleOffset.toFixed(2) + 's';
+  aggiornaBattuta(key);
 }
 
 function updatePlayhead(key) {
@@ -2930,6 +3217,15 @@ window.addEventListener('message', function(e) {
     // BPM passato dalla pagina che apre il sampler (dal database): la griglia
     // parte già su quel valore, così si sente subito se il brano ci sta sopra.
     if (e.data.bpm) { try { setBpm('main', e.data.bpm); } catch (_) {} }
+    // Il nome del FILE e la canzone del database: senza il nome vero il pulsante
+    // 🎯 Trova la battuta non saprebbe cosa analizzare (e nemmeno «Scarica
+    // selezione», che usa lo stesso campo).
+    const pl = players['main'];
+    if (pl) {
+      pl.filename = e.data.filename || pl.filename;
+      pl.songId = e.data.songId || '';
+      aggiornaBattuta('main');
+    }
   }
 });
 </script>
@@ -3038,7 +3334,32 @@ window.addEventListener('message', e => {
   else if(d.action === 'dbChanged'){ loadDb(); } // il player ha aggiunto brani → aggiorna il DB
   else if(d.action === 'openSampler'){ openInSampler(d.songId || d.local_file || ''); } // il player chiede il sampler FL-Studio
   else if(d.action === 'audioplaying'){ pauseAllScraperAudio(e.source); } // un editor embedded ha iniziato: ferma tutto il resto
+  else if(d.action === 'saveBpm'){ salvaBpmDaSampler(d); } // 💾 il sampler ha misurato il BPM sulla battuta celeste
 });
+
+// Il sampler ha misurato il BPM sul TRIM CELESTE (la battuta): lo salva nella
+// canzone aperta — id del database, oppure cercata per nome file. `updateSongField`
+// marca anche bpm_verified = 1: è una misura fatta a orecchio con la battuta che
+// gira in loop, non una stima automatica.
+async function salvaBpmDaSampler(d){
+  const bpm = parseFloat(d && d.bpm);
+  if(!isFinite(bpm) || bpm <= 0){ toast('BPM non valido: niente da salvare','err'); return; }
+  let song = d.songId ? (allDbSongs||[]).find(s=>s.id===d.songId) : null;
+  if(!song && d.filename) song = (allDbSongs||[]).find(s=>s.local_file===d.filename) || null;
+  if(!song){
+    try{
+      const lista = await fetch('/db/songs').then(r=>r.json());
+      if(Array.isArray(lista)){
+        song = lista.find(s=>s.local_file===d.filename) || null;
+        if(song) allDbSongs = lista;
+      }
+    }catch(_){}
+  }
+  if(!song){ toast('Questa canzone non è nel database: salva prima la canzone, poi il BPM','err'); return; }
+  const valore = Math.round(bpm*10)/10;
+  await updateSongField(song.id, 'bpm', valore);
+  toast(`💾 BPM ${valore} salvato per «${song.title||song.local_file}» (battuta da ${Number(d.quarters)||4} quarti)`,'ok');
+}
 
 // Un brano è stato rimosso dal player → lo elimina anche dal database (e dal file).
 async function deleteSongFromPlayer(t){
@@ -3307,7 +3628,7 @@ function renderResults(data){
         <div class="track-name">${esc(data.title)}</div>
         <div class="track-artist">${esc(data.artist)}</div>
         <div class="meta-row" id="meta-main">
-          <button class="meta-btn" onclick="fetchMetadata('${escA(data.artist)}','${escA(data.title)}','meta-main','${escA(data.main_yt_url||'')}')">🔎 BPM &amp; Key</button>
+          <span class="meta-loading">🥁 BPM: misuralo nel sampler (🎛 → 🎯 Trova la battuta)</span>
         </div>
       </div>
       ${data.ws_url?`<a href="${data.ws_url}" target="_blank" class="ws-badge">WhoSampled ↗</a>`:""}
@@ -3453,9 +3774,6 @@ function renderPairCard(item,i,section,mainTitle,mainArtist,mainYtUrl){
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         <span class="pair-year">${esc(item.year||"")}</span>
-        <span class="meta-badge" id="meta-${p}-${i}-yi">
-          <button class="meta-btn" onclick="fetchMetadata('${escA(item.artist)}','${escA(item.title)}','meta-${p}-${i}-yi','${escA(item.yt_url||"")}')">🔎 BPM &amp; Key</button>
-        </span>
       </div>
     </div>
     <div class="pair-players">
@@ -4224,22 +4542,12 @@ function savePair(btn,xTitle,xArtist,xYtUrl,yiTitle,yiArtist,yiYtUrl,defaultTsX,
   .catch(e=>{btn.disabled=false;statusEl.textContent="✕ Errore rete";statusEl.style.color="var(--red)"});
 }
 
-// ── METADATA ─────────────────────────────────────────────────────────────────
-function fetchMetadata(artist,title,elementId,ytUrl){
-  const el=document.getElementById(elementId);if(!el)return;el.innerHTML='<span class="meta-loading">⏳ Analisi BPM & Key...</span>';
-  const cacheKey=(ytUrl||`${artist} ${title}`).trim();
-  function doFetch(filename){
-    fetch("/metadata",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({artist,title,filename:filename||"",yt_url:ytUrl||""})})
-    .then(r=>r.json()).then(res=>{
-      if(res.metadata)renderMetadata(el,res.metadata);
-      else el.innerHTML=`<button class="meta-btn" onclick="fetchMetadata('${escA(artist)}','${escA(title)}','${elementId}','${escA(ytUrl||'')}')">🔎 BPM &amp; Key</button>`;
-    }).catch(()=>{el.innerHTML=`<button class="meta-btn" onclick="fetchMetadata('${escA(artist)}','${escA(title)}','${elementId}','${escA(ytUrl||'')}')">🔎 BPM &amp; Key</button>`});
-  }
-  if(downloadCache[cacheKey]?.status==="done"){doFetch(downloadCache[cacheKey].filename);return}
-  if(downloadCache[cacheKey]?.status==="pending"){el.innerHTML='<span class="meta-loading">⏳ In attesa del download...</span>';let attempts=0;const t=setInterval(()=>{attempts++;if(downloadCache[cacheKey]?.status==="done"){clearInterval(t);el.innerHTML='<span class="meta-loading">⏳ Analisi BPM & Key...</span>';doFetch(downloadCache[cacheKey].filename)}else if(downloadCache[cacheKey]?.status==="error"||attempts>60){clearInterval(t);doFetch(null)}},1500);return}
-  doFetch(null);
-}
-function renderMetadata(el,meta){const conf=meta.confidence?` (${Math.round(meta.confidence*100)}%)`:'';;const src=meta.source==='tunebat'?'🌐':(meta.source==='librosa'?'🎛️':'💾');el.innerHTML=`<span class="meta-badge">${src} ${meta.bpm||'?'} BPM · ${meta.key||'?'}${conf}</span>`}
+// ── METADATA: la stima automatica del BPM («🔎 BPM & Key») è stata TOLTA il
+// 18/09/2026: sbagliava troppo spesso (Tunebat misura un'altra versione del
+// brano, librosa/ffmpeg misurano tutto il file, intro compresa). Il BPM ora si
+// misura nel sampler con 🎯 Trova la battuta + trim celeste, e da lì si salva.
+// Nel backend le rotte dei metadati restano (le usa la pagina legacy index.html),
+// ma da questa pagina non le chiama più nessuno.
 
 document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="inp-title")startSearch()});
 
@@ -5063,14 +5371,11 @@ async function dbFileSelected(name){
     if(t.TBPM&&t.TBPM.data){ bpmFromTags=t.TBPM.data; document.getElementById('db-add-bpm').value=bpmFromTags; }
     if(t.TKEY&&t.TKEY.data){ document.getElementById('db-add-key').value=t.TKEY.data; }
   }catch(_){}
-  try{
-    const {metadata}=await fetch('/metadata/estimate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:name})}).then(r=>r.json());
-    if(metadata){
-      if(metadata.bpm&&!bpmFromTags) document.getElementById('db-add-bpm').value=metadata.bpm;
-      if(metadata.key) document.getElementById('db-add-key').value=metadata.key;
-      info.textContent=`✓ Metadati letti dal file${metadata.source?` · BPM/Key stimati (${metadata.source})`:''}`;
-    } else info.textContent='✓ Metadati letti dal file';
-  }catch(e){ info.textContent='✓ Metadati letti dal file'; }
+  // BPM e tonalità: SOLO quelli scritti nei tag del file (TBPM/TKEY). La stima
+  // automatica (librosa/ffmpeg/Tunebat) è stata tolta il 18/09/2026 — sbagliava
+  // spesso: il BPM vero si misura nel sampler con la battuta celeste.
+  info.textContent='✓ Metadati letti dal file'+(bpmFromTags?` · BPM ${bpmFromTags} dai tag`:'')
+    +' · per il BPM usa il sampler (🎯 Trova la battuta)';
 }
 
 async function dbAddManual(){
@@ -5396,7 +5701,7 @@ async function saveDbEditor(){
 // ─── AUDIO EDITOR INTEGRATION ─────────────────────────────────
 // `startSec` = secondo da cui partire, `bpm` = BPM da mettere nella casella
 // (arrivano dal database quando il sampler viene aperto da una canzone).
-function openAudioEditor(url, filename, startSec, bpm) {
+function openAudioEditor(url, filename, startSec, bpm, songId) {
   const modal = document.getElementById('audio-editor-modal');
   const iframe = document.getElementById('audio-editor-iframe');
   const title = document.getElementById('audio-editor-title');
@@ -5407,7 +5712,8 @@ function openAudioEditor(url, filename, startSec, bpm) {
   const blobUrl = URL.createObjectURL(blob);
   iframe.onload = function() {
     iframe.contentWindow.postMessage({action: 'load', url: url, filename: filename,
-                                      startSec: startSec || 0, bpm: bpm || 0}, '*');
+                                      startSec: startSec || 0, bpm: bpm || 0,
+                                      songId: songId || ''}, '*');
   };
   iframe.src = blobUrl;
 }
@@ -5445,7 +5751,8 @@ async function openInSampler(songIdOrFile, opts){
   }
   const label = (song && (song.title || song.local_file)) || localFile;
   const bpm = (song && song.bpm) || opts.bpm || 0;
-  openAudioEditor('/stream/'+encodeURIComponent(localFile), label, opts.startSec||0, bpm);
+  openAudioEditor('/stream/'+encodeURIComponent(localFile), label, opts.startSec||0, bpm,
+                  (song && song.id) || '');
   toast('🎛️ "'+label+'" aperto nel sampler' +
         (bpm ? (' — BPM nel database: '+bpm+' (controlla con griglia/TAP)')
              : ' — nessun BPM nel database: misuralo con TAP'), 'ok');

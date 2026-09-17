@@ -2706,6 +2706,435 @@ def dataset_stats():
 def get_dataset():
     return jsonify(load_dataset())
 
+# ── BATTUTA: dove comincia (e finisce) una battuta ───────────────────────────
+# Il BPM stimato su TUTTO il brano sbaglia quando l'intro è senza batteria (o
+# quando il pezzo è in half-time): quello che serve è trovare DOVE comincia la
+# battuta — il primo colpo forte dove il tempo è stabile, cioè l'entrata della
+# batteria o il drop — e da lì misurare quanto dura una battuta. Il BPM che il
+# sampler mostra e salva nasce da quella misura, e l'utente può spostarne gli
+# estremi (il trim celeste) prima di salvarlo.
+#
+# Il lavoro «di testa» sta in funzioni PURE che prendono gli inviluppi (liste di
+# numeri, uno ogni `hop` campioni): così si provano su un segnale sintetico con
+# un tempo noto (test_sampler_battuta.py) senza decodificare un file audio.
+
+def _autocorrelazione(onset, lag_min, lag_max):
+    """Punteggio di autocorrelazione per ogni lag (media sul numero di termini).
+
+    Le medie servono a confrontare lag di lunghezza diversa: senza, i lag corti
+    vincono solo perché hanno più campioni da moltiplicare.
+    """
+    n = len(onset)
+    punteggi = {}
+    for lag in range(lag_min, lag_max + 1):
+        c = 0.0
+        for i in range(n - lag):
+            c += onset[i] * onset[i + lag]
+        punteggi[lag] = c / (n - lag)
+    return punteggi
+
+
+def periodi_candidati(onset, hop, sr, bpm_min=50.0, bpm_max=220.0, quota=0.30, massimo_picchi=6):
+    """Periodi candidati (secondi) dai picchi locali dell'autocorrelazione.
+
+    Il massimo assoluto non è per forza il battito: in 4/4 il disegno
+    «cassa-rullante» si ripete ogni DUE quarti e il suo picco vale il doppio del
+    periodo, cioè metà BPM. Misurato il 18/09/2026 su un pattern 120 BPM generato
+    apposta: il picco a due quarti arrivava al 100% e quello del battito solo al
+    67% (lag 22 contro 43). Per questo si tengono TUTTI i picchi sopra `quota` del
+    massimo: la scelta vera la fa `scegli_periodo`, che guarda i colpi.
+    """
+    n = len(onset)
+    passo = hop / float(sr)
+    lag_min = max(1, int(round((60.0 / bpm_max) / passo)))
+    lag_max = min(n // 2, int(round((60.0 / bpm_min) / passo)))
+    if lag_max <= lag_min + 1:
+        return []
+    punteggi = _autocorrelazione(onset, lag_min, lag_max)
+    massimo = max(punteggi.values())
+    if massimo <= 0:
+        return []
+    soglia = quota * massimo
+    picchi = [lag for lag in range(lag_min + 1, lag_max)
+              if punteggi[lag] >= soglia and punteggi[lag] >= punteggi[lag - 1]
+              and punteggi[lag] >= punteggi[lag + 1]]
+    picchi.sort(key=lambda l: -punteggi[l])
+    return [lag * passo for lag in picchi[:massimo_picchi]]
+
+
+def scegli_tra_candidati(onset, hop, sr, candidati, finestra=0.03, margine=0.06):
+    """Il periodo migliore fra i candidati: vince chi spiega più colpi.
+
+    Ogni candidato viene rifinito al millisecondo solo in una finestra STRETTA
+    (`finestra`, ±3%): allargandola a ±8% la rifinitura scappava di 8% dal valore
+    giusto (misurato su *In Da Club*: 123,05 → 133,75). A parità quasi esatta di
+    punteggio (`margine`) vince il periodo più LUNGO: una griglia più fitta spiega
+    sempre un po' di più, e senza questa regola la scelta finiva sulla suddivisione
+    (185 invece di 92,3 su *Get Up*).
+    Ritorna (periodo, spiegato, media, fase) o (None, 0, 0, 0).
+    """
+    misurati = []
+    for grezzo in candidati:
+        if not grezzo or grezzo <= 0:
+            continue
+        periodo = periodo_fine(onset, grezzo, hop, sr, finestra)
+        spiegato, media, fase = punteggio_griglia(onset, periodo, hop, sr)
+        misurati.append((spiegato, periodo, media, fase))
+    if not misurati:
+        return (None, 0.0, 0.0, 0.0)
+    migliore = max(c[0] for c in misurati)
+    finalisti = [c for c in misurati if c[0] >= migliore * (1.0 - margine)]
+    spiegato, periodo, media, fase = max(finalisti, key=lambda c: c[1])
+    return (periodo, spiegato, media, fase)
+
+
+def colpo_vicino(onset, istante_s, hop, sr, tolleranza_s=0.06):
+    """Valore massimo dell'inviluppo intorno a `istante_s` (0 se il colpo non c'è)."""
+    centro = int(round(istante_s * sr / hop))
+    raggio = max(1, int(round(tolleranza_s * sr / hop)))
+    a, b = max(0, centro - raggio), min(len(onset), centro + raggio + 1)
+    if a >= b:
+        return 0.0
+    return max(onset[a:b])
+
+
+def punti_griglia(onset, inizio_s, passo_s, hop, sr, quanti, tolleranza_s=0.06):
+    """I valori dell'inviluppo sui punti di una griglia (uno ogni `passo_s`)."""
+    return [colpo_vicino(onset, inizio_s + i * passo_s, hop, sr, tolleranza_s)
+            for i in range(quanti)]
+
+
+def _combinato(spiegato, media):
+    """Punteggio unico di una griglia: i colpi spiegati + un po' di energia media.
+
+    Serve a rifinire il periodo al millisecondo: `spiegato` cambia a scalini
+    (un colpo è dentro o fuori tolleranza), `media` varia in modo continuo e
+    indica il verso giusto dentro lo scalino.
+    """
+    return spiegato + 0.25 * media
+
+
+def punteggio_griglia(onset, periodo_s, hop, sr, tolleranza_s=0.04, quanti=60, tentativi=16):
+    """Quanto una griglia di periodo `periodo_s` spiega i colpi: (spiegato, media, fase).
+
+    - `spiegato` = quota di ENERGIA dei colpi che cade entro `tolleranza_s` da un
+      punto della griglia: è quello che distingue il battito dal doppio periodo
+      (la griglia del doppio prende solo la cassa e lascia fuori il rullante);
+    - `media` = valore medio dell'inviluppo sui punti della griglia: è la misura
+      continua che serve per rifinire il periodo.
+
+    Si prova un ventaglio di fasi e si tiene la migliore.
+    """
+    if not onset or not periodo_s or periodo_s <= 0:
+        return 0.0, 0.0, 0.0
+    massimo = max(onset) or 1.0
+    colpi = [(i * hop / float(sr), v) for i, v in enumerate(onset) if v >= 0.25 * massimo][:quanti]
+    if not colpi:
+        return 0.0, 0.0, 0.0
+    energia_totale = sum(v for _, v in colpi) or 1.0
+    migliore = (0.0, 0.0, 0.0)
+    for k in range(max(1, tentativi)):
+        fase = periodo_s * k / float(max(1, tentativi))
+        spiegata = 0.0
+        for t, v in colpi:
+            punto = fase + int(round((t - fase) / periodo_s)) * periodo_s
+            if abs(t - punto) <= tolleranza_s:
+                spiegata += v
+        medio = (sum(punti_griglia(onset, fase, periodo_s, hop, sr, quanti, tolleranza_s)) /
+                 float(max(1, quanti)))
+        if _combinato(spiegata / energia_totale, medio) > _combinato(migliore[0], migliore[1]):
+            migliore = (spiegata / energia_totale, medio, fase)
+    return migliore
+
+
+def periodo_fine(onset, periodo_s, hop, sr, finestra=0.08, passo_ms=1.0, tolleranza_s=0.06):
+    """Il periodo al millisecondo: si prova un intorno di `periodo_s` e vince il migliore.
+
+    Serve perché i lag dell'autocorrelazione sono a passi di `hop` (23 ms): a 120
+    BPM un lag di differenza vale 5 BPM (misurato su *In Da Club*: 123,0 invece di
+    117,5). Con ±8% di intorno e passi da 1 ms l'errore scende sotto il decimo di BPM.
+    """
+    if not periodo_s or periodo_s <= 0:
+        return periodo_s
+    migliore, miglior_p = periodo_s, -1.0
+    passi = int(round(2.0 * finestra * periodo_s / (passo_ms / 1000.0)))
+    for i in range(passi + 1):
+        candidato = periodo_s * (1.0 - finestra) + i * (passo_ms / 1000.0)
+        if candidato <= 0:
+            continue
+        spiegato, media, _ = punteggio_griglia(onset, candidato, hop, sr, tolleranza_s)
+        p = _combinato(spiegato, media)
+        if p > miglior_p:
+            miglior_p, migliore = p, candidato
+    return migliore
+
+
+def scegli_quarto(onset, bassi, passo_s, fase_s, hop, sr, quarti=4, tolleranza_s=0.06):
+    """Quale dei `quarti` colpi della battuta è il PRIMO (il downbeat).
+
+    Il primo quarto si riconosce dalla cassa: fra le `quarti` posizioni possibili
+    si sceglie quella con più energia nella banda bassa, e i colpi dell'inviluppo
+    fanno da spareggio (una battuta comincia dove c'è la cassa e c'è un colpo).
+    Il confronto guarda 4 battute avanti, così non decide un colpo solo.
+    """
+    quarti = max(1, int(round(quarti)))
+    passo_battuta = passo_s * quarti
+    migliore, miglior_p = 0, -1.0
+    for k in range(quarti):
+        inizio = fase_s + k * passo_s
+        p = (sum(punti_griglia(bassi, inizio, passo_battuta, hop, sr, 4, tolleranza_s)) +
+             0.5 * sum(punti_griglia(onset, inizio, passo_battuta, hop, sr, 4, tolleranza_s)))
+        if p > miglior_p:
+            miglior_p, migliore = p, k
+    return migliore
+
+
+def colpi_a_fuoco(onset, inizio_s, passo_s, hop, sr, quarti=4, tolleranza_s=0.06):
+    """Quanti dei quarti della battuta cadono su un colpo vero (0..quarti).
+
+    La soglia è bassa di proposito (12% del colpo più forte dell'inviluppo): qui
+    non si misura se il colpo è forte ma se la griglia CADE su un transiente.
+    Alzandola al 25% (come nella prima versione del 18/09/2026) i quarti deboli
+    della musica vera — misurati su *Get Up*: 0,21 contro 0,88 — venivano contati
+    come «fuori» e il risultato sembrava inaffidabile pur essendo giusto.
+    """
+    quarti = max(1, int(round(quarti)))
+    soglia = 0.12 * (max(onset) or 1.0)
+    return sum(1 for p in punti_griglia(onset, inizio_s, passo_s, hop, sr, quarti, tolleranza_s)
+               if p >= soglia)
+
+
+def primo_colpo_forte(onset, hop, sr, soglia=0.35):
+    """Istante (secondi) del primo colpo forte: dove entra la batteria (o il drop)."""
+    if not onset:
+        return None
+    limite = soglia * (max(onset) or 1.0)
+    for i, v in enumerate(onset):
+        if v >= limite:
+            return i * hop / float(sr)
+    return None
+
+
+def _mmss(sec):
+    """Tempo leggibile come nel sampler: «0:22,4»."""
+    if sec is None:
+        return "—"
+    m = int(sec // 60)
+    return "%d:%04.1f" % (m, sec - 60 * m)
+
+
+def trova_battuta(onset, bassi, hop, sr, quarti=4, bpm_min=50.0, bpm_max=220.0,
+                  tolleranza_s=0.06, periodo=None, fase=None):
+    """La battuta da mostrare: dove comincia, dove finisce, il BPM, quanto è affidabile.
+
+    Passi: 1) il periodo del battito e la fase della griglia (se non arrivano da
+    fuori si ricavano qui con i picchi dell'inviluppo); 2) quale quarto è il primo
+    (dove batte la cassa); 3) l'inizio avanza fino al primo colpo forte, così la
+    battuta è la prima INTERA della sezione con la batteria — se l'intro è senza
+    batteria non si prende l'intro. Il risultato c'è SEMPRE (se un periodo esiste):
+    quello che cambia è `reliable`, che è falso quando meno di 3 quarti su 4
+    cadono su un colpo — in quel caso il messaggio lo dice e l'utente sposta il
+    trim a orecchio. Solo se non c'è nessun colpo o il brano è troppo corto non
+    c'è niente da proporre.
+    """
+    if not onset or not bassi:
+        return {"ok": False, "message": "Traccia vuota: non c'è niente da analizzare."}
+    massimo = max(onset)
+    if massimo < 1e-9:
+        return {"ok": False, "message": "Nel primo tratto non c'è nessun colpo: nessuna pulsazione da seguire."}
+    passo, spiegato, _media, fase_auto = scegli_tra_candidati(
+        onset, hop, sr, periodi_candidati(onset, hop, sr, bpm_min, bpm_max))
+    if periodo:
+        passo = periodo
+    if fase is not None:
+        fase_auto = fase
+    if not passo:
+        return {"ok": False, "message": "Brano troppo corto per misurare una battuta."}
+    fase = fase_auto
+    quarti_int = max(1, int(round(quarti)))
+    battuta = passo * quarti_int
+    inizio = fase + scegli_quarto(onset, bassi, passo, fase, hop, sr, quarti_int, tolleranza_s) * passo
+    colpo = primo_colpo_forte(onset, hop, sr)
+    if colpo is not None and inizio < colpo - tolleranza_s:
+        salti = int(math.ceil((colpo - tolleranza_s - inizio) / battuta))
+        inizio += salti * battuta
+    fine = inizio + battuta
+    fuoco = colpi_a_fuoco(onset, inizio, passo, hop, sr, quarti_int, tolleranza_s)
+    affidabile = fuoco >= 0.75 * quarti_int
+    bpm = 60.0 / passo
+    messaggio = ("battuta a %s → %s · %s BPM · %d/%d quarti a fuoco%s" % (
+        _mmss(inizio).replace(".", ","), _mmss(fine).replace(".", ","),
+        ("%.1f" % bpm).replace(".", ","), fuoco, quarti_int,
+        (" · batteria da %s" % _mmss(colpo).replace(".", ",")) if colpo is not None else ""))
+    if not affidabile:
+        # Il pulsante dà SEMPRE la sua proposta (l'utente sposta il trim e ascolta),
+        # ma dice chiaramente quando la griglia non entra bene nella musica.
+        messaggio += " · ⚠ pochi quarti a fuoco: controlla a orecchio e sposta il trim"
+    return {
+        "ok": True,
+        "reliable": affidabile,
+        "bar_start": round(inizio, 3),
+        "bar_end": round(fine, 3),
+        "bpm": round(bpm, 1),
+        "quarters": quarti_int,
+        "beat": round(passo, 3),
+        "beats": [round(inizio + i * passo, 3) for i in range(quarti_int)],
+        "first_hit": round(colpo, 3) if colpo is not None else None,
+        "confidence": round(fuoco / float(quarti_int), 2),
+        "coverage": round(spiegato, 2),
+        "message": messaggio,
+    }
+
+
+def inviluppo_onset(campioni, sr, hop=512, n_fft=2048, banda_bassi=200.0):
+    """(onset, bassi) dall'audio: l'aumento di energia per frame e la banda bassa.
+
+    L'onset è quanto l'energia sale da un frame al successivo (mai sotto zero): è
+    quello che «sente» un colpo di batteria. `bassi` è l'energia sotto
+    `banda_bassi` Hz, normalizzata: lì c'è la cassa, cioè il primo quarto.
+    Ritorna (None, None) se numpy non c'è o la traccia è troppo corta.
+    """
+    if np is None:
+        return None, None
+    x = np.asarray(campioni, dtype=np.float32)
+    if x.size < n_fft + hop:
+        return None, None
+    nf = (x.size - n_fft) // hop
+    frames = np.lib.stride_tricks.sliding_window_view(x, n_fft)[::hop][:nf]
+    finestra = (0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(n_fft) / (n_fft - 1))).astype(np.float32)
+    spettro = np.abs(np.fft.rfft(frames * finestra, axis=1))
+    energia = np.sum(spettro * spettro, axis=1)
+    frequenze = np.fft.rfftfreq(n_fft, 1.0 / sr)
+    bassi = np.sum(spettro[:, frequenze < banda_bassi] ** 2, axis=1)
+    # Onset = aumento di energia rispetto al frame precedente. Lo zero in testa
+    # (e la stessa forma per `bassi`) tiene le due serie allineate al frame a cui
+    # si riferiscono: senza, i tempi che ne ricavo erano un frame avanti (23 ms,
+    # misurato il 18/09/2026: il colpo a 20,00 s finiva a 19,93).
+    onset = np.concatenate(([0.0], np.maximum(0.0, energia[1:] - energia[:-1])))
+    bassi = np.concatenate(([0.0], bassi[1:]))
+    return ((onset / (float(onset.max()) or 1.0)).tolist(),
+            (bassi / (float(bassi.max()) or 1.0)).tolist())
+
+
+def _campioni_del_file(filepath, secondi=90.0, sr=22050):
+    """(campioni, sr, sorgente): librosa se c'è, altrimenti ffmpeg (PCM mono)."""
+    if HAS_LIBROSA:
+        try:
+            y, sr0 = librosa.load(filepath, sr=sr, mono=True, duration=secondi)
+            if len(y):
+                return y, sr0, "librosa"
+        except Exception as e:
+            print("[battuta] librosa:", e)
+    if not FFMPEG:
+        return None, sr, ""
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".f32le")
+    os.close(tmp_fd)
+    try:
+        cmd = [FFMPEG, "-y", "-i", filepath, "-t", str(max(1, int(secondi))),
+               "-ac", "1", "-ar", str(sr), "-f", "f32le", tmp_path]
+        subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=90)
+        with open(tmp_path, "rb") as f:
+            raw = f.read()
+        if len(raw) < 8192 or np is None:
+            return None, sr, ""
+        return np.frombuffer(raw, dtype=np.float32), sr, "ffmpeg"
+    except Exception as e:
+        print("[battuta] ffmpeg:", e)
+        return None, sr, ""
+    finally:
+        try: os.remove(tmp_path)
+        except OSError: pass
+
+
+def periodo_e_fase(campioni, sr, onset, hop=512, bpm_min=50.0, bpm_max=220.0):
+    """(periodo_s, fase_s, fonte) del battito: picchi dell'inviluppo + librosa insieme.
+
+    I candidati vengono da due posti e poi si misurano tutti allo stesso modo
+    (`scegli_tra_candidati`):
+    1. i picchi dell'autocorrelazione dell'inviluppo (funzione pura): sui pattern
+       puliti misurati il 18/09/2026 stanno entro 0,7 BPM dal tempo vero;
+    2. il tempo di librosa e il suo doppio/la sua metà (se c'è): sulla musica vera
+       l'autocorrelazione da sola oscillava (*In Da Club*: 67,6 oppure 210 a
+       seconda della regola), mentre il beat tracker resta stabile.
+    Il risultato più alto viene poi rifinito da `scegli_tra_candidati`.
+    Ritorna (None, 0.0, "") se non c'è niente da seguire.
+    """
+    candidati = periodi_candidati(onset, hop, sr, bpm_min, bpm_max)
+    if HAS_LIBROSA and np is not None:
+        try:
+            oe = librosa.onset.onset_strength(y=campioni, sr=sr, hop_length=hop)
+            tempo = float(np.atleast_1d(librosa.feature.tempo(
+                onset_envelope=oe, sr=sr, hop_length=hop, aggregate=np.median))[0])
+            if tempo > 0:
+                # Rifinitura in una finestra STRETTA (±2%): il tempo di librosa è
+                # stabile ma sta sui 23 ms di griglia, e allargando la finestra la
+                # rifinitura scappava (*In Da Club*: 123,05 → 133,75 con ±8%).
+                periodo = periodo_fine(onset, 60.0 / tempo, hop, sr, 0.02)
+                # La fase però si prende dal MIO inviluppo: i battiti di librosa
+                # cadono qualche decina di ms prima dei picchi che misuro qui, e
+                # con quella fase i «quarti a fuoco» risultavano fuori anche quando
+                # la griglia era giusta (*Get Up*: 1/4 invece di 3/4).
+                _, _, fase = punteggio_griglia(onset, periodo, hop, sr)
+                return periodo, fase, "librosa"
+        except Exception as e:
+            print("[battuta] librosa:", e)
+    periodo, _spiegato, _media, fase = scegli_tra_candidati(onset, hop, sr, candidati)
+    if not periodo:
+        return None, 0.0, ""
+    return periodo, fase, "pettine"
+
+
+def analizza_battuta(filepath, secondi=90.0, quarti=4):
+    """La battuta di un file: legge l'audio, ne fa gli inviluppi e la misura."""
+    campioni, sr, sorgente = _campioni_del_file(filepath, secondi)
+    if campioni is None:
+        return {"ok": False, "message": "Non riesco a leggere l'audio (servono librosa o ffmpeg)."}
+    onset, bassi = inviluppo_onset(campioni, sr)
+    if onset is None:
+        return {"ok": False, "message": "Traccia troppo corta per l'analisi."}
+    periodo, fase, fonte_tempo = periodo_e_fase(campioni, sr, onset)
+    risultato = trova_battuta(onset, bassi, 512, sr, quarti=quarti,
+                              periodo=periodo, fase=fase)
+    risultato["source"] = sorgente
+    risultato["tempo_source"] = fonte_tempo
+    risultato["seconds_analysed"] = round(min(float(secondi), len(campioni) / float(sr)), 1)
+    return risultato
+
+
+@app.route("/beat/bar", methods=["POST"])
+def beat_bar():
+    """Trova la battuta di un file locale: inizio, fine e BPM (la usa il sampler).
+
+    Il sampler mette il trim celeste qui e da questa battuta ricava il BPM che poi
+    salva nel database. È un punto di partenza, non una verità da accettare:
+    l'utente può spostare gli estremi del trim prima di salvare.
+    """
+    data = request.json or {}
+    filename = (data.get("filename") or "").strip()
+    if not filename:
+        return jsonify({"ok": False, "message": "Nome del file mancante"}), 400
+    percorso = os.path.join(DL_DIR, filename)
+    if not os.path.exists(percorso):
+        return jsonify({"ok": False, "message": "File non trovato"}), 404
+    try:
+        secondi = float(data.get("seconds") or 90.0)
+    except (TypeError, ValueError):
+        secondi = 90.0
+    try:
+        quarti = float(data.get("quarters") or 4)
+    except (TypeError, ValueError):
+        quarti = 4.0
+    if not (1 <= quarti <= 16):
+        quarti = 4.0
+    try:
+        return jsonify(analizza_battuta(percorso, secondi=secondi, quarti=quarti))
+    except Exception as e:
+        print("[battuta] errore:", e)
+        return jsonify({"ok": False, "message": "Errore nell'analisi: %s" % e})
+
+
 # ── METADATA (BPM + Key) ──────────────────────────────────────────────────────
 @app.route("/metadata", methods=["POST"])
 def metadata_endpoint():
