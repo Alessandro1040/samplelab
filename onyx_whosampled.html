@@ -153,11 +153,20 @@ body.embedded .content-header{padding-top:14px;}
 
 /* ─── SEARCH BAR ─── */
 .search-bar{padding:12px 24px;flex-shrink:0;display:none;}
-.search-wrap{position:relative;max-width:400px;}
+.search-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.search-wrap{position:relative;flex:1;min-width:220px;max-width:400px;}
 .search-wrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--text3);}
 .search-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:8px 12px 8px 36px;font-size:13px;color:var(--text);font-family:inherit;outline:none;transition:border-color .2s;}
 .search-input:focus{border-color:var(--text2);}
 .search-input::placeholder{color:var(--text3);}
+/* Tendina «cerco in…»: sceglie su quale informazione del brano cerca la barra
+   (titolo, artista, album, anno, genere, testo… oppure tutto insieme).
+   Le opzioni NON sono scritte qui: le costruisce initSearchFieldUI() da
+   SEARCH_FIELDS, così tendina e filtro non possono divergere. */
+.search-field{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:8px 12px;font-size:12px;font-family:inherit;color:var(--text2);outline:none;cursor:pointer;transition:border-color .2s,color .2s;}
+.search-field:hover{color:var(--text);border-color:var(--text2);}
+.search-field:focus{border-color:var(--text2);color:var(--text);}
+.search-field option{background:var(--surface2);color:var(--text);}
 
 /* ─── TRACKS TABLE ─── */
 .tracks-area{flex:1;overflow-y:auto;padding:0 24px 16px;}
@@ -418,11 +427,18 @@ body.embedded .content-header{padding-top:14px;}
           </div>
         </div>
 
-        <!-- Search bar (visible in search view) -->
+        <!-- Search bar (visible in search view).
+             La tendina accanto sceglie SU COSA cercare: titolo, artista, album,
+             anno, genere, compositore, BPM, tonalità, commento, testo, nome file
+             oppure «Tutto» (tutte le informazioni insieme). Le opzioni le
+             costruisce initSearchFieldUI() da SEARCH_FIELDS. -->
         <div class="search-bar" id="searchBar">
-          <div class="search-wrap">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input class="search-input" id="searchInput" placeholder="Cerca brani, artisti..." oninput="filterTracks()">
+          <div class="search-controls">
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input class="search-input" id="searchInput" placeholder="Cerca in tutte le informazioni…" oninput="filterTracks()">
+            </div>
+            <select class="search-field" id="searchField" onchange="onSearchFieldChange()" title="Scegli su quale informazione cercare"></select>
           </div>
         </div>
 
@@ -1491,6 +1507,98 @@ function updateHeaderUI() {
   }
 }
 
+// ──────────────────────────────────────────────
+//  RICERCA DEL PLAYER: SU QUALE INFORMAZIONE CERCARE
+// ──────────────────────────────────────────────
+// La barra «Cerca» non cerca più soltanto titolo e artista: la tendina accanto
+// sceglie il campo (titolo, artista, album, artista dell'album, anno, genere,
+// compositore, BPM, tonalità, commento, testo, nome file) oppure «Tutto», che
+// cerca in tutte le informazioni del brano insieme. SEARCH_FIELDS è l'unica
+// fonte delle opzioni: initSearchFieldUI() costruisce la tendina da qui, quindi
+// elenco, etichette, segnaposto e filtro non possono divergere.
+const SEARCH_FIELDS = [
+  { value: "all",          label: "🔎 Tutto (titolo, artista, album…)", placeholder: "Cerca in tutte le informazioni…" },
+  { value: "name",         label: "🎵 Titolo",          placeholder: "Cerca per titolo…" },
+  { value: "artist",       label: "🎤 Artista",         placeholder: "Cerca per artista…" },
+  { value: "album",        label: "💿 Album",           placeholder: "Cerca per album…" },
+  { value: "album_artist", label: "💿 Artista album",   placeholder: "Cerca per artista dell'album…" },
+  { value: "year",         label: "📅 Anno",            placeholder: "Cerca per anno (es. 1999)…" },
+  { value: "genre",        label: "🎼 Genere",          placeholder: "Cerca per genere…" },
+  { value: "composer",     label: "✍️ Compositore",     placeholder: "Cerca per compositore…" },
+  { value: "bpm",          label: "🥁 BPM",             placeholder: "Cerca per BPM (es. 61.5)…" },
+  { value: "musical_key",  label: "🎹 Tonalità",        placeholder: "Cerca per tonalità (es. A Minor)…" },
+  { value: "comment",      label: "💬 Commento",        placeholder: "Cerca nei commenti…" },
+  { value: "lyrics",       label: "📝 Testo",           placeholder: "Cerca nelle parole del testo…" },
+  { value: "file",         label: "📁 Nome file",       placeholder: "Cerca per nome file…" },
+];
+
+// Campi usati quando la ricerca è su «Tutto»: un'informazione nuova va aggiunta
+// qui e diventa subito cercabile (anche con più parole insieme, es.
+// "50 cent 2003" trova il brano con artista 50 Cent e anno 2003).
+const SEARCH_FIELDS_ALL = ["name","artist","album","album_artist","year","genre","composer","bpm","musical_key","comment","lyrics","file"];
+
+// Normalizzazione del testo da cercare/confrontare: minuscole, accenti tolti e
+// punteggiatura trasformata in spazio. Gli apostrofi (dritto e tipografico)
+// invece vengono tolti senza lasciare spazio: così «If I Can’t» — scritto con
+// l'apostrofo tipografico come in libreria — si trova scrivendo "if i cant",
+// "If I Can't" o solo "cant". Anche i BPM si trovano con la virgola italiana
+// ("61,5" e "61.5" diventano entrambi "61 5").
+function normalizzaRicerca(val){
+  return String(val === undefined || val === null ? "" : val)
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u2018\u2019\u0060\u00b4']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Il valore del brano su cui cercare, per il campo scelto (sempre una stringa).
+function valoreCampoRicerca(track, field){
+  if(!track) return "";
+  if(field === "all") return SEARCH_FIELDS_ALL.map(f => valoreCampoRicerca(track, f)).join(" ");
+  if(field === "file") return [track.localFile, track._origName].filter(Boolean).join(" ");
+  return track[field];
+}
+
+// true se il brano corrisponde alla ricerca: TUTTE le parole scritte devono
+// comparire nel campo scelto, in qualsiasi ordine. Campo sconosciuto o brano
+// mancante non fanno esplodere nulla: semplicemente non corrispondono.
+function branoCorrisponde(track, field, query){
+  const parole = normalizzaRicerca(query).split(" ").filter(Boolean);
+  if(!parole.length) return true;
+  const testo = normalizzaRicerca(valoreCampoRicerca(track, field));
+  return parole.every(p => testo.includes(p));
+}
+
+// Campo attivo nella tendina («all» se la tendina non è (ancora) in pagina).
+function campoRicercaAttivo(){
+  const el = document.getElementById("searchField");
+  return (el && el.value) || "all";
+}
+
+// Costruisce la tendina dalla costante SEARCH_FIELDS e allinea il segnaposto.
+function initSearchFieldUI(){
+  const sel = document.getElementById("searchField");
+  if(!sel) return;
+  sel.innerHTML = SEARCH_FIELDS.map(f => `<option value="${f.value}">${f.label}</option>`).join("");
+  sel.value = "all";
+  aggiornaSegnapostoRicerca();
+}
+
+// Il segnaposto della barra dice su cosa si sta cercando.
+function aggiornaSegnapostoRicerca(){
+  const input = document.getElementById("searchInput");
+  if(!input) return;
+  const def = SEARCH_FIELDS.find(f => f.value === campoRicercaAttivo()) || SEARCH_FIELDS[0];
+  input.placeholder = def.placeholder;
+}
+
+// Cambio di campo nella tendina: nuovo segnaposto e risultati aggiornati.
+function onSearchFieldChange(){
+  aggiornaSegnapostoRicerca();
+  filterTracks();
+}
+
 function visibleTracks() {
   let list = [...tracks];
   
@@ -1503,10 +1611,13 @@ function visibleTracks() {
     list = list.filter(t => t.playlists && t.playlists.includes(currentPlFilter));
   }
   
-  // 2. Search filter applies on top
+  // 2. Search filter applies on top: cerca nel campo scelto dalla tendina
+  //    (titolo, artista, album, anno, genere, testo… oppure «Tutto»).
   if (currentView === "search") {
-    const q = document.getElementById("searchInput").value.toLowerCase();
-    if (q) list = list.filter(t => t.name.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q));
+    const input = document.getElementById("searchInput");
+    const q = input ? input.value : "";
+    const field = campoRicercaAttivo();
+    if (q) list = list.filter(t => branoCorrisponde(t, field, q));
   }
   return getSortedList(list);
 }
@@ -2184,9 +2295,17 @@ function renderTracks() {
   }
 
   if (!list.length) {
+    // Con una ricerca attiva il messaggio dice COSA si stava cercando e DOVE
+    // (il campo scelto nella tendina): prima si limitava a parlare di playlist.
+    const cercaInput = document.getElementById("searchInput");
+    const q = (currentView === "search" && cercaInput) ? cercaInput.value.trim() : "";
+    const campo = SEARCH_FIELDS.find(f => f.value === campoRicercaAttivo()) || SEARCH_FIELDS[0];
+    const messaggio = tracks.length === 0
+      ? "Nessun brano. Clicca \"+ Aggiungi brani\" per iniziare."
+      : (q ? `Nessun brano trovato per «${escHtml(q)}» in ${escHtml(campo.label)}.` : "Nessun brano in questa playlist.");
     el.innerHTML = `<div class="empty-state">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
-      <p>${tracks.length === 0 ? "Nessun brano. Clicca \"+ Aggiungi brani\" per iniziare." : "Nessun brano in questa playlist."}</p>
+      <p>${messaggio}</p>
     </div>`;
     return;
   }
@@ -2632,6 +2751,7 @@ function whenReady(){
     const iv = setInterval(()=>{ if(appReady){ clearInterval(iv); res(); } }, 50);
   });
 }
+initSearchFieldUI();   // tendina «cerco in…» della barra Cerca (da SEARCH_FIELDS)
 initDB().then(async () => { await loadAll(); restorePlaybackState(); appReady = true; }).catch(console.error);
 
 // Navigazione topbar: dentro l'iframe cambia il tab del parent,

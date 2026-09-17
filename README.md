@@ -58,6 +58,11 @@ con `(2)` nella cartella locale:
   del pannello SQL/script (funzione pura `move_field_value`: artista dal titolo
   agli artisti, anno dal titolo al campo anno, parola intera, parentesi rimaste
   vuote): `python3 -m unittest -v test_move_field`
+- `test_search_field.py` — test della **ricerca del player** (pagina `/onyx`): su
+  quale informazione cerca la barra «Cerca» (titolo, artista, album, artista
+  dell'album, anno, genere, compositore, BPM, tonalità, commento, testo, nome file
+  oppure *Tutto*), funzione pura `branoCorrisponde`:
+  `python3 -m unittest -v test_search_field`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -667,4 +672,47 @@ Da tenere presente nelle sessioni di lavoro successive:
   Nota: i titoli con «(feat. …)» in libreria sono **124**: buona parte si sistema
   da qui in 3 clic (da *Titolo* a *Artista*, testo = il nome, «solo parola
   intera» attivo).
+- **RICERCA DEL PLAYER: SI SCEGLIE SU COSA CERCARE (17/09/2026, notte).**
+  Richiesta di Alessandro: «nella barra cerca nel player, l'utente dovrebbe poter
+  scegliere tra cercare un titolo, un artista, un album o un anno o altre
+  informazioni». Prima la barra «Cerca» (pagina `/onyx`, tab 🎧 Player) filtrava
+  soltanto `name`+`artist`. Ora accanto alla barra c'è la tendina **cerco in…**
+  (`#searchField`) con 13 voci: *Tutto* (predefinita), Titolo, Artista, Album,
+  Artista album, Anno, Genere, Compositore, BPM, Tonalità, Commento, Testo, Nome
+  file. Le opzioni **non** sono scritte nell'HTML: le costruisce
+  `initSearchFieldUI()` dalla costante `SEARCH_FIELDS`, quindi elenco, etichette,
+  segnaposto e filtro non possono divergere; il segnaposto della barra dice su cosa
+  si sta cercando. La logica è in funzioni pure — `normalizzaRicerca(val)`
+  (minuscole, accenti tolti, **apostrofi tolti senza spazio**, il resto della
+  punteggiatura in spazi), `valoreCampoRicerca(track, field)` (`all` =
+  `SEARCH_FIELDS_ALL`, `file` = `localFile`+`_origName`) e
+  `branoCorrisponde(track, field, query)` (TUTTE le parole scritte devono
+  comparire, in qualsiasi ordine) — usate da `visibleTracks()`. Effetti pratici
+  misurati: «cant» trova *If I Can’t* (apostrofo tipografico: prima era
+  introvabile), «61,5» trova i BPM 61.5 (virgola italiana) e «50 cent 2003» trova
+  i brani di 50 Cent del 2003 anche con le parole su campi diversi. Il messaggio di
+  ricerca senza risultati ora dice cosa si cercava e in quale campo («Nessun brano
+  trovato per «…» in 🎵 Titolo») invece di parlare di playlist. Il filtro del tab
+  🗄️ Database (`db-search`) resta **invariato** (cerca in titolo+artista+album+nome
+  file): lì la tendina non c'è.
+  Verifiche del 17/09/2026: **`test_search_field.py`** → 8 test con **45 casi**
+  eseguiti davvero in JavaScriptCore (apostrofi dritto/tipografico, accenti,
+  virgola dei BPM, anno parziale, campo sconosciuto, brano `null`) più i controlli
+  di cablaggio (ogni campo della tendina esiste nel modello del brano — un refuso
+  tipo `key` invece di `musical_key` non passerebbe —, tendina vuota nell'HTML e
+  costruita da `SEARCH_FIELDS`, `SEARCH_FIELDS_ALL` allineato, filtro che passa da
+  `branoCorrisponde`); in **Chrome reale** (Selenium, app viva su
+  <http://localhost:5070/?tab=player>) **19/19**: 890 brani caricati dal database,
+  13 opzioni nella tendina, barra mostrata dalla voce *Cerca*, segnaposto «Cerca per
+  anno (es. 1999)…», 12 filtri confrontati riga per riga col conteggio indipendente
+  ricavato da `/db/songs` (apex 1, anno 1999 **78** contro titolo 1999 **2**,
+  gunmen 1, «61,5» 4, «dr dre» 6, eminem 228, «.mp3» 3, album *Marshall Mathers*
+  25, «cant» 3 righe: *i can't get high*, *If I Can’t*, *Just Cant Kill The
+  Beast*) e messaggio di ricerca senza risultati; **3/3** blocchi `<script>` della
+  pagina compilati (JavaScriptCore) e `curl /onyx` → **200** con la nuova tendina.
+  La correzione dell'apostrofo è arrivata **dal test**: la prima versione
+  normalizzava `’` in uno spazio («if i can t») e «cant» non trovava *If I Can’t*.
+  Solo la pagina del player è cambiata (`onyx_whosampled.html`, servita da
+  `send_file` a ogni richiesta): nessuna modifica al backend, nessun riavvio
+  necessario.
 
