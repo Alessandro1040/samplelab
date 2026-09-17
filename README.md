@@ -39,6 +39,9 @@ con `(2)` nella cartella locale:
   pagina `/`: griglia, BPM, offset, Battute Sel., Diventa Bar N°, Allinea griglia,
   TAP, metronomo, undo/redo, taglio): come aprirlo, ogni controllo spiegato e la
   matematica della griglia coi numeri misurati
+- `test_sampler_tap.py` — test della stima **TAP** del sampler (funzione pura
+  `bpmDaTap`: media di tutti i colpi, decimali, tocchi fuori tempo):
+  `python3 -m unittest -v test_sampler_tap`
 - `fortissimo_compare_v3.py` — modello **Fortissimo Compare v3**: confronto tra
   due output `AudioAnalysis` (MIDI + one-shot), score [0,1]
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
@@ -453,6 +456,22 @@ Da tenere presente nelle sessioni di lavoro successive:
   log dell'app senza traceback; **22 + 26 + 8 test** delle suite esistenti OK.
   ⚠️ Le righe con `title` NULL restano (dati da decidere): il codice ora non ci
   sbatte più, ma la riga di *Apex* va rinominata (vedi **🎛 Sampler** o *✏️ Edit*).
+
+- **TAP PIÙ PRECISO (17/09/2026).** Nel sampler il pulsante **🎵 TAP** ora ricava
+  il BPM dalla **media di tutti i colpi della sessione** (prima teneva solo gli
+  ultimi 8) e lo salva con **un decimale** invece di arrotondarlo all'intero: più
+  colpi batti, più la stima converge (12 colpi a 0,5 s → **120,00**; 5 colpi a
+  320 ms → **187,6**). Il pulsante mostra su quanti colpi sta mediando
+  (`🎵 TAP ×12`); un tocco fuori tempo (< 0,2 s o > 2 s, cioè fuori dai 30–300
+  BPM), un **Undo/Redo** o un BPM scritto a mano **fanno ripartire la sessione**.
+  La matematica è in una funzione pura (`bpmDaTap`), quindi testabile — test
+  committato `test_sampler_tap.py` (`python3 -m unittest -v test_sampler_tap`,
+  6 test) — e verificata il 17/09/2026: **11/11** controlli in JavaScriptCore e
+  **9/9** in Chrome con **clic reali** sul pulsante (contatore `🎵 TAP ×12`, BPM
+  120,00 con 12 colpi, 187,60 con 5 colpi, riavvio dopo un tocco fuori tempo,
+  sessione azzerata scrivendo 114,8 a mano); **6/6 blocchi `<script>`** compilati.
+  Dettagli e tutti i numeri misurati in [`README_sampler.md`](README_sampler.md)
+  (§5.5).
 
 - **TITOLI ROVINATI DALLA SOSTITUZIONE "TOGLI EMINEM" — RIPARATI (17/09/2026).**
   Una sostituzione fatta sulla colonna `title` (intento: "Eminem sta nell'artista,

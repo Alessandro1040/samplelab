@@ -1501,6 +1501,8 @@ function applyHistoryState(key, state) {
   document.getElementById(`bpm-${key}`).value = p.bpm.toFixed(2);
   document.getElementById(`offset-${key}`).value = p.gridOffset.toFixed(4);
   
+  p.tapTimes = [];            // il BPM è cambiato: la sessione di TAP riparte
+  updateTapLabel(key);
   p.nextMetroBeatTime = null; // Forza il ricalcolo del metronomo
   
   updateTrimUI(key);
@@ -2172,6 +2174,7 @@ function setBpm(key, val) {
   p.bpm = parseFloat(val) || 0;
   document.getElementById(`bpm-${key}`).value = p.bpm.toFixed(2);
   p.tapTimes = [];
+  updateTapLabel(key);
   p.nextMetroBeatTime = null;
   if (p.gridEnabled) snapTrimToGrid(key);
   fullRedraw(key);
@@ -2205,32 +2208,53 @@ function snapTrimToGrid(key) {
 }
 
 // ─── TAP TEMPO ──────────────────────────────────────────────────
+// `bpmDaTap` è la parte pura: dagli ISTANTI dei TAP (ms) ricava il BPM come
+// media di TUTTI i colpi della sessione (dal secondo in poi). Più colpi batti,
+// più la stima è precisa: prima si tenevano solo gli ultimi 8 colpi e il
+// risultato veniva arrotondato all'intero (perdendo i decimali dei BPM del
+// database) — richiesta del 17/09/2026.
+// Torna `null` se i colpi non bastano o se un tocco è fuori tempo (intervallo
+// < 0,2 s o > 2 s, cioè fuori dai 30–300 BPM): in quel caso chi chiama fa
+// ripartire la sessione.
+function bpmDaTap(tapTimes) {
+  if (!tapTimes || tapTimes.length < 2) return null;
+  let total = 0;
+  for (let i = 1; i < tapTimes.length; i++) {
+    const intervallo = (tapTimes[i] - tapTimes[i - 1]) / 1000;
+    if (intervallo < 0.2 || intervallo > 2.0) return null;
+    total += intervallo;
+  }
+  const media = total / (tapTimes.length - 1);
+  const bpm = 60 / media;
+  return (bpm >= 30 && bpm <= 300) ? bpm : null;
+}
+
+// Il pulsante mostra su quanti colpi sta mediando (es. "🎵 TAP ×12").
+function updateTapLabel(key) {
+  const btn = document.getElementById(`tap-btn-${key}`);
+  if (!btn) return;
+  const n = (players[key] && players[key].tapTimes ? players[key].tapTimes.length : 0);
+  btn.textContent = n >= 2 ? `🎵 TAP ×${n}` : '🎵 TAP';
+}
+
 function tapTempo(key) {
   const p = players[key];
   if (!p) return;
   const now = performance.now();
-  p.tapTimes.push(now);
-  if (p.tapTimes.length > 8) p.tapTimes.shift();
-  if (p.tapTimes.length < 2) return;
-
-  let total = 0;
-  for (let i = 1; i < p.tapTimes.length; i++) {
-    const interval = (p.tapTimes[i] - p.tapTimes[i-1]) / 1000;
-    if (interval < 0.2 || interval > 2.0) {
-      p.tapTimes = [now];
-      return;
-    }
-    total += interval;
+  p.tapTimes.push(now);                 // si tengono TUTTI i colpi della sessione
+  const bpm = bpmDaTap(p.tapTimes);
+  if (bpm === null) {
+    // primo colpo, oppure tocco fuori tempo: la sessione riparte da questo
+    p.tapTimes = [now];
+    updateTapLabel(key);
+    return;
   }
-  const avgInterval = total / (p.tapTimes.length - 1);
-  const bpm = 60 / avgInterval;
-  if (bpm < 30 || bpm > 300) return;
-
-  p.bpm = Math.round(bpm);
+  p.bpm = Math.round(bpm * 10) / 10;    // un decimale, come i BPM del database
   document.getElementById(`bpm-${key}`).value = p.bpm.toFixed(2);
   p.nextMetroBeatTime = null;
   if (p.gridEnabled) snapTrimToGrid(key);
   fullRedraw(key);
+  updateTapLabel(key);
   pushHistory(key); // Salva Azione
 }
 
@@ -2547,6 +2571,7 @@ function _moveCellBorderDrag(key, clientX, isShiftPressed = false) {
     p.selectedBarStartTime = offset + (state.barNum - 1) * updatedStep;
 
     p.tapTimes = [];
+    updateTapLabel(key);
     p.nextMetroBeatTime = null;
   }
 

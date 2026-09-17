@@ -241,7 +241,7 @@ cade la musica rispetto alla griglia**.
 
 | Controllo | Cosa fa |
 |---|---|
-| **🎵 TAP** | premuto a tempo di musica ricava il BPM dall'intervallo fra i battiti: tiene in memoria fino a **8** colpi e fa la media degli ultimi. Scarta colpi troppo vicini (< 0,2 s) o troppo lontani (> 2 s) — quando succede ricomincia da capo — e accetta solo risultati fra **30 e 300 BPM**, arrotondati all'intero. Ogni TAP svuota la misura precedente del campo BPM. |
+| **🎵 TAP** | premuto a tempo di musica ricava il BPM dalla **media di tutti i colpi della sessione** (dal secondo in poi): più colpi batti, più la stima è precisa — e il pulsante lo dice, mostrando il contatore (`🎵 TAP ×12`). Accetta intervalli fra **0,2 e 2 s** (cioè 30–300 BPM): un tocco fuori tempo (o un doppio tocco) **fa ripartire la sessione** da quel colpo, e lo stesso succede se cambi il BPM a mano. Il risultato è tenuto con **un decimale** (es. `187.6`), come i BPM del database: nessun arrotondamento all'intero. |
 | **● Metronomo** | clic generati via Web Audio (nessun file da caricare), con l'icona di stato che passa da 🔇 a 🔊 e un pallino che pulsa. **I colpi seguono l'unità della griglia**: con `1/4 bar` batti i quarti, con `1 bar` batti una volta per battuta. Il **primo** colpo di ogni battuta è più acuto (1000 Hz) e più forte, gli altri più cupi (720 Hz): così senti dove ricomincia il giro. Ogni colpo fa lampeggiare una lineetta sulla forma d'onda: è il «click» che vedi. |
 
 > 💡 **Per misurare il tempo il metronomo vuole «1/4 bar»**: con l'unità a `1 bar`
@@ -426,25 +426,26 @@ sono quelli di `index (2).html` (il contenuto della textarea inizia alla riga
 | Cosa | Dove |
 |---|---|
 | Modale del sampler | `index (2).html` riga **780** (`#audio-editor-modal` + `iframe#audio-editor-iframe`) |
-| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **790–2797** (`<textarea id="audio-editor-src">`) |
-| Apertura del modale | `index (2).html` riga **5112**: `openAudioEditor(url, filename, startSec, bpm)` |
-| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5135**: `openInSampler(songIdOFile, opts)` |
-| Pulsante nella riga del database | dentro `renderDbTable`, cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit) |
-| Ricezione dal player (`openSampler`) | `index (2).html` riga **2892** |
-| Link diretti `?tab=` / `?sampler=` / `?sampler_file=` | `index (2).html` riga **2921** |
+| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **790–2826** (`<textarea id="audio-editor-src">`) |
+| Apertura del modale | `index (2).html` riga **5137**: `openAudioEditor(url, filename, startSec, bpm)` |
+| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5160**: `openInSampler(songIdOFile, opts)` |
+| Pulsante nella riga del database | dentro `renderDbTable` (riga **4217**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit) |
+| Ricezione dal player (`openSampler`) | `index (2).html` riga **2917** |
+| Link diretti `?tab=` / `?sampler=` / `?sampler_file=` | `index (2).html` riga **2953** |
 | Voce di menu nel player | `onyx_whosampled.html` riga **2478**, con `samplerUrlFor` (**2489**), `dbSongIdFor` (**2497**), `openInSampler` (**2516**) |
 | Handshake col documento (`{action:'load', url, filename, startSec, bpm}`) | documento del sampler, ricezione del messaggio (in coda allo script) |
-| Griglia: passo, snap, unità | `getGridStep` **2157** · `snapToGrid` **2162** · `snapTrimToGrid` **2198** · `setBpm` **2169** · `setGridOffset` **2180** · `setGridSubdivision` **2190** |
-| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1707** · `alignGridToSelection` **1715** |
-| BPM dai battiti e dal fattore | `tapTempo` **2208** · `multiplyBpm` **2238** |
-| Metronomo | `toggleMetronome` **2259** · `checkMetronome` **2278** · `flashMetronome` **2308** |
-| Disegno della griglia e del righello | `updateGridUI` **2321** · `updateRuler` **2347** |
-| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2416** · `deselectBar` **2434** · `updateBarSelectionUI` **2449** · `_startCellBorderDrag` **2489** · `_moveCellBorderDrag` **2517** |
-| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2591** · `onAudioLayerMouseDown` **2600** · `startPlayheadDrag` **2691** · `applyHandleDrag` **2068** · `startSelDrag` **2081** · `resetTrimStart` **2725** |
-| Zoom, scorrimento, trasporto | `setZoom` **1878** · `adjustZoom` **1896** · `onTrimWheel` **1920** · `togglePlay` **1933** · `toggleFollow` **1751** |
-| Storico (Undo/Redo) | `pushHistory` **1457** · `undoAction` **1511** · `redoAction` **1518** |
-| Caricamento del brano | `initPlayer` **1610** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
+| Griglia: passo, snap, unità | `getGridStep` **2159** · `snapToGrid` **2164** · `snapTrimToGrid` **2201** · `setBpm` **2171** · `setGridOffset` **2183** · `setGridSubdivision` **2193** |
+| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1709** · `alignGridToSelection` **1717** |
+| BPM dai battiti e dal fattore | `bpmDaTap` **2219** (media pura) · `tapTempo` **2240** · `updateTapLabel` **2233** · `multiplyBpm` **2262** |
+| Metronomo | `toggleMetronome` **2283** · `checkMetronome` **2302** · `flashMetronome` **2332** |
+| Disegno della griglia e del righello | `updateGridUI` **2345** · `updateRuler` **2371** |
+| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2440** · `deselectBar` **2458** · `updateBarSelectionUI` **2473** · `_startCellBorderDrag` **2513** · `_moveCellBorderDrag` **2541** |
+| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2616** · `onAudioLayerMouseDown` **2625** · `startPlayheadDrag` **2716** · `applyHandleDrag` **2070** · `startSelDrag` **2083** · `resetTrimStart` **2750** |
+| Zoom, scorrimento, trasporto | `setZoom` **1880** · `adjustZoom` **1898** · `onTrimWheel` **1922** · `togglePlay` **1935** · `toggleFollow` **1753** |
+| Storico (Undo/Redo) | `pushHistory` **1457** · `applyHistoryState` **1490** · `undoAction` **1513** · `redoAction` **1520** |
+| Caricamento del brano | `initPlayer` **1612** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
 | Taglio reale (player delle card) | `index (2).html` `downloadTrim` → `POST /trim` → `GET /status/<job_id>` → `GET /download-file/<nome>` (in `app (2).py`: righe **2528**, **2395**, **2308**) |
+| Test della stima TAP | `test_sampler_tap.py` (`python3 -m unittest -v test_sampler_tap`): esegue `bpmDaTap` con JavaScriptCore su 11 casi |
 | Streaming del file | `app (2).py` riga **2265**: `/stream/<path:filename>` (regge anche le richieste Range) |
 
 ## 13. Note, limiti e piccoli trucchi
@@ -476,6 +477,9 @@ sono quelli di `index (2).html` (il contenuto della textarea inizia alla riga
 | **Adatta alla griglia** prima di ritagliare | IN/OUT finiscono su tempi "tondi" e il taglio esce pulito |
 | Guarda `sample: ±…s` in basso | ti dice se hai spostato l'audio (nella tabella non c'è: è solo nel sampler) |
 | Se il pulsante non c'è → **Cmd+Shift+R** | il browser tiene in cache il JavaScript vecchio |
+| Batti **8–12 colpi** invece di due o tre | la stima è la media di **tutti** i colpi della sessione: il jitter della mano si annulla e il BPM converge (es. 12 colpi a 0,5 s → 120,00) |
+| Guarda il contatore sul pulsante (`🎵 TAP ×N`) | dice su quanti colpi sta mediando: se riparte da ×1 hai battuto fuori tempo |
+| I **decimali** del TAP sono reali (es. 187,6) | puoi copiarli nel campo `bpm` con ✏️ Edit senza arrotondarli a mano |
 
 **Verifiche di questa guida (17/09/2026).** I numeri qui sopra non sono
 "secondo la documentazione": sono **misurati** in Chrome pilotato da Selenium
@@ -483,10 +487,15 @@ dentro l'iframe del sampler, con *60 Hz II* di DJ Shocca (BPM nel database
 60,1) — 15 controlli su passo della griglia (3,993 s a 60,1 BPM), snap
 (10,3 → 10 e 13,9 → 14 a 120 BPM; 10,3 → 10,7 con offset 0,7), *Allinea griglia*
 (2 s con `4` → 120 BPM e offset 10; con `8` e Bar N° 3 → 240 BPM e offset 8),
-*Moltiplica* (120 × 2,3 = 276), TAP (5 colpi a 500 ms → 120 BPM), metronomo,
-Undo/Redo (90 → 100 → 90, storico di 12 stati) e le cinque suddivisioni a
-120 BPM (0,5 · 1 · 2 · 4 · 8 s) — più 8 controlli sull'apertura dal tab
-Database, dal menu del player, dal link diretto e su `?sampler_file=`.
+*Moltiplica* (120 × 2,3 = 276), metronomo, Undo/Redo (90 → 100 → 90, storico di
+12 stati) e le cinque suddivisioni a 120 BPM (0,5 · 1 · 2 · 4 · 8 s) — più 8
+controlli sull'apertura dal tab Database, dal menu del player, dal link diretto
+e su `?sampler_file=`. Il **TAP** ha verifiche sue: 11/11 sulla funzione pura
+`bpmDaTap` (JavaScriptCore: 12 colpi a 500 ms → 120; 4 colpi a 320 ms → 187,5;
+tocco a 150 ms e a 2,5 s → sessione da riavviare) e 9/9 in Chrome con **clic
+reali** sul pulsante (contatore `🎵 TAP ×12`, BPM 120,00 con 12 colpi, 187,6 con
+5 colpi a 320 ms, sessione che riparte dopo un tocco fuori tempo e azzerata
+quando si scrive il BPM a mano).
 
 
 
