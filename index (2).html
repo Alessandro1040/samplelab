@@ -273,6 +273,19 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
 .db-add-song-panel h3{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
 .db-script-panel{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:18px;margin-top:20px}
 .db-script-panel h3{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
+/* 📖 legenda (tabelle/campi) e ➡️ Sposta: stessi colori del resto del pannello */
+.db-legend{border:1px solid var(--border2);border-radius:8px;background:var(--surface2);padding:10px 12px;margin-bottom:16px}
+.db-legend summary{font-family:'Space Mono',monospace;font-size:11px;color:var(--text);cursor:pointer;letter-spacing:.05em}
+.db-legend-body{margin-top:10px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);line-height:1.7;max-height:360px;overflow:auto}
+.db-legend-body b{color:var(--text)}
+.db-legend-body code{color:var(--accent)}
+.db-legend-body .lg-table{margin:8px 0}
+.db-legend-body .lg-cols{padding-left:12px}
+.db-move-tool{border:1px solid var(--border2);border-radius:8px;background:var(--surface2);padding:12px;margin-bottom:18px}
+.db-move-tool h4{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px}
+.sl-label{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);white-space:nowrap}
+.mv-check{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap}
+.tool-result{display:none;margin-top:8px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);white-space:pre-wrap}
 .db-cleanup-panel{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:18px;margin-top:20px}
 .db-cleanup-panel h3{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px}
 .db-add-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -573,6 +586,32 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
 
   <div class="db-script-panel">
     <h3>⚙️ Esegui query / script personalizzati</h3>
+
+    <details class="db-legend" id="db-legend" ontoggle="if(this.open)loadDbLegend()">
+      <summary>📖 Legenda — tabelle, campi e comandi disponibili</summary>
+      <div class="db-legend-body" id="db-legend-body">Apri la legenda per vedere tabelle e campi…</div>
+    </details>
+
+    <div class="db-move-tool">
+      <h4>➡️ Sposta un testo da un campo all'altro</h4>
+      <div class="mass-rename-row">
+        <span class="sl-label">Da</span>
+        <select class="mass-rename-select" id="mv-from" title="campo in cui cercare il testo"></select>
+        <span class="sl-label">a</span>
+        <select class="mass-rename-select" id="mv-to" title="campo in cui spostarlo"></select>
+        <span class="sl-label">sposta</span>
+        <input class="mass-rename-input" id="mv-text" placeholder="cosa spostare (es. Eminem, oppure 1999)">
+        <select class="mass-rename-select" id="mv-mode" title="come scriverlo nella destinazione">
+          <option value="append">Aggiungi (« / »)</option>
+          <option value="replace">Sostituisci</option>
+        </select>
+        <label class="mv-check"><input type="checkbox" id="mv-word" checked> solo parola intera</label>
+        <label class="mv-check"><input type="checkbox" id="mv-clean" checked> pulisci parentesi vuote</label>
+        <button class="btn-sm" onclick="previewMoveField()" title="mostra cosa cambierebbe, senza scrivere niente">👁 Anteprima</button>
+        <button class="btn-mass-rename" onclick="doMoveField()" title="sposta davvero (annullabile con Undo)">➡️ Sposta</button>
+      </div>
+      <div class="tool-result" id="mv-result"></div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div>
         <label style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace">SQL (SELECT o UPDATE)</label>
@@ -584,10 +623,9 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
       </div>
       <div>
         <label style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace">Python (accesso a `conn`, `re`, `db_path`)</label>
-        <textarea id="custom-script" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px;font-family:'Space Mono',monospace;font-size:12px;resize:vertical" placeholder="# Esempio (SICURO): mostra le canzoni con un nome dentro il titolo&#10;# Non modifica niente: per correggere usa &#9999;&#65039; Edit nella pagina (o il README).&#10;rows = conn.execute(&quot;SELECT id, title, artist FROM songs WHERE title LIKE '%Eminem%'&quot;).fetchall()&#10;for r in rows:&#10;    print(r['id'], '|', r['title'], '|', r['artist'])&#10;print('Trovate:', len(rows))&#10;# Se scrivi una UPDATE: usa r'\bEminem\b' (senza \b spezzi 'Eminems' -> 's') e&#10;# poi pulisci le parentesi rimaste vuote:&#10;#   re.sub(r'\(\s*(?:feat|ft)\.?\s*\)?', '', testo)"></textarea>
+        <textarea id="custom-script" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:8px;font-family:'Space Mono',monospace;font-size:12px;resize:vertical" placeholder="# Esempio (SICURO): mostra le canzoni con un nome dentro il titolo&#10;# Non modifica niente: per correggere usa &#9999;&#65039; Edit nella pagina (o il README).&#10;rows = conn.execute(&quot;SELECT id, title, artist FROM songs WHERE title LIKE '%Eminem%'&quot;).fetchall()&#10;for r in rows:&#10;    print(r['id'], '|', r['title'], '|', r['artist'])&#10;print('Trovate:', len(rows))&#10;# Per spostare un pezzo di testo da un campo a un altro (es. un artista dal titolo)&#10;# usa &#10145;&#65039; Sposta qui sopra: fa l'anteprima e si annulla con &#8617;&#65039; Undo."></textarea>
         <div style="display:flex;gap:8px;margin-top:6px">
           <button class="btn-sm" onclick="runCustomScript()">▶ Esegui Python</button>
-          <button class="btn-sm" onclick="loadEminemScript()">📋 Script Eminem</button>
           <button class="btn-sm" onclick="loadSlashArtistScript()">📋 Script "/" artisti</button>
         </div>
       </div>
@@ -2898,6 +2936,15 @@ window.addEventListener('message', function(e) {
 </textarea>
 
 <script>
+// Etichette italiane dei campi del database (menu "Da"/"a" dello strumento ➡️ Sposta).
+// Dichiarate QUI, non accanto alle funzioni in fondo al file: servono già al primo
+// switchTab('database') di un deep link tipo /?tab=database, e let/const non sono
+// "hoisted" come le funzioni (prima davano "Cannot access 'dbSchemaCache' before
+// initialization" in console).
+const CAMPI_DB={title:'Titolo',artist:'Artista',album:'Album',album_artist:'Artista album',composer:'Compositore',producers:'Produttori (JSON)',genre:'Genere',year:'Anno',release_date:'Data di uscita',comment:'Commento',musical_key:'Tonalità'};
+let dbSchemaCache=null;
+function etichettaCampo(f){return CAMPI_DB[f]||f}
+
 function toast(msg, type = 'info') {
   const container = document.getElementById('toasts') || (() => {
     const el = document.createElement('div');
@@ -2936,7 +2983,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   document.body.classList.toggle('player-tab-active', name==='player');
-  if(name==='database') loadDb();
+  if(name==='database'){ loadDb(); ensureCampiSposta(); } // riempie anche i menu dello strumento ➡️ Sposta
 }
 // Adatta l'altezza del wrapper del Player all'altezza REALE della barra tab:
 // così la nowbar interna del Player arriva esattamente a 8px dal bordo
@@ -4678,27 +4725,124 @@ async function runCustomScript() {
   refreshHistoryBadge();
 }
 
-function loadEminemScript() {
-  document.getElementById('custom-script').value =
-`# Sposta Eminem dal titolo all'artista
-cursor = conn.cursor()
-rows = cursor.execute("SELECT id, title, artist FROM songs WHERE title LIKE '%Eminem%'").fetchall()
-count = 0
-for row in rows:
-    new_title = re.sub(r'\\s*[(\\[ ]?\\s*Eminem\\s*[)\\]]?\\s*', '', row[1], flags=re.IGNORECASE)
-    new_title = re.sub(r'\\s*[-–]\\s*Eminem\\s*[-–]?\\s*', '', new_title, flags=re.IGNORECASE).strip()
-    new_title = re.sub(r'\\s*Eminem\\s*[-–]\\s*', '', new_title, flags=re.IGNORECASE).strip()
-    if not new_title:
-        new_title = row[1]
-    if 'eminem' not in row[2].lower():
-        new_artist = row[2] + (', Eminem' if row[2] else 'Eminem')
-    else:
-        new_artist = row[2]
-    if new_title != row[1] or new_artist != row[2]:
-        cursor.execute('UPDATE songs SET title=?, artist=? WHERE id=?', (new_title, new_artist, row[0]))
-        count += 1
-conn.commit()
-print("Aggiornate", count, "canzoni")`;
+// ─── LEGENDA DEL PANNELLO + ➡️ SPOSTA UN TESTO FRA CAMPI ─────
+// Nota: `CAMPI_DB`, `dbSchemaCache` ed `etichettaCampo` sono dichiarati in cima
+// a questo <script>: servono già al primo switchTab('database') di un deep link
+// (/?tab=database) e `let`/`const` non sono "hoisted" come le funzioni.
+//
+// I menu "Da"/"a" dello strumento Sposta si riempiono da /db/schema, così sono
+// sempre allineati ai campi che il backend accetta (niente elenchi a mano).
+async function ensureCampiSposta(){
+  const sel=document.getElementById('mv-from');
+  if(!sel || sel.options.length) return;
+  if(!dbSchemaCache){
+    try{ dbSchemaCache=await fetch('/db/schema').then(r=>r.json()); }catch(_){ return; }
+  }
+  fillMoveFields(dbSchemaCache.bulk_fields||[]);
+}
+
+function fillMoveFields(campi){
+  if(!campi.length) return;
+  const dal=document.getElementById('mv-from'), al=document.getElementById('mv-to');
+  if(!dal || !al) return;
+  const opts=campi.map(f=>`<option value="${f}">${etichettaCampo(f)}</option>`).join('');
+  dal.innerHTML=opts; al.innerHTML=opts;
+  const iArtista=campi.indexOf('artist');
+  al.selectedIndex=iArtista>=0?iArtista:Math.min(1,campi.length-1); // destinazione: Artista
+}
+
+// 📖 Legenda: tabelle, campi (con descrizione) e comandi consentiti.
+async function loadDbLegend(){
+  const body=document.getElementById('db-legend-body');
+  if(!body) return;
+  if(!dbSchemaCache){
+    body.textContent='⏳ Carico la legenda…';
+    try{ dbSchemaCache=await fetch('/db/schema').then(r=>r.json()); }
+    catch(e){ body.textContent='❌ Legenda non disponibile: '+e.message; return; }
+  }
+  fillMoveFields(dbSchemaCache.bulk_fields||[]);
+  const s=dbSchemaCache;
+  let html='<div class="lg-table"><b>Come si scrivono i comandi</b><br>'
+    +'• <b>SQL</b>: solo <code>'+s.sql.allowed.join('</code>, <code>')+'</code>; vietate '+esc(s.sql.forbidden.join(', '))+'.<br>'
+    +'• <b>Python</b>: nello script hai <code>'+s.script.globals.join('</code>, <code>')+'</code> con le funzioni base ('+esc(s.script.builtins.slice(0,8).join(', '))+', …); timeout '+s.script.timeout+' s.<br>'
+    +'• Ogni UPDATE o script salva uno snapshot: <b>↩️ Undo</b> qui sotto annulla l\'ultima operazione.</div>';
+  for(const t of s.tables){
+    html+='<div class="lg-table"><b>'+esc(t.name)+'</b> <code>'+t.count+' righe</code> — '+esc(t.doc||'')+'<div class="lg-cols">';
+    for(const c of t.columns){
+      html+='• <b>'+esc(c.name)+'</b>'
+        +(c.type?' <code>'+esc(c.type)+'</code>':'')
+        +(c.pk?' <code>PK</code>':'')
+        +(c.doc?' — '+esc(c.doc):'')
+        +'<br>';
+    }
+    html+='</div></div>';
+  }
+  body.innerHTML=html;
+}
+
+function moveFieldPayload(dryRun){
+  return {
+    from_field:document.getElementById('mv-from').value,
+    to_field:document.getElementById('mv-to').value,
+    text:document.getElementById('mv-text').value,
+    mode:document.getElementById('mv-mode').value,
+    whole_word:document.getElementById('mv-word').checked,
+    clean:document.getElementById('mv-clean').checked,
+    dry_run:!!dryRun
+  };
+}
+
+// Righe dell'anteprima in testo: prima il campo di partenza, poi la destinazione.
+function testoSpostamento(righe,max=10){
+  const out=righe.slice(0,max).map(r=>{
+    const dst=r.old_to?`«${r.old_to}» → «${r.new_to}»`:`(vuoto) → «${r.new_to}»`;
+    return `  ${r.old_from} → ${r.new_from}\n  ${dst}`;
+  });
+  if(righe.length>max) out.push(`  … e altre ${righe.length-max}`);
+  return out.join('\n');
+}
+async function spostaChiamata(dryRun){
+  try{
+    return await fetch('/db/move_field',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(moveFieldPayload(dryRun))}).then(r=>r.json());
+  }catch(e){ return {error:e.message}; }
+}
+
+function mvErrore(msg){
+  const out=document.getElementById('mv-result');
+  out.style.display='block'; out.textContent='⚠️ '+msg;
+}
+
+// 👁 Anteprima: mostra cosa cambierebbe SENZA scrivere niente (dry_run).
+async function previewMoveField(){
+  const out=document.getElementById('mv-result');
+  await ensureCampiSposta();
+  const p=moveFieldPayload(true);
+  if(!p.text.trim()){ mvErrore('Scrivi cosa spostare (es. Eminem, oppure 1999)'); return; }
+  if(p.from_field===p.to_field){ mvErrore('«Da» e «a» devono essere due campi diversi'); return; }
+  out.style.display='block'; out.textContent='⏳ Anteprima…';
+  const r=await spostaChiamata(true);
+  if(r.error){ out.textContent='❌ '+r.error; return; }
+  if(!r.count){ out.textContent='Niente da spostare: nessuna riga con «'+p.text+'»'+(r.skipped?` (${r.skipped} saltate)`:''); return; }
+  out.textContent=`👁 Anteprima — ${r.count} righe cambierebbero${r.skipped?`, ${r.skipped} saltate`:''} (niente è stato scritto)\n${testoSpostamento(r.updated)}`;
+}
+
+// ➡️ Sposta davvero: prima l'anteprima, poi la conferma, poi (solo) la scrittura.
+async function doMoveField(){
+  const out=document.getElementById('mv-result');
+  await ensureCampiSposta();
+  const p=moveFieldPayload(false);
+  if(!p.text.trim()){ mvErrore('Scrivi cosa spostare (es. Eminem, oppure 1999)'); return; }
+  if(p.from_field===p.to_field){ mvErrore('«Da» e «a» devono essere due campi diversi'); return; }
+  out.style.display='block'; out.textContent='⏳ Cerco le righe…';
+  const anteprima=await spostaChiamata(true);
+  if(anteprima.error){ out.textContent='❌ '+anteprima.error; return; }
+  if(!anteprima.count){ out.textContent='Niente da spostare: nessuna riga con «'+p.text+'»'+(anteprima.skipped?` (${anteprima.skipped} saltate)`:''); return; }
+  const ok=confirm(`Sposto «${p.text}» da ${etichettaCampo(p.from_field)} a ${etichettaCampo(p.to_field)}\n\n${testoSpostamento(anteprima.updated,5)}\n\n${anteprima.count} righe${anteprima.skipped?`, ${anteprima.skipped} saltate`:''}. Procedere? (annullabile con ↩️ Undo)`);
+  if(!ok){ out.textContent='Operazione annullata'; return; }
+  const r=await spostaChiamata(false);
+  if(r.error){ out.textContent='❌ '+r.error; return; }
+  out.textContent=`✅ ${r.count} righe aggiornate${r.skipped?`, ${r.skipped} saltate`:''}\n${testoSpostamento(r.updated)}`;
+  loadDb(); refreshHistoryBadge();
 }
 
 function loadSlashArtistScript() {
@@ -5032,6 +5176,7 @@ fetchDatasetStats();
 refreshDbFileSelect();
 refreshHistoryBadge();
 loadDb();
+ensureCampiSposta(); // menu "Da"/"a" dello strumento ➡️ Sposta (una volta sola)
 // Aggiornamento automatico e costante del database (nessun pulsante richiesto).
 // Inizializza subito la firma per evitare un doppio fetch all'avvio.
 fetch('/db/changed').then(r=>r.json()).then(s=>{ lastDbSig=JSON.stringify(s||{}); }).catch(()=>{});

@@ -3326,27 +3326,210 @@ def verify_song(song_id):
     })
 
 # ── DB: MASS RENAME ───────────────────────────────────────────────────────────
+# ── DB: MODIFICHE IN BLOCCO (✏️ Rinomina in massa / ➡️ Sposta) ────────────────
+# Campi su cui possono lavorare gli strumenti "in blocco" della tab Database:
+# sono i campi testuali semplici di `songs`. Restano fuori (apposta) `id`, i
+# timestamp e le colonne di stato (verified, analyzed_status, URL…): quelle si
+# toccano da ✏️ Edit, dalle funzioni dell'app o dallo script Python del pannello.
+BULK_FIELDS = [
+    "title", "artist", "album", "album_artist", "composer", "producers",
+    "genre", "year", "release_date", "comment", "musical_key",
+]
+# Campi numerici: da un titolo si sposta solo una cifra (es. l'anno 1999)
+NUMERIC_FIELDS = {"year"}
+# Separatore con cui la libreria tiene più valori nello stesso campo
+# (es. artist = "Bad Meets Evil / Eminem").
+VALUE_SEPARATOR = " / "
+
+
+def _pulisci_dopo_rimozione(testo):
+    """Ripulisce quel che resta quando si porta via un pezzo di testo.
+
+    Esempio: "Remember The Name (feat. 50 Cent)" → tolto "50 Cent" resta
+    "(feat. )" → qui diventa "" e resta solo "Remember The Name"; vengono tolti
+    anche i separatori rimasti orfani (" - ", " / ", ",") in testa o in coda.
+    Funzione PURA (la usa `move_field_value`, testata da test_move_field).
+    """
+    s = re.sub(r"\s{2,}", " ", testo)
+    # parentesi/quadre rimaste vuote, anche col solo "feat."/"ft."/"with" dentro
+    s = re.sub(r"\s*[(\[]\s*(?:feat\.?|ft\.?|with)?\s*[)\]]", " ", s, flags=re.IGNORECASE)
+    # separatore rimasto appeso prima di una parentesi chiusa:
+    # "The Anthem (feat. RZA & )" → "The Anthem (feat. RZA)"
+    s = re.sub(r"\s*[&,;/\-–—]\s*([)\]])", r"\1", s)
+    # "feat." rimasto appeso senza parentesi (es. "Titolo - feat.")
+    s = re.sub(r"\s*[-–—,]\s*(?:feat\.?|ft\.?)\s*$", "", s, flags=re.IGNORECASE)
+    # separatori doppi rimasti in mezzo: "A - / B" → "A / B"
+    s = re.sub(r"([-–—/,;])\s*[-–—/,;]", r"\1", s)
+    # separatori orfani in testa e in coda
+    s = re.sub(r"^\s*[-–—/,;]\s*", "", s)
+    s = re.sub(r"\s*[-–—/,;]\s*$", "", s)
+    return s.strip()
+
+
+def move_field_value(old_from, old_to, text, mode="append", whole_word=True,
+                     pulisci=True, numerico=False):
+    """Sposta `text` dal campo `old_from` al campo `old_to` (funzione PURA).
+
+    Restituisce (nuovo_valore_sorgente, nuovo_valore_destinazione) oppure
+    (None, None) quando la riga va **saltata**: testo non presente, campo
+    sorgente che resterebbe vuoto, o destinazione numerica già occupata.
+    - mode="append"  → il testo si AGGIUNGE alla destinazione (con " / "),
+      senza duplicarlo se c'è già;
+    - mode="replace" → il testo SOSTITUISCE il valore della destinazione;
+    - whole_word     → sposta solo la parola intera ("Ever" non tocca "Forever");
+    - pulisci        → ripulisce parentesi/separatori rimasti vuoti;
+    - numerico       → in "append" scrive solo se la destinazione è vuota.
+    """
+    src, dst = (old_from or ""), (old_to or "")
+    testo = (text or "").strip()
+    if not testo:
+        return None, None
+    if not re.search(re.escape(testo), src, flags=re.IGNORECASE):
+        return None, None
+    pattern = rf"(?<!\w){re.escape(testo)}(?!\w)" if whole_word else re.escape(testo)
+    nuovo_src = re.sub(pattern, " ", src, flags=re.IGNORECASE)
+    if pulisci:
+        nuovo_src = _pulisci_dopo_rimozione(nuovo_src)
+    else:
+        nuovo_src = re.sub(r"\s{2,}", " ", nuovo_src).strip()
+    if not nuovo_src:
+        return None, None  # il campo conteneva SOLO quel testo: non lo svuoto
+    if nuovo_src == src:
+        # Nessuna occorrenza valida (es. "Ever" dentro "Forever" con "solo parola
+        # intera"): NON si tocca la destinazione, altrimenti il nome finirebbe
+        # aggiunto agli artisti senza essere tolto dal titolo.
+        return None, None
+    if mode == "replace":
+        nuovo_dst = testo
+    elif not dst:
+        nuovo_dst = testo
+    elif numerico:
+        return None, None  # destinazione numerica già piena: non la sovrascrivo
+    elif testo.lower() in [p.strip().lower() for p in re.split(r"[,/]", dst)]:
+        nuovo_dst = dst  # già presente (a meno di maiuscole): non lo duplico
+    else:
+        nuovo_dst = dst + VALUE_SEPARATOR + testo
+    if nuovo_src == src and nuovo_dst == dst:
+        return None, None
+    return nuovo_src, nuovo_dst
+
+
 @app.route("/db/mass_rename", methods=["POST"])
 def mass_rename():
-    """Apply find/replace on a specific field across all songs"""
+    """Apply find/replace on a specific field across all songs
+
+    Salva uno snapshot prima/dopo: l'operazione è annullabile con ↩️ Undo
+    (prima non lo era: una sostituzione sbagliata — es. "50 Cent" → "51 Cent"
+    su 35 righe, 17/09/2026 — restava scritta nel database).
+    """
     data = request.json or {}
     field = data.get("field", "title")
     find = data.get("find", "")
     replace = data.get("replace", "")
-    if field not in ["title", "artist", "album", "genre", "comment", "producers"]:
-        return jsonify({"error": "Campo non consentito"}), 400
+    if field not in BULK_FIELDS:
+        return jsonify({"error": "Campi consentiti: " + ", ".join(BULK_FIELDS)}), 400
     if not find:
         return jsonify({"error": "find richiesto"}), 400
-    with get_db() as conn:
-        rows = conn.execute(f"SELECT id, {field} FROM songs WHERE {field} LIKE ?", (f"%{find}%",)).fetchall()
-        updated = []
-        for r in rows:
-            old = r[field] or ""
-            new = old.replace(find, replace)
-            if new != old:
-                conn.execute(f"UPDATE songs SET {field}=?, updated_at=datetime('now') WHERE id=?", (new, r["id"]))
-                updated.append({"id": r["id"], "old": old, "new": new})
-    return jsonify({"updated": updated, "count": len(updated)})
+    before = db_snapshot()
+    updated = []
+    try:
+        with get_db() as conn:
+            rows = conn.execute(f"SELECT id, {field} FROM songs WHERE {field} LIKE ?", (f"%{find}%",)).fetchall()
+            for r in rows:
+                old = r[field] or ""
+                new = old.replace(find, replace)
+                if new != old:
+                    conn.execute(f"UPDATE songs SET {field}=?, updated_at=datetime('now') WHERE id=?", (new, r["id"]))
+                    updated.append({"id": r["id"], "old": old, "new": new})
+    except Exception as e:
+        _drop_snapshot(before)
+        return jsonify({"error": str(e)}), 500
+    if updated:
+        after = db_snapshot()
+        push_undo(before, after, f"Rinomina in massa «{find}» → «{replace}» ({len(updated)} righe, {field})")
+    else:
+        _drop_snapshot(before)
+    return jsonify({"updated": updated, "count": len(updated), **_history()})
+
+@app.route("/db/move_field", methods=["POST"])
+def move_field():
+    """➡️ Sposta un testo da un campo a un altro, su tutte le righe che lo contengono.
+
+    Esempi: «Eminem» dal titolo agli artisti; «1999» dal titolo al campo anno.
+    Con `dry_run: true` fa SOLO l'anteprima (nessuna scrittura: la usa la pagina
+    per mostrare cosa cambierebbe prima di applicare). L'operazione vera salva
+    uno snapshot prima/dopo, quindi è annullabile con ↩️ Undo (come /db/execute).
+    """
+    data = request.json or {}
+    from_field = (data.get("from_field") or "").strip()
+    to_field = (data.get("to_field") or "").strip()
+    text = (data.get("text") or "").strip()
+    mode = data.get("mode") or "append"
+    whole_word = bool(data.get("whole_word", True))
+    pulisci = bool(data.get("clean", True))
+    dry_run = bool(data.get("dry_run", False))
+
+    if from_field not in BULK_FIELDS or to_field not in BULK_FIELDS:
+        return jsonify({"error": "Campi consentiti: " + ", ".join(BULK_FIELDS)}), 400
+    if from_field == to_field:
+        return jsonify({"error": "«Da» e «a» devono essere due campi diversi"}), 400
+    if not text:
+        return jsonify({"error": "Scrivi cosa spostare (es. Eminem, oppure 1999)"}), 400
+    if mode not in ("append", "replace"):
+        return jsonify({"error": "Modalità non valida"}), 400
+    numerico = to_field in NUMERIC_FIELDS
+    if numerico and not re.fullmatch(r"\d{1,4}", text):
+        return jsonify({"error": f"«{to_field}» è un campo numerico: si sposta solo una cifra (es. 1999)"}), 400
+
+    before = None if dry_run else db_snapshot()
+    updated, skipped = [], 0
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"SELECT id, {from_field} AS f, {to_field} AS t FROM songs WHERE {from_field} LIKE ?",
+                (f"%{text}%",),
+            ).fetchall()
+            for r in rows:
+                new_from, new_to = move_field_value(r["f"], r["t"], text, mode=mode,
+                                                    whole_word=whole_word,
+                                                    pulisci=pulisci, numerico=numerico)
+                if new_from is None:
+                    skipped += 1
+                    continue
+                updated.append({"id": r["id"], "old_from": r["f"], "new_from": new_from,
+                                "old_to": r["t"], "new_to": new_to})
+                if dry_run:
+                    continue
+                if (new_to or "") != (r["t"] or ""):
+                    conn.execute(
+                        f"UPDATE songs SET {from_field}=?, {to_field}=?, updated_at=datetime('now') WHERE id=?",
+                        (new_from, new_to, r["id"]),
+                    )
+                else:
+                    conn.execute(
+                        f"UPDATE songs SET {from_field}=?, updated_at=datetime('now') WHERE id=?",
+                        (new_from, r["id"]),
+                    )
+    except Exception as e:
+        _drop_snapshot(before)
+        return jsonify({"error": str(e)}), 500
+
+    if not dry_run:
+        if updated:
+            after = db_snapshot()
+            push_undo(before, after, f"Sposta «{text}»: {from_field} → {to_field} ({len(updated)} righe)")
+        else:
+            _drop_snapshot(before)
+
+    return jsonify({
+        "dry_run": dry_run,
+        "count": len(updated),
+        "skipped": skipped,
+        "updated": updated[:50],
+        "message": ("Anteprima: nessuna riga scritta" if dry_run else
+                    f"{len(updated)} righe aggiornate" + (f", {skipped} saltate" if skipped else "")),
+        **_history(),
+    })
 
 # ── DB: ADD FROM FILE (upload) ────────────────────────────────────────────────
 @app.route("/db/add_local", methods=["POST"])
@@ -3397,6 +3580,18 @@ def db_from_onyx():
 # Prima di ogni operazione che modifica il database (UPDATE o script) viene
 # salvato uno snapshot completo del DB: con /db/undo e /db/redo puoi
 # annullare/ripetere le ultime operazioni.
+# Regole del pannello SQL/script: usate da /db/execute e mostrate dalla legenda
+# (/db/schema), così pagina e backend restano d'accordo su cosa è permesso.
+SQL_ALLOWED = ["SELECT", "UPDATE"]
+SQL_FORBIDDEN = ["DROP", "ALTER", "CREATE", "DELETE", "INSERT", "TRUNCATE", "REPLACE"]
+# Variabili disponibili dentro lo script Python (stesse di `safe_globals`) e
+# funzioni di base; SCRIPT_TIMEOUT è il tempo massimo di esecuzione.
+SCRIPT_GLOBALS = ["conn", "db_path", "re", "time", "json", "sqlite3", "os", "math", "hashlib"]
+SCRIPT_BUILTINS = ["print", "len", "str", "int", "float", "bool", "dict", "list", "tuple",
+                   "set", "range", "enumerate", "zip", "sorted", "min", "max", "sum",
+                   "abs", "round", "repr", "isinstance"]
+SCRIPT_TIMEOUT = 30
+
 SNAP_DIR = os.path.join(BASE_DIR, ".snapshots")
 os.makedirs(SNAP_DIR, exist_ok=True)
 MAX_UNDO = 30
@@ -3477,10 +3672,9 @@ def execute_custom():
     # ── Query SQL ──
     if sql:
         sql_upper = sql.upper().strip()
-        if not (sql_upper.startswith("SELECT") or sql_upper.startswith("UPDATE")):
-            return jsonify({"error": "Sono consentite solo SELECT e UPDATE"}), 400
-        forbidden = ["DROP", "ALTER", "CREATE", "DELETE", "INSERT", "TRUNCATE", "REPLACE"]
-        if any(re.search(rf"\b{w}\b", sql_upper) for w in forbidden):
+        if not any(sql_upper.startswith(w) for w in SQL_ALLOWED):
+            return jsonify({"error": "Sono consentite solo " + " e ".join(SQL_ALLOWED)}), 400
+        if any(re.search(rf"\b{w}\b", sql_upper) for w in SQL_FORBIDDEN):
             return jsonify({"error": "Operazione non consentita"}), 400
         try:
             if sql_upper.startswith("SELECT"):
@@ -3548,12 +3742,12 @@ def execute_custom():
 
     t = _threading.Thread(target=run_script)
     t.start()
-    t.join(timeout=30)
+    t.join(timeout=SCRIPT_TIMEOUT)
     _sys.stdout = old_stdout
 
     if t.is_alive():
         _drop_snapshot(before)
-        return jsonify({"error": "Script timeout (30s)"}), 500
+        return jsonify({"error": f"Script timeout ({SCRIPT_TIMEOUT}s)"}), 500
 
     after = db_snapshot()
     first_line = script.strip().splitlines()[0][:60] if script.strip() else "Script"
@@ -3597,6 +3791,88 @@ def db_redo():
 @app.route("/db/history", methods=["GET"])
 def db_history():
     return jsonify({"undo": len(undo_stack), "redo": len(redo_stack)})
+
+
+# ── DB: LEGENDA DEL PANNELLO SQL/SCRIPT (tabelle, campi, cose disponibili) ────
+# Le descrizioni stanno qui, accanto agli endpoint, così restano allineate ai
+# campi veri della tabella: la legenda in pagina le mostra in italiano.
+TABLE_DOCS = {
+    "songs": "La libreria: una riga per canzone (titolo, artisti, album, BPM, tonalità, crediti, testo, file locale…).",
+    "sample_relations": "Campionamenti (WhoSampled): chi campiona chi — `derivative_song_id` = chi usa il sample, `source_song_id` = il brano campionato.",
+    "stem_sessions": "Una sessione di separazione degli stem (Demucs) di un brano.",
+    "stem_tracks": "Le singole tracce separate di una sessione (voce, batteria, basso, altro).",
+    "audio_analyses": "Analisi audio salvate (MIDI + one-shot) usate dal confronto FORTISSIMO.",
+    "playback_state": "Stato del player: UNA sola riga (id = 1) con brano, posizione, volume.",
+}
+COLUMN_DOCS = {"songs": {
+    "id": "identificativo interno (song_…)",
+    "title": "titolo del brano",
+    "artist": "artisti separati da ' / ' (dopo la Verifica: crediti completi)",
+    "album": "album",
+    "album_artist": "artista dell'album",
+    "composer": "compositori (da Genius)",
+    "producers": "produttori in JSON: [\"Nome\", …]",
+    "genre": "genere",
+    "year": "anno (numero)",
+    "release_date": "data di uscita (testo, es. 'October 1, 1999')",
+    "track_number": "numero di traccia",
+    "disc_number": "numero di disco",
+    "compilation": "1 se è una compilation",
+    "rating": "voto",
+    "bpm": "BPM (numero; da Verifica o ffmpeg)",
+    "musical_key": "tonalità (es. 'A# Minor')",
+    "play_count": "quante volte è stato riprodotto",
+    "comment": "commento libero",
+    "lyrics": "testo del brano (da Genius)",
+    "duration": "durata in secondi",
+    "analyzed_status": "stato dell'analisi audio ('none' = mai analizzato)",
+    "genius_url": "link Genius",
+    "whosampled_url": "link WhoSampled",
+    "youtube_url": "link YouTube",
+    "tunebat_url": "link Tunebat",
+    "cover_art_path": "file della copertina",
+    "local_file": "nome del file audio in downloads/",
+    "title_verified": "1 = titolo confermato (verde in pagina)",
+    "artist_verified": "1 = artisti confermati",
+    "bpm_verified": "1 = BPM confermato",
+    "key_verified": "1 = tonalità confermata",
+    "lyrics_verified": "1 = testo confermato",
+    "genius_match_score": "somiglianza del match Genius (0-1)",
+    "created_at": "quando è stata aggiunta",
+    "updated_at": "ultima modifica",
+}}
+
+
+@app.route("/db/schema", methods=["GET"])
+def db_schema():
+    """📖 Legenda del pannello: tabelle e campi (con descrizione), numero di righe
+    e comandi consentiti (SQL e script Python)."""
+    tables = []
+    with get_db() as conn:
+        names = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        for name in names:
+            columns = [{
+                "name": c["name"],
+                "type": c["type"] or "",
+                "pk": bool(c["pk"]),
+                "notnull": bool(c["notnull"]),
+                "doc": COLUMN_DOCS.get(name, {}).get(c["name"], ""),
+            } for c in conn.execute(f"PRAGMA table_info({name})")]
+            tables.append({
+                "name": name,
+                "doc": TABLE_DOCS.get(name, ""),
+                "count": conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0],
+                "columns": columns,
+            })
+    return jsonify({
+        "tables": tables,
+        "bulk_fields": BULK_FIELDS,
+        "numeric_fields": sorted(NUMERIC_FIELDS),
+        "sql": {"allowed": SQL_ALLOWED, "forbidden": SQL_FORBIDDEN},
+        "script": {"globals": SCRIPT_GLOBALS, "builtins": SCRIPT_BUILTINS,
+                   "timeout": SCRIPT_TIMEOUT},
+    })
 
 # ── DB: PULIZIA (file durata zero + duplicati per contenuto audio) ───────────
 TRASH_DIR = os.path.join(BASE_DIR, ".trash")

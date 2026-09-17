@@ -54,6 +54,10 @@ con `(2)` nella cartella locale:
   dal job, mai l'audio di un altro sample): `python3 -m unittest -v test_download_fallback`
 - `test_verify_genius.py` — test del recupero crediti da Genius (tutti gli
   artisti, produttori, compositori): `python3 -m unittest -v test_verify_genius`
+- `test_move_field.py` — test della **legenda 📖** e dello strumento **➡️ Sposta**
+  del pannello SQL/script (funzione pura `move_field_value`: artista dal titolo
+  agli artisti, anno dal titolo al campo anno, parola intera, parentesi rimaste
+  vuote): `python3 -m unittest -v test_move_field`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -539,8 +543,11 @@ Da tenere presente nelle sessioni di lavoro successive:
   era proprio quello che aveva fatto il danno (`re.sub(r'\s*Eminem\s*', '', …)`,
   senza confine di parola: `Eminems` → `s`, `(feat. Eminem)` → `(feat.`). Ora
   l'esempio è **di sola lettura** (mostra le righe col nome nel titolo e non
-  modifica niente) e ricorda le due regole per una `UPDATE` sicura: usare
-  `r'\bEminem\b'` e ripulire le parentesi rimaste vuote. Verificato provando le
+  modifica niente) e ricordava le due regole per una `UPDATE` sicura: usare
+  `r'\bEminem\b'` e ripulire le parentesi rimaste vuote. (Più tardi lo stesso
+  giorno quel pulsante «📋 Script Eminem» **non c'è più**: al suo posto lo
+  strumento generico **➡️ Sposta**, annullabile — vedi l'ultima nota.)
+  Verificato provando le
   regex dell'esempio sui titoli che erano stati rovinati: la versione vecchia li
   rompe (`Eminems…` → `s Freestyle…`, `Rock City (feat. Eminem)` → `Rock City
   (feat.)`), mentre un esempio "sicuro" che togliesse comunque Eminem ne
@@ -599,4 +606,65 @@ Da tenere presente nelle sessioni di lavoro successive:
   l'album di un **omonimo** ("Cha-Ching" → album di *Unique Salonga*): è stata
   **annullata** dal backup (`/tmp/samplelab_pre_backfill_2114.db`) prima di
   rifarla con le guardie. Meglio un segnaposto che l'album di un'altra canzone.
+
+- **PANNELLO SQL/SCRIPT: LEGENDA 📖 E STRUMENTO ➡️ SPOSTA (17/09/2026, sera).**
+  Richiesta di Alessandro: «all'inizio della sezione dai una legenda con tutte le
+  tabelle e i nomi delle cose che possiamo usare; togli anche il pulsante *Script
+  Eminem* e piuttosto rendilo generico — l'utente scrive da dove spostare cosa,
+  dove spostarla e cosa spostare (es. prendere una parola dal titolo, tipo
+  l'anno, e spostarla in anno)». Fatto:
+  1. **📖 Legenda** in cima al pannello (a comparsa): `GET /db/schema` legge il
+     database **vero** (`sqlite_master` + `PRAGMA table_info`) e la pagina mostra
+     le **6 tabelle** con il numero di righe e **tutte le colonne** — per `songs`
+     (35 campi) ognuna con la sua descrizione in italiano («artist: artisti
+     separati da ' / '», «producers: produttori in JSON», «title_verified: 1 =
+     titolo confermato»). La legenda dice anche cosa si può usare nel pannello:
+     in SQL solo `SELECT`/`UPDATE` (vietate DROP/ALTER/CREATE/DELETE/INSERT/
+     TRUNCATE/REPLACE) e nello script Python `conn`, `db_path`, `re`, `time`,
+     `json`, `sqlite3`, `os`, `math`, `hashlib` più le funzioni di base, con
+     timeout 30 s. Le due liste sono **costanti del backend** (`SQL_ALLOWED`,
+     `SQL_FORBIDDEN`, `SCRIPT_GLOBALS`, `SCRIPT_TIMEOUT`), usate anche da
+     `/db/execute`: legenda e controlli non possono divergere.
+  2. **➡️ Sposta** sostituisce il pulsante «📋 Script Eminem» (rimosso): si sceglie
+     **da** quale campo, **a** quale campo, **cosa** spostare (es. `Eminem`,
+     oppure `1999`), se **aggiungere** con ` / ` o **sostituire**, con due
+     opzioni («solo parola intera», «pulisci parentesi vuote»). Endpoint nuovo
+     `POST /db/move_field` con **anteprima** (`dry_run: true` → non scrive
+     nulla), conferma in pagina con l'elenco delle righe e **↩️ Undo** (snapshot
+     prima/dopo). I menu «Da»/«a» si riempiono da `/db/schema`, quindi i campi
+     disponibili sono sempre quelli che il backend accetta.
+  3. **✏️ Rinomina in massa ora è annullabile**: era l'unico strumento in blocco
+     senza snapshot. Non è teoria: il 17/09 alle 20:23 una sostituzione
+     `50 Cent` → `51 Cent` aveva toccato **35 righe** e l'unico modo per tornare
+     indietro era scrivere l'`UPDATE` inverso a mano (i valori sono stati
+     ripristinati alle 20:23:43; nel database di lavoro resta solo l'`updated_at`
+     nuovo su quelle righe). Ora salva lo snapshot prima/dopo come `/db/execute`.
+  4. La **matematica del testo** è in funzioni pure (`move_field_value`,
+     `_pulisci_dopo_rimozione`): sposta senza duplicare (se il nome è già nel
+     campo destinazione non lo aggiunge due volte), **non svuota** un titolo che
+     era solo quel nome, su campi numerici accetta **solo cifre** e non
+     sovrascrive un anno già presente (riga **saltata**, non rovinata), e
+     ripulisce i resti (`(feat. )` → via, `… Chino XL & )` → `… Chino XL)`).
+  Verifiche del 17/09/2026: **25 test** in `test_move_field.py`
+  (`python3 -m unittest -v test_move_field`) e nessuna regressione nelle altre
+  suite (**6 + 8 + 17 + 26 + 22** test OK); il ciclo completo scrittura + ↩️ Undo
+  è stato provato su una **copia isolata** di app+DB (porta 5075: il database
+  vero non è stato toccato) → **10/10**, compresa la riproduzione dell'incidente
+  (`50 Cent` → `51 Cent`, 35 righe) e l'Undo che riporta la libreria **identica**
+  (md5 della lista `id|artist` uguale a prima); in **Chrome** (Selenium) **22/22**:
+  legenda popolata (3.545 caratteri con `890 righe`, `artist`, `SELECT`, `conn`,
+  `PK`), menu «Da»/«a» con 11 campi e destinazione predefinita *Artista*,
+  anteprima in pagina (`👁 Anteprima — 2 righe cambierebbero (niente è stato
+  scritto)`) col titolo nel database **intatto**, pulsante Eminem **rimosso**,
+  **0 errori JavaScript** in console.
+  Due bug trovati proprio dalle verifiche e corretti: (a) con «solo parola
+  intera» attivo, un testo che compare solo *dentro* un'altra parola (`Ever` in
+  `Forever`) veniva **aggiunto** alla destinazione senza essere tolto dal titolo
+  (ora la riga si salta — l'ha scoperto il test); (b) col deep link
+  `/?tab=database` la console dava `Cannot access 'dbSchemaCache' before
+  initialization` (le dichiarazioni `let`/`const` sono state spostate in cima
+  allo `<script>`).
+  Nota: i titoli con «(feat. …)» in libreria sono **124**: buona parte si sistema
+  da qui in 3 clic (da *Titolo* a *Artista*, testo = il nome, «solo parola
+  intera» attivo).
 
