@@ -174,6 +174,62 @@ class TestYtSearchSelection(unittest.TestCase):
         self.assertEqual(APP.yt_search_first("Tyler Sam Is Dead", "Sam Is Dead", "Tyler"),
                          (None, None))
 
+    # ── min_duration: l'audio deve contenere il secondo del sample ────────────
+    def test_min_duration_preferisce_la_versione_che_contiene_il_timestamp(self):
+        # Caso reale "Sam Is Dead" (16/09/2026): il titolo identico dura 170 s ma
+        # il sample è a 216 s (3:36) → si sceglie la versione lunga da 401 s.
+        self.use_entries([
+            yt_entry("Sam Is Dead", 170, "url-tagliata"),
+            yt_entry("Tyler, The Creator And Domo Genesis - Sam Is Dead", 401,
+                     "url-lunga", channel="Tyler, The Creator"),
+        ])
+        url, _ = APP.yt_search_first("Tyler Sam Is Dead", "Sam Is Dead", "Tyler",
+                                     min_duration=216)
+        self.assertEqual(url, "url-lunga")
+
+    def test_min_duration_con_titolo_identico_abbastanza_lungo(self):
+        self.use_entries([
+            yt_entry("Sam Is Dead", 260, "url-identica-lunga"),
+            yt_entry("Sam Is Dead", 170, "url-identica-corta"),
+        ])
+        url, _ = APP.yt_search_first("Sam Is Dead", "Sam Is Dead", "",
+                                     min_duration=216)
+        self.assertEqual(url, "url-identica-lunga")
+
+    def test_min_duration_senza_versioni_lunghe_non_blocca_il_download(self):
+        # Nessun video arriva al timestamp: si consegna la versione corta (in
+        # pagina compare l'avviso "il sample a 3:36 non c'è in questo audio"),
+        # NON un errore: l'utente può comunque ascoltare e ritagliare a mano.
+        self.use_entries([yt_entry("Sam Is Dead", 170, "url-corta")])
+        url, _ = APP.yt_search_first("Sam Is Dead", "Sam Is Dead", "",
+                                     min_duration=216)
+        self.assertEqual(url, "url-corta")
+
+
+    def test_min_duration_senza_artista_non_allarga_la_ricerca(self):
+        # Senza artista l'allargamento a titoli simili è pericoloso (in prova
+        # pescava "Sam Is Dead | Ghost (1990)", un video sul film): si resta sul
+        # titolo identico anche se corto — la pagina avviserà che il sample non
+        # è in quell'audio.
+        self.use_entries([
+            yt_entry("Sam Is Dead", 170, "url-tagliata"),
+            yt_entry("Sam Is Dead | Ghost (1990)", 559, "url-film", channel="Cinema"),
+        ])
+        url, _ = APP.yt_search_first("Sam Is Dead", "Sam Is Dead", "",
+                                     min_duration=216)
+        self.assertEqual(url, "url-tagliata")
+
+    def test_min_duration_allarga_solo_verso_l_artista_giusto(self):
+        self.use_entries([
+            yt_entry("Sam Is Dead", 170, "url-tagliata"),
+            yt_entry("Sam Is Dead | Ghost (1990)", 559, "url-film", channel="Cinema"),
+            yt_entry("Tyler, The Creator - Sam Is Dead", 401, "url-giusta",
+                     channel="OfficialHipHopWire"),
+        ])
+        url, _ = APP.yt_search_first("Tyler Sam Is Dead", "Sam Is Dead", "Tyler",
+                                     min_duration=216)
+        self.assertEqual(url, "url-giusta")
+
 
 class TestDownloadsSnapshot(unittest.TestCase):
     def test_snapshot_ignora_i_file_nascosti(self):

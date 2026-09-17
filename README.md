@@ -252,9 +252,42 @@ Da tenere presente nelle sessioni di lavoro successive:
   La pagina (`index (2).html`) manda ora `expected_title` a `/download` dai 4
   punti che lo chiamano (player principale, editor sample, download completo,
   tab database). Verifiche del 16/09/2026: `python3 -m unittest -v
-  test_download_fallback` (17 test) e prova end-to-end — URL inesistente → job
+  test_download_fallback` (22 test, aggiornati in serata) e prova end-to-end — URL inesistente → job
   **in errore senza file** (prima restituiva `Mosh.mp3`), "Sam Is Dead" →
   `Sam (Is Dead).mp3` (170 s, recupero del brano completo; con il vecchio
   ranking usciva `sam is dead.mp3`, una clip di 30 s), `/stream/Mosh.mp3` +
   formato wav → `Mosh.wav`.
+- **TIMESTAMP DEL SAMPLE FUORI DALL'AUDIO — CORRETTO (16/09/2026, sera).** Con
+  l'audio giusto ma più corto del previsto la card mostrava
+  `IN 3:36 → OUT 2:50 | durata: -1:-46 | sample: +0.00s`: il timestamp del sample
+  (216 s = 3:36) cade **oltre la fine** dell'audio scaricato (170 s = 2:50), e
+  `fmtTime` su una differenza negativa stampa `-1:-46` (in JavaScript `%`
+  conserva il segno). Causa: `wirePlayerEvents` faceva
+  `trimStart=startSec` e `trimEnd=min(startSec+30, durata)` senza controllare che
+  il timestamp esistesse nel file. Fix:
+  1. `index (2).html`: nuova funzione pura **`trimRangeFor(startSec, durata,
+     finestra)`**, usata da `wirePlayerEvents` (loadedmetadata) e da
+     `resetTrimStart`: IN/OUT restano sempre dentro `[0, durata]` con finestra
+     > 0 (caso 216 s su file di 170 s → **IN 2:20, OUT 2:50, durata 30 s**) e
+     quando il timestamp non esiste nel file compare in rosso
+     *"⚠ il sample a 3:36 non c'è in questo audio (durata 2:50): file più corto
+     del previsto — serve una versione completa"* (span `tt-warn-*`, sia nel
+     player principale sia in `buildPlayerHTML`). Verificata **in esecuzione
+     reale** con JavaScriptCore (`osascript -l JavaScript`) su 7 casi limite
+     (216/170, 600/170, 170/170, 216/216, 10/5, 0/300, 30/300): tutti con
+     `start < end` dentro la durata.
+  2. `app (2).py`: la pagina manda ora anche **`min_duration`** (il secondo in
+     cui serve il sample) e **`expected_artist`** (prima mandava solo il titolo);
+     se il video indicato non è scaricabile il recupero preferisce un video che
+     CONTENGA quel secondo, ma **solo con l'artista noto e solo se l'artista
+     compare nel titolo/canale** — senza questo ancoraggio usciva un omonimo
+     sbagliato (*"Sam Is Dead | Ghost (1990)"*, un video sul film).
+  Verifiche: job reale su `nojZbdeHPCk` (video con "Please sign in") con
+  `expected_title` + `expected_artist` + `min_duration=216` → scelto
+  `Tyler The Creator And Domo Genesis - Sam Is Dead` (**400 s**, contiene 3:36);
+  senza artista → resta la versione corta `Sam (Is Dead)` (170 s) con l'avviso
+  in pagina e **nessun errore**; `python3 -m unittest -v test_download_fallback
+  test_fortissimo_compare` → **44 test OK**. Nota: durante la verifica è emerso
+  anche un `NameError` (`ea` non definito in `yt_search_first`, introdotto in
+  questo stesso fix) → corretto subito e ricontrollato con il job reale.
 

@@ -1392,6 +1392,7 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
           IN <span class="trim-time-val" id="tt-start-main">—</span> &nbsp;→&nbsp; OUT <span class="trim-time-val" id="tt-end-main">—</span>
           &nbsp;|&nbsp; durata: <span id="tt-dur-main">—</span>
           &nbsp;|&nbsp; sample: <span id="tt-offset-main">0.00s</span>
+          <span id="tt-warn-main" style="display:none;color:var(--red);font-weight:700"></span>
           &nbsp;|&nbsp; <span style="color:var(--metronome-active);" id="metro-status-main">🔇</span>
         </div>
         <button class="btn-reset-handle" onclick="resetTrimStart('main')">⟳ Reset al sample</button>
@@ -3229,18 +3230,18 @@ function renderResults(data){
   loadPlayerAudio("main",mainYtUrlX,"player-main-wrap",0,data.main_yt_title||data.title,false,++mainToken);
   data.contains.forEach((item,i)=>{
     const yq=item.yt_url||`${item.artist} ${item.title}`;
-    loadSampleXEditor(`xed-c-yi-${i}`,yq,item.timestamp_yi,item.title);
-    if(mainYtUrlX) loadSampleXEditor(`xed-c-x-${i}`,mainYtUrlX,item.timestamp_x,data.title);
+    loadSampleXEditor(`xed-c-yi-${i}`,yq,item.timestamp_yi,item.title,item.artist);
+    if(mainYtUrlX) loadSampleXEditor(`xed-c-x-${i}`,mainYtUrlX,item.timestamp_x,data.title,data.artist);
   });
   data.sampled_in.forEach((item,i)=>{
     const yq=item.yt_url||`${item.artist} ${item.title}`;
-    loadSampleXEditor(`xed-s-yi-${i}`,yq,item.timestamp_yi,item.title);
-    if(mainYtUrlX) loadSampleXEditor(`xed-s-x-${i}`,mainYtUrlX,item.timestamp_x,data.title);
+    loadSampleXEditor(`xed-s-yi-${i}`,yq,item.timestamp_yi,item.title,item.artist);
+    if(mainYtUrlX) loadSampleXEditor(`xed-s-x-${i}`,mainYtUrlX,item.timestamp_x,data.title,data.artist);
   });
   (data.covered_by||[]).forEach((item,i)=>{
     const yq=item.yt_url||`${item.artist} ${item.title}`;
-    loadSampleXEditor(`xed-cb-yi-${i}`,yq,item.timestamp_yi,item.title);
-    if(mainYtUrlX) loadSampleXEditor(`xed-cb-x-${i}`,mainYtUrlX,item.timestamp_x,data.title);
+    loadSampleXEditor(`xed-cb-yi-${i}`,yq,item.timestamp_yi,item.title,item.artist);
+    if(mainYtUrlX) loadSampleXEditor(`xed-cb-x-${i}`,mainYtUrlX,item.timestamp_x,data.title,data.artist);
   });
 }
 
@@ -3265,9 +3266,9 @@ function chooseMainVersion(i,btn){
   if(mw) mw.innerHTML=playerLoadingHTML("Caricamento versione selezionata...");
   loadPlayerAudio("main",mainYtUrlX,"player-main-wrap",0,mainTitleX||(lastResultX&&lastResultX.title)||"",false,++mainToken);
   if(lastResultX){
-    lastResultX.contains.forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-c-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX); });
-    lastResultX.sampled_in.forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-s-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX); });
-    (lastResultX.covered_by||[]).forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-cb-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX); });
+    lastResultX.contains.forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-c-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX,mainArtistX); });
+    lastResultX.sampled_in.forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-s-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX,mainArtistX); });
+    (lastResultX.covered_by||[]).forEach((item,i)=>{ if(mainYtUrlX) loadSampleXEditor(`xed-cb-x-${i}`,mainYtUrlX,item.timestamp_x,mainTitleX,mainArtistX); });
   }
 }
 
@@ -3362,7 +3363,7 @@ function loadPlayerAudio(key,query,containerId,startSec,label,isXCopy,token){
   }
   if(downloadCache[cacheKey]?.status==="pending"){downloadCache[cacheKey].callbacks.push({key,containerId,startSec:startSec||0,label,token});return}
   downloadCache[cacheKey]={status:"pending",filename:null,callbacks:[]};
-  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3",expected_title:label||""})})
+  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3",expected_title:label||"",min_duration:Math.round(startSec||0)})})
   .then(r=>r.json()).then(({job_id,error})=>{
     if(error){downloadCache[cacheKey].status="error";if(!isStaleByToken(containerId,token))setContainerError(containerId,error);return}
     pollDownloadJob(cacheKey,job_id,key,containerId,startSec||0,label,token);
@@ -3420,7 +3421,7 @@ function embedAudioEditorX(containerId, url, filename, startSec){
   cont.innerHTML='';
   cont.appendChild(fr);
 }
-function loadSampleXEditor(containerId, query, startSec, label){
+function loadSampleXEditor(containerId, query, startSec, label, expectArtist){
   const cacheKey=query.trim();
   const doBuild=function(filename){
     embedAudioEditorX(containerId,'/stream/'+encodeURIComponent(filename), label||filename, startSec||0);
@@ -3428,7 +3429,7 @@ function loadSampleXEditor(containerId, query, startSec, label){
   if(downloadCache[cacheKey]?.status==="done"){ doBuild(downloadCache[cacheKey].filename); return; }
   if(downloadCache[cacheKey]?.status==="pending"){ downloadCache[cacheKey].callbacks.push({fn:doBuild}); return; }
   downloadCache[cacheKey]={status:"pending",filename:null,callbacks:[]};
-  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3",expected_title:label||""})})
+  fetch("/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query:cacheKey,format:"mp3",expected_title:label||"",expected_artist:expectArtist||"",min_duration:Math.round(startSec||0)})})
   .then(r=>r.json()).then(({job_id,error})=>{
     if(error){downloadCache[cacheKey].status="error";setContainerError(containerId,error);return}
     pollDownloadJobX(cacheKey,job_id,doBuild,containerId);
@@ -3488,6 +3489,18 @@ function removeClone(cloneId,yiKey,xKey){
 }
 
 // ── BUILD PLAYER (FL-Studio style trimmer) ────────────────────────────────────
+// ── RANGE DI TRIM SEMPRE VALIDO ──────────────────────────────────────────────
+// Bug 16/09/2026: con un audio più corto del timestamp del sample l'editor
+// faceva trimStart=timestamp e trimEnd=min(timestamp+30, durata) => IN 3:36 →
+// OUT 2:50 con durata NEGATIVA (-1:-46), che in JS viene da `%` col segno.
+// Questa funzione torna sempre start < end dentro [0, durata] e dice se il
+// timestamp richiesto non esiste in questo file (`beyond`).
+function trimRangeFor(startSec, duration, defaultDur){
+  const dur=Number(duration)||0, want=Math.max(0,Number(startSec)||0);
+  const win=Math.max(1,Math.min(Number(defaultDur)||30, dur||1));
+  const start=Math.min(want,Math.max(0,dur-win));
+  return {start:start, end:Math.min(start+win,dur), beyond:(dur>0&&want>dur-0.05), want:want};
+}
 function buildPlayer(key,containerId,filename,startSec,label){
   const container=document.getElementById(containerId); if(!container)return;
   const audio=new Audio(`/stream/${encodeURIComponent(filename)}`); audio.preload="metadata";
@@ -3559,7 +3572,7 @@ function buildPlayerHTML(key,label,filename){
     </div>
   </div>
   <div class="trim-time-row">
-    <div class="trim-time-label">IN <span class="trim-time-val" id="tt-start-${key}">—</span> &nbsp;→&nbsp; OUT <span class="trim-time-val" id="tt-end-${key}">—</span> &nbsp;|&nbsp; durata: <span id="tt-dur-${key}">—</span> &nbsp;|&nbsp; sample: <span id="tt-offset-${key}">0.00s</span></div>
+    <div class="trim-time-label">IN <span class="trim-time-val" id="tt-start-${key}">—</span> &nbsp;→&nbsp; OUT <span class="trim-time-val" id="tt-end-${key}">—</span> &nbsp;|&nbsp; durata: <span id="tt-dur-${key}">—</span> &nbsp;|&nbsp; sample: <span id="tt-offset-${key}">0.00s</span><span id="tt-warn-${key}" style="display:none;color:var(--red);font-weight:700"></span></div>
     <button class="btn-reset-handle" onclick="resetTrimStart('${key}')">⟳ Reset al sample</button>
   </div>
   <div class="download-row">
@@ -3575,8 +3588,13 @@ function buildPlayerHTML(key,label,filename){
 function wirePlayerEvents(key,audio,startSec,defaultDur){
   audio.addEventListener("loadedmetadata",()=>{
     const dur=audio.duration,p=players[key];
-    p.trimStart=startSec||0; p.trimEnd=Math.min((startSec||0)+defaultDur,dur);
-    p.scrollOffset=Math.max(0,(startSec||0)-5); p.timelineTime=p.trimStart;
+    // Range SEMPRE valido: se il timestamp del sample cade oltre la fine di
+    // questo audio (file più corto del previsto) si usa l'ultima finestra utile
+    // e si segnala l'avviso in interfaccia (vedi trimRangeFor).
+    const r=trimRangeFor(startSec,dur,defaultDur);
+    p.sampleBeyondAudio=r.beyond; p.wantSec=r.want;
+    p.trimStart=r.start; p.trimEnd=r.end;
+    p.scrollOffset=Math.max(0,r.start-5); p.timelineTime=p.trimStart;
     audio.currentTime=Math.max(0,p.timelineTime-p.sampleOffset);
     // Default BPM 120 se non impostato (2s per barra)
     if(!p.bpm||p.bpm<=0){p.bpm=120;document.getElementById(`bpm-${key}`).value=120;}
@@ -3654,6 +3672,15 @@ function updateTrimUI(key){
   const te=document.getElementById(`tt-end-${key}`);if(te)te.textContent=fmtTime(p.trimEnd);
   const td=document.getElementById(`tt-dur-${key}`);if(td)td.textContent=fmtTime(p.trimEnd-p.trimStart);
   const to=document.getElementById(`tt-offset-${key}`);if(to)to.textContent=(p.sampleOffset>=0?"+":"")+p.sampleOffset.toFixed(2)+"s";
+  // Avviso quando il timestamp del sample NON esiste in questo audio (file più
+  // corto del previsto): prima si vedeva solo una durata negativa senza spiegazioni.
+  const tw=document.getElementById(`tt-warn-${key}`);
+  if(tw){
+    if(p.sampleBeyondAudio){
+      tw.textContent=` ⚠ il sample a ${fmtTime(p.wantSec)} non c'è in questo audio (durata ${fmtTime(p.audio.duration||0)}): file più corto del previsto — serve una versione completa`;
+      tw.style.display="inline";
+    }else{ tw.textContent=""; tw.style.display="none"; }
+  }
   drawWaveform(key);
 }
 function updatePlayhead(key){
@@ -3940,7 +3967,7 @@ function startSelDragTouch(e,key){e.preventDefault();e.stopPropagation();const p
     if(!isDragging){const t=clientXToSec(key,startX);p.timelineTime=p.loopSel?Math.max(p.trimStart,Math.min(p.trimEnd,t)):Math.max(0,Math.min(p.audio.duration||0,t));p.audio.currentTime=Math.max(0,p.timelineTime-p.sampleOffset);updatePlayhead(key);updateTimecode(key);if(p.audio.paused){p.audio.play().catch(()=>{});setPlayBtn(key,true)}}}
   document.addEventListener("touchmove",om,{passive:false});document.addEventListener("touchend",oe);
 }
-function resetTrimStart(key){const p=players[key];if(!p)return;p.trimStart=p.startSec;if(p.trimEnd<=p.trimStart)p.trimEnd=Math.min(p.startSec+30,p.audio.duration||p.startSec+30);p.timelineTime=p.trimStart;p.audio.currentTime=Math.max(0,p.timelineTime-p.sampleOffset);updateTrimUI(key)}
+function resetTrimStart(key){const p=players[key];if(!p)return;const r=trimRangeFor(p.startSec,p.audio.duration||0,30);p.sampleBeyondAudio=r.beyond;p.wantSec=r.want;p.trimStart=r.start;p.trimEnd=r.end;p.timelineTime=p.trimStart;p.audio.currentTime=Math.max(0,p.timelineTime-p.sampleOffset);updateTrimUI(key)}
 function downloadTrim(key){
   const p=players[key];if(!p)return;const fmt=document.getElementById(`fmt-${key}`)?.value||"mp3";const statusEl=document.getElementById(`dls-${key}`);
   if(statusEl){statusEl.className="dl-status";statusEl.textContent="Taglio in corso..."}
@@ -4010,8 +4037,8 @@ function confirmAddSample(section){
   </div>`;
   const sectionEl=document.getElementById(section==="contains"?"sec-contains":section==="sampled_in"?"sec-sampled":"sec-covered");
   if(sectionEl)sectionEl.appendChild(card);
-  if(ytUrl) loadSampleXEditor(xedYiId, ytUrl||query, 0, label);
-  if(mainYtUrlX) loadSampleXEditor(xedXId, mainYtUrlX, 0, mainTitleX);
+  if(ytUrl) loadSampleXEditor(xedYiId, ytUrl||query, 0, label, artist);
+  if(mainYtUrlX) loadSampleXEditor(xedXId, mainYtUrlX, 0, mainTitleX, mainArtistX);
   if(statusEl)statusEl.textContent="";
   ["artist","title","yt"].forEach(f=>{const inp=document.getElementById(`add-${section}-${f}`);if(inp)inp.value=""});
   toggleAddForm(`add-form-${section}`);

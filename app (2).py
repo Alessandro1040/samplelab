@@ -1045,6 +1045,7 @@ def _rank_yt_entries(entries, expected_title="", expected_artist=""):
         ranked.append({
             "url": e.get("webpage_url") or e.get("url"),
             "title": raw_title,
+            "channel": e.get("channel", "") or "",
             "score": round(score, 3),
             "explicit": explicit,
             "clean": clean,
@@ -1055,7 +1056,7 @@ def _rank_yt_entries(entries, expected_title="", expected_artist=""):
     ranked.sort(key=lambda r: (r["score"], r["duration"]), reverse=True)
     return ranked
 
-def yt_search_first(query, expected_title="", expected_artist=""):
+def yt_search_first(query, expected_title="", expected_artist="", min_duration=0):
     entries = _yt_fetch_entries(query)
     if not entries:
         return None, None
@@ -1065,6 +1066,7 @@ def yt_search_first(query, expected_title="", expected_artist=""):
         return e.get("webpage_url") or e.get("url"), e.get("title", "")
 
     et = normalize(expected_title)
+    ea = normalize(expected_artist) if expected_artist else ""
     ranked = _rank_yt_entries(entries, expected_title, expected_artist)
     for r in ranked:
         tag = (" [ESPLICITA]" if r["explicit"] else "") + (" [CENSURATA]" if r["clean"] else "")
@@ -1075,9 +1077,29 @@ def yt_search_first(query, expected_title="", expected_artist=""):
     # completa del brano (caso "Sam Is Dead", 16/09/2026).
     exact = [r for r in ranked if r["url"] and normalize(r["title"]) == et]
     if exact:
+        if min_duration:
+            # Serve un audio che CONTENGA il timestamp del sample (min_duration):
+            # se nessun titolo identico è abbastanza lungo si accetta un titolo
+            # simile abbastanza lungo (es. la versione da 401 s invece di quella
+            # tagliata da 170 s, che non arriva a 3:36). L'allargamento si fa
+            # SOLO con un artista noto e solo se l'artista compare nel titolo o
+            # nel canale: senza questo ancoraggio si pescava un omonimo sbagliato
+            # (caso osservato: "Sam Is Dead | Ghost (1990)", un video sul film).
+            long_exact = [r for r in exact if (r.get("duration") or 0) >= min_duration]
+            if not long_exact and ea:
+                long_exact = [r for r in ranked if r["url"]
+                              and (r.get("duration") or 0) >= min_duration
+                              and r["score"] >= 0.55
+                              and ea in normalize(r["title"] + " " + (r.get("channel") or ""))]
+            if long_exact:
+                exact = long_exact
         best = max(exact, key=lambda r: (r["score"], r.get("duration") or 0))
-        print(f"[yt_search]  MATCH ESATTO: {best['title']} "
-              f"({best.get('duration')}s, score {best['score']:.3f})")
+        if normalize(best["title"]) == et:
+            print(f"[yt_search]  MATCH ESATTO: {best['title']} "
+                  f"({best.get('duration')}s, score {best['score']:.3f})")
+        else:
+            print(f"[yt_search]  SCELTO (titolo simile, serviva >= {min_duration:g}s): "
+                  f"{best['title']} ({best.get('duration')}s, score {best['score']:.3f})")
         return best["url"], best["title"]
 
     if ranked and ranked[0]["score"] >= 0.55 and ranked[0]["url"]:
@@ -1231,16 +1253,20 @@ def _convert_download_format(job_id, filename, fmt):
         print(f"[download {job_id}] Errore conversione, uso formato nativo: {conv_err}")
     return filename
 
-def do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist=""):
+def do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="", min_duration=0):
     with DL_SEM:
-        _do_download(job_id, query, fmt, quality, expected_title, expected_artist)
+        _do_download(job_id, query, fmt, quality, expected_title, expected_artist, min_duration)
 
-def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist=""):
+def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="", min_duration=0):
     # Foto della cartella download PRIMA di iniziare: alla fine si accettano solo
     # i file creati da questo job (vedi _pick_job_file), mai file di altri download.
     before = _downloads_snapshot()
     expected_title = (expected_title or "").strip()
     expected_artist = (expected_artist or "").strip()
+    try:
+        min_duration = float(min_duration or 0)
+    except (TypeError, ValueError):
+        min_duration = 0.0
     jobs[job_id]["status"] = "searching"
     jobs[job_id]["progress"] = {"percent": 0, "speed": "", "eta": ""}
     try:
@@ -1332,17 +1358,24 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         # spesso con "Please sign in" di YouTube sui brani con restrizioni) e la
         # pagina ci ha detto QUALE brano serve, si cerca un ALTRO video dello
         # stesso brano con il ranking titolo/artista, invece di restituire il
-        # primo file trovato in cartella.
+        # primo file trovato in cartella. Se la pagina sa anche a che SECONDO
+        # serve il sample (min_duration) si preferisce un video abbastanza lungo
+        # da contenerlo (altrimenti il timestamp cadrebbe oltre la fine
+        # dell'audio: IN > OUT, durata negativa in pagina).
         if not filename and expected_title:
             alt_url, alt_title = yt_search_first(
                 f"{expected_artist} {expected_title}".strip(),
-                expected_title=expected_title, expected_artist=expected_artist)
+                expected_title=expected_title, expected_artist=expected_artist,
+                min_duration=min_duration)
             if alt_url and alt_url != yt_url:
                 print(f"[download {job_id}] Video di partenza non scaricabile: provo {alt_url}")
                 jobs[job_id]["status"] = "downloading"
                 filename = _attempt_download(alt_url)
                 if filename:
                     yt_title = alt_title or ""
+                    # visibile in /status: si sa QUALE video alternativo è stato usato
+                    jobs[job_id]["yt_title"] = alt_title or alt_url
+                    jobs[job_id]["yt_url"] = alt_url
 
         # RECUPERO 2: si accettano SOLO file creati da questo job (confronto con
         # la foto iniziale della cartella) e, quando il titolo è noto, che lo
@@ -2348,8 +2381,14 @@ def start_download():
     quality = data.get("quality", "192")
     # Titolo/artista attesi: li manda la pagina (es. il titolo del sample). Servono
     # a NON consegnare un audio di un altro brano quando il download fallisce.
+    # min_duration = secondo del sample nell'audio: serve a preferire una versione
+    # abbastanza lunga da contenerlo.
     expected_title = (data.get("expected_title") or "").strip()
     expected_artist = (data.get("expected_artist") or "").strip()
+    try:
+        min_duration = float(data.get("min_duration") or 0)
+    except (TypeError, ValueError):
+        min_duration = 0.0
     if not query:
         return jsonify({"error": "URL/query mancante"}), 400
     jid = str(uuid.uuid4())[:8]
@@ -2363,7 +2402,8 @@ def start_download():
         "expected_title": expected_title,
     }
     threading.Thread(target=do_download,
-                     args=(jid, query, fmt, quality, expected_title, expected_artist),
+                     args=(jid, query, fmt, quality, expected_title, expected_artist,
+                           min_duration),
                      daemon=True).start()
     return jsonify({"job_id": jid})
 
