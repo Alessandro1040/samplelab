@@ -28,7 +28,8 @@
   --solid-color: #080808;
 }
 html,body{height:100%;overflow:hidden;}
-body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;}
+body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;
+     -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;}
 
 /* ─── LAYOUT ─── */
 .app{display:flex;flex-direction:column;height:100vh;}
@@ -121,7 +122,8 @@ body.embedded .content-header{padding-top:14px;}
 /* ─── CONTENT HEADER ─── */
 .content-header{padding:20px 24px 0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
 .page-title-wrap{display:flex;align-items:center;gap:12px;}
-.page-title{font-size:26px;font-weight:800;letter-spacing:-0.5px;}
+.page-title{font-size:26px;font-weight:800;letter-spacing:-0.7px;background:linear-gradient(92deg,var(--text) 25%,var(--text2));
+      -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
 .page-title-back{background:none;border:none;color:var(--text3);cursor:pointer;padding:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;transition:all .2s;}
 .page-title-back:hover{color:var(--text);background:var(--surface2);}
 .page-title-back svg{width:22px;height:22px;}
@@ -167,6 +169,72 @@ body.embedded .content-header{padding-top:14px;}
 .search-field:hover{color:var(--text);border-color:var(--text2);}
 .search-field:focus{border-color:var(--text2);color:var(--text);}
 .search-field option{background:var(--surface2);color:var(--text);}
+
+/* ─── HERO: intestazione di ARTISTA e di ALBUM (due GUI diverse) ───
+   Prima il nome compariva come testo piatto nella barra in alto
+   («Artista: Eminem», «Album: Mus»). Ora ogni clic apre una scheda:
+   artista = avatar tondo col monogramma + chip degli album; album = cover
+   quadrata in stile vinile + anno/durata e numeri di traccia veri.
+   I colori sono GENERATI dal nome (niente copertine nel database). */
+.hero-slot{margin:14px 24px 0;flex-shrink:0;}
+.hero-slot:empty{display:none;}
+.hero{display:flex;gap:20px;align-items:center;padding:18px 20px;border-radius:14px;
+      background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.012));
+      border:1px solid var(--border);position:relative;overflow:hidden;animation:heroIn .3s ease-out;}
+.hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+      background:radial-gradient(130% 150% at 0% 0%,var(--hero-glow,transparent),transparent 62%);}
+@keyframes heroIn{from{opacity:0;transform:translateY(-7px);}to{opacity:1;transform:none;}}
+.hero-art{width:104px;height:104px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+      font-family:'Space Mono',monospace;font-weight:700;font-size:36px;letter-spacing:-1.5px;color:#fff;
+      text-shadow:0 2px 14px rgba(0,0,0,.6);box-shadow:0 12px 30px rgba(0,0,0,.55);position:relative;z-index:1;}
+.hero-artist .hero-art{border-radius:50%;border:1px solid rgba(255,255,255,.14);}
+.hero-album .hero-art{border-radius:10px;border:1px solid rgba(255,255,255,.14);font-size:32px;}
+/* accenno di solco del disco nella cover dell'album */
+.hero-album .hero-art::before{content:"";position:absolute;inset:15px;border-radius:50%;
+      border:1px solid rgba(255,255,255,.13);box-shadow:inset 0 0 0 9px rgba(0,0,0,.20);}
+.hero-album .hero-art::after{content:"";position:absolute;width:9px;height:9px;border-radius:50%;background:rgba(0,0,0,.45);}
+.hero-info{min-width:0;flex:1;position:relative;z-index:1;}
+.hero-eyebrow{font-family:'Space Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.22em;
+      text-transform:uppercase;color:var(--hero-accent,var(--accent));}
+.hero-title{font-size:32px;font-weight:700;letter-spacing:-1px;line-height:1.12;margin:6px 0 9px;
+      word-break:break-word;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.hero-meta{display:flex;gap:9px;flex-wrap:wrap;align-items:center;
+      font-family:'Space Mono',monospace;font-size:11px;color:var(--text3);}
+.hero-meta b{color:var(--text2);font-weight:700;}
+.hero-dot{width:3px;height:3px;border-radius:50%;background:var(--text3);opacity:.65;flex-shrink:0;}
+.hero-flag{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:20px;
+      font-family:'Space Mono',monospace;font-size:10px;color:#ffd166;border:1px solid rgba(255,209,102,.35);
+      background:rgba(255,209,102,.08);}
+.hero-actions{display:flex;gap:8px;align-items:center;position:relative;z-index:1;flex-shrink:0;}
+.hero-btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:22px;
+      font-family:'Space Grotesk',sans-serif;font-size:12.5px;font-weight:600;white-space:nowrap;cursor:pointer;
+      background:var(--surface3);border:1px solid var(--border2);color:var(--text);
+      transition:transform .12s,opacity .15s,background .2s,border-color .2s;}
+.hero-btn:hover{border-color:var(--text3);transform:translateY(-1px);}
+.hero-btn:active{transform:scale(.97);}
+.hero-btn.primary{background:var(--hero-accent,var(--accent));border-color:transparent;color:#080808;}
+.hero-btn.primary:hover{opacity:.88;}
+/* chip degli album dell'artista: portano alla scheda dell'album.
+   Sfondo un gradino più chiaro del contenuto, altrimenti non si vedevano. */
+.hero-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding:0 2px;}
+.hero-chip{display:inline-flex;align-items:center;gap:8px;max-width:340px;padding:7px 13px;border-radius:20px;
+      background:var(--surface3);border:1px solid var(--border2);color:var(--text2);font-size:12px;font-family:inherit;
+      cursor:pointer;transition:all .2s;}
+.hero-chip:hover{color:var(--text);border-color:var(--text3);background:#262626;transform:translateY(-1px);}
+.hero-chip-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);}
+.hero-chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hero-chip-n{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);flex-shrink:0;}
+.hero-chip:hover .hero-chip-n{color:var(--hero-accent,var(--accent));}
+.hero-chip.more{cursor:default;color:var(--text3);border-style:dashed;background:var(--surface2);}
+.hero-chip.more:hover{transform:none;border-color:var(--border2);background:var(--surface2);}
+/* Vista album: le righe non ripetono l'album (uguale per tutte) e il numero
+   mostrato è quello di traccia del disco, non la posizione nella lista. */
+body.album-view .track-album{display:none;}
+@media (max-width:980px){
+  .hero{flex-wrap:wrap;}
+  .hero-title{font-size:26px;}
+  .hero-actions{width:100%;}
+}
 
 /* ─── TRACKS TABLE ─── */
 .tracks-area{flex:1;overflow-y:auto;padding:0 24px 16px;}
@@ -410,6 +478,12 @@ body.embedded .content-header{padding-top:14px;}
             <button class="action-btn success" onclick="document.getElementById('addFolderInput').click()">📂 Carica cartella</button>
           </div>
         </div>
+
+        <!-- Scheda di ARTISTA o di ALBUM: la costruisce renderHero().
+             Sono due GUI diverse (avatar tondo + chip degli album per
+             l'artista, cover quadrata in stile vinile + numeri di traccia
+             per l'album): prima il nome era solo testo piatto nella barra. -->
+        <div class="hero-slot" id="heroSlot"></div>
 
         <!-- BG Picker -->
         <div class="bg-picker">
@@ -1440,7 +1514,7 @@ function renderArtistChips(artistString) {
     if (isSeparator) {
       return `<span class="track-artist-sep">${part}</span>`;
     }
-    return `<span class="track-artist-part" onclick="event.stopPropagation(); setArtistFilter('${escHtml(part)}')">${escHtml(part)}</span>`;
+    return `<span class="track-artist-part" data-artist="${escHtml(part)}" onclick="event.stopPropagation(); apriArtistaDa(this)">${escHtml(part)}</span>`;
   }).join('');
 }
 
@@ -1490,21 +1564,22 @@ function clearAlbumFilter() {
 function updateHeaderUI() {
   const backBtn = document.getElementById("pageTitleBack");
   const titleEl = document.getElementById("pageTitle");
-  
-  if (currentArtistFilter) {
+
+  if (currentArtistFilter || currentAlbumFilter) {
     backBtn.style.display = "flex";
-    titleEl.textContent = `Artista: ${currentArtistFilter}`;
-  } else if (currentAlbumFilter) {
-    backBtn.style.display = "flex";
-    titleEl.textContent = `Album: ${currentAlbumFilter}`;
+    // Il nome non si scrive più come testo piatto («Artista: …» / «Album: …»):
+    // lo mostra la scheda costruita da renderHero(), diversa nei due casi.
+    titleEl.style.display = "none";
   } else {
     backBtn.style.display = "none";
+    titleEl.style.display = "";
     if (currentView === "home") {
       titleEl.textContent = currentPlFilter ? (playlists.find(p=>p.id===currentPlFilter)||{name:"Playlist"}).name : "Onyx, la tua musica";
     } else if (currentView === "search") {
       titleEl.textContent = "Cerca";
     }
   }
+  renderHero();
 }
 
 // ──────────────────────────────────────────────
@@ -1597,6 +1672,221 @@ function aggiornaSegnapostoRicerca(){
 function onSearchFieldChange(){
   aggiornaSegnapostoRicerca();
   filterTracks();
+}
+
+// ──────────────────────────────────────────────
+//  SCHEDE DI ARTISTA E DI ALBUM (due GUI diverse)
+// ──────────────────────────────────────────────
+// Un clic su un artista o su un album non scrive più una riga piatta nella
+// barra in alto («Artista: Eminem», «Album: Mus»): apre una scheda costruita
+// da renderHero(), diversa nei due casi — avatar tondo col monogramma e chip
+// degli album per l'artista, cover quadrata in stile vinile con anno, durata e
+// numeri di traccia del disco per l'album. La grafica è GENERATA dal nome
+// (gradiente stabile + iniziali) perché il database non ha copertine.
+// Parole che non contano per il monogramma ("The Slim Shady LP" -> "SS")
+const HERO_PAROLE_VUOTE = ["the","a","an","of","and","to","is","my","from","with","del","della","delle","dei","degli","il","lo","la","i","gli","le","un","uno","una","di","da","in","su","per","con","tra","fra","e","ed"];
+
+// Album che non sono album veri: il nome della cartella di caricamento ("Mus")
+// o le etichette segnaposto. Nella scheda lo diciamo apertamente.
+const ALBUM_SEGNAPOSTO = ["mus","album","album sconosciuto","sconosciuto","unknown","unknown album","senza album","n/a","na","-",""];
+
+// Quante chip di album mostrare nella scheda dell'artista (poi «+N altri»)
+const HERO_MAX_CHIP = 12;
+
+// Monogramma per la cover generata: le iniziali delle prime due parole che
+// contano, in maiuscolo — "Everyday Is Christmas (Deluxe Edition)" -> "EC",
+// "The Slim Shady LP" -> "SS", "Eminem" -> "E", "Stan's Tape" -> "ST",
+// stringa vuota -> "♪" (mai una copertina vuota).
+function monogramma(nome){
+  const parole = String(nome === undefined || nome === null ? "" : nome)
+    .replace(/[\u2018\u2019\u0060\u00b4']/g, "")     // "Stan's" è una parola sola
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim().split(" ").filter(Boolean);
+  const utili = parole.filter(p => !HERO_PAROLE_VUOTE.includes(p.toLowerCase()));
+  const mono = (utili.length ? utili : parole).slice(0, 2).map(p => p[0]).join("").toUpperCase();
+  return mono || "♪";
+}
+
+// Tinta stabile dal nome: lo stesso artista/album ha sempre lo stesso colore
+function tintaDa(nome){
+  const s = String(nome === undefined || nome === null ? "" : nome);
+  let h = 0;
+  for(let i = 0; i < s.length; i++){ h = (h * 31 + s.charCodeAt(i)) % 360; }
+  return h;
+}
+
+// Gradiente della cover generata (nessun artwork nel database)
+function gradienteDa(nome){
+  const h = tintaDa(nome);
+  return `linear-gradient(142deg, hsl(${h} 58% 44%), hsl(${(h + 42) % 360} 62% 16%))`;
+}
+
+// Vero per gli album segnaposto («Mus», «Album sconosciuto», vuoto…)
+function albumSegnaposto(nome){
+  const n = String(nome === undefined || nome === null ? "" : nome).trim().toLowerCase();
+  return ALBUM_SEGNAPOSTO.includes(n);
+}
+
+// "1 h 12 min" / "48 min" / "—"
+function durataEstesa(secondi){
+  const s = Math.round(Number(secondi) || 0);
+  if(s <= 0) return "—";
+  if(s < 3600) return Math.max(1, Math.round(s / 60)) + " min";
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+// "1999–2018", "1999" oppure "" (gli anni possono arrivare come testo)
+function intervalloAnni(anni){
+  const a = (anni || []).map(n => String(n).trim()).filter(Boolean)
+    .map(Number).filter(n => !isNaN(n)).sort((x, y) => x - y);
+  if(!a.length) return "";
+  return a[0] === a[a.length - 1] ? String(a[0]) : `${a[0]}–${a[a.length - 1]}`;
+}
+
+// Riassunto dell'artista: quanti brani, quali album (col conteggio), gli anni
+// e la durata totale: sono i numeri mostrati nella scheda.
+function riassuntoArtista(brani){
+  const lista = brani || [];
+  const conteggio = new Map();
+  lista.forEach(t => {
+    const nome = String(t.album || "").trim();
+    if(nome) conteggio.set(nome, (conteggio.get(nome) || 0) + 1);
+  });
+  const album = Array.from(conteggio.entries())
+    .map(([nome, n]) => ({ nome, n }))
+    .sort((x, y) => (y.n - x.n) || x.nome.localeCompare(y.nome));
+  return {
+    n: lista.length,
+    album,
+    anni: intervalloAnni(lista.map(t => t.year)),
+    durata: lista.reduce((tot, t) => tot + (Number(t.dur) || 0), 0)
+  };
+}
+
+// Riassunto dell'album: brani, durata, anno e artista dell'album (che nel
+// database c'è solo per 69 brani: altrimenti si usa l'artista del brano).
+function riassuntoAlbum(brani){
+  const lista = brani || [];
+  let albumArtista = "";
+  const artisti = new Set();
+  lista.forEach(t => {
+    const aa = String(t.album_artist || "").trim();
+    if(aa && !albumArtista) albumArtista = aa;
+    // "Eminem / D12" -> due artisti (stesso separatore delle chip)
+    String(t.artist || "").split(/\s*\/\s*/).forEach(a => { a = a.trim(); if(a) artisti.add(a); });
+  });
+  return {
+    n: lista.length,
+    durata: lista.reduce((tot, t) => tot + (Number(t.dur) || 0), 0),
+    anno: intervalloAnni(lista.map(t => t.year)),
+    albumArtista,
+    artisti: Array.from(artisti)
+  };
+}
+
+// Costruisce la scheda: una GUI per l'artista, una (diversa) per l'album.
+function renderHero(){
+  const slot = document.getElementById("heroSlot");
+  if(!slot) return;
+  document.body.classList.toggle("album-view", !!currentAlbumFilter);
+  if(!currentArtistFilter && !currentAlbumFilter){ slot.innerHTML = ""; return; }
+
+  const brani = visibleTracks();
+  const album = !!currentAlbumFilter;
+  const nome = album ? currentAlbumFilter : currentArtistFilter;
+  const tinta = tintaDa(nome);
+  const accento = album ? "var(--accent3)" : "var(--accent)";
+  const scheda = album ? riassuntoAlbum(brani) : riassuntoArtista(brani);
+  const art = `<div class="hero-art" style="background:${gradienteDa(nome)}">${escHtml(monogramma(nome))}</div>`;
+  const azioni = `<div class="hero-actions">
+      <button class="hero-btn primary" onclick="heroPlayAll()" title="Riproduci dall'inizio">▶ ${album ? "Riproduci l'album" : "Riproduci"}</button>
+      <button class="hero-btn" onclick="heroShuffle()" title="Parti da un brano a caso">🔀 Casuale</button>
+    </div>`;
+  const contenitore = `--hero-accent:${accento};--hero-glow:hsl(${tinta} 60% 45% / .16)`;
+  let extra = "";
+
+  if(album){
+    const artista = scheda.albumArtista || scheda.artisti[0] || "artista sconosciuto";
+    slot.innerHTML = `<div class="hero hero-album" style="${contenitore}">
+      ${art}
+      <div class="hero-info">
+        <div class="hero-eyebrow">Album</div>
+        <div class="hero-title" title="${escHtml(nome)}">${escHtml(nome) || "Album senza nome"}</div>
+        <div class="hero-meta">
+          <span>${escHtml(artista)}</span>
+          <span class="hero-dot"></span><span><b>${scheda.n}</b> ${scheda.n === 1 ? "brano" : "brani"}</span>
+          ${scheda.anno ? `<span class="hero-dot"></span><span>${escHtml(scheda.anno)}</span>` : ""}
+          <span class="hero-dot"></span><span>${escHtml(durataEstesa(scheda.durata))}</span>
+          ${scheda.artisti.length > 1 ? `<span class="hero-dot"></span><span>${scheda.artisti.length} artisti</span>` : ""}
+          ${albumSegnaposto(nome) ? `<span class="hero-flag" title="Il nome dell'album è quello della cartella di caricamento, non un disco vero">⚠ album segnaposto</span>` : ""}
+        </div>
+      </div>
+      ${azioni}
+    </div>`;
+    return;
+  }
+
+  // Artista: sotto la scheda, una chip per ogni album (porta alla scheda album)
+  if(scheda.album.length){
+    const mostrati = scheda.album.slice(0, HERO_MAX_CHIP);
+    const chip = a => `<button class="hero-chip" data-album="${escHtml(a.nome)}" onclick="heroApriAlbum(this)" title="Apri l'album «${escHtml(a.nome)}»"><span class="hero-chip-dot" style="background:${gradienteDa(a.nome)}"></span><span class="hero-chip-name">${escHtml(a.nome)}</span><span class="hero-chip-n">${a.n}</span></button>`;
+    extra = `<div class="hero-chips">${mostrati.map(chip).join("")}${
+      scheda.album.length > mostrati.length
+        ? `<span class="hero-chip more">+${scheda.album.length - mostrati.length} altri album</span>` : ""}</div>`;
+  }
+  slot.innerHTML = `<div class="hero hero-artist" style="${contenitore}">
+      ${art}
+      <div class="hero-info">
+        <div class="hero-eyebrow">Artista</div>
+        <div class="hero-title" title="${escHtml(nome)}">${escHtml(nome)}</div>
+        <div class="hero-meta">
+          <span><b>${scheda.n}</b> ${scheda.n === 1 ? "brano" : "brani"}</span>
+          <span class="hero-dot"></span><span><b>${scheda.album.length}</b> album</span>
+          ${scheda.anni ? `<span class="hero-dot"></span><span>${escHtml(scheda.anni)}</span>` : ""}
+          <span class="hero-dot"></span><span>${escHtml(durataEstesa(scheda.durata))}</span>
+        </div>
+      </div>
+      ${azioni}
+    </div>${extra}`;
+}
+
+// ▶ Riproduci: parte dal primo brano della scheda (artista o album)
+function heroPlayAll(){
+  if(!visibleTracks().length) return;
+  playTrack(0);
+}
+
+// 🔀 Casuale: accende lo shuffle (se spento) e parte da un brano a caso
+function heroShuffle(){
+  if(!shuffle) toggleShuffle();
+  const lista = visibleTracks();
+  if(!lista.length) return;
+  playTrack(Math.floor(Math.random() * lista.length));
+}
+
+// Clic su una chip di album nella scheda dell'artista. Il nome dell'album
+// viaggia in un attributo data-, non dentro un onclick: con l'apostrofo
+// («Stan's Tape», «Knoc-Turn'al») lo schema inline generava JavaScript non
+// valido e il clic non apriva nulla.
+function heroApriAlbum(el){
+  const nome = el && el.getAttribute ? el.getAttribute("data-album") : "";
+  if(nome) setAlbumFilter(nome);
+}
+
+// Apre la scheda dell'album partendo dal nome in data-album della riga
+// (titolo o nome album). Stessa ragione di heroApriAlbum: l'apostrofo
+// («Stan's Tape») dentro un onclick inline romperebbe il JavaScript.
+function apriAlbumDa(el){
+  const nome = el && el.getAttribute ? el.getAttribute("data-album") : "";
+  if(nome) setAlbumFilter(nome);
+}
+
+// Apre la scheda dell'artista da una chip della riga: il nome sta in
+// data-artist («Knoc-Turn'al», «Royce Da 5'9"» non rompono più il clic).
+function apriArtistaDa(el){
+  const nome = el && el.getAttribute ? el.getAttribute("data-artist") : "";
+  if(nome) setArtistFilter(nome);
 }
 
 function visibleTracks() {
@@ -2314,6 +2604,9 @@ function renderTracks() {
     const isActive = (t.id === currentTrackId);
     const isSelected = selectedIds.has(t.id);
     const checkboxVisibility = selectionMode ? 'visible' : 'hidden';
+    // Vista album: il numero mostrato è quello di traccia del disco (se noto),
+    // non la posizione nella lista — come su un vero retro di copertina.
+    const numero = currentAlbumFilter ? (t.track_number || (i + 1)) : (i + 1);
     
     // Analyze status icon
     let analyzeIcon = '🔍';
@@ -2333,7 +2626,7 @@ function renderTracks() {
     return `
       <div class="track-row ${isActive ? "playing" : ""}" ondblclick="playTrack(${i})" oncontextmenu="showTrackCtxMenu(event,'${t.id}')">
         <div class="track-num-cell">
-          <div class="track-num">${isActive ? `<div class="eq-bars ${isPlaying ? "playing" : ""}" style="display:flex"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>` : i+1}</div>
+          <div class="track-num">${isActive ? `<div class="eq-bars ${isPlaying ? "playing" : ""}" style="display:flex"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>` : numero}</div>
           ${playHoverBtn}
         </div>
         <div style="text-align:center; visibility: ${checkboxVisibility};"><input type="checkbox" class="track-check" ${isSelected ? "checked" : ""} onclick="event.stopPropagation(); toggleTrackSelection('${t.id}')"></div>
@@ -2342,9 +2635,9 @@ function renderTracks() {
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
           </div>
           <div class="track-text">
-            <div class="track-name" onclick="event.stopPropagation(); setAlbumFilter('${escHtml(t.album)}')" title="Apri l'album di questa canzone">${escHtml(t.name)}</div>
+            <div class="track-name" data-album="${escHtml(t.album)}" onclick="event.stopPropagation(); apriAlbumDa(this)" title="Apri l'album di questa canzone">${escHtml(t.name)}</div>
             <div class="track-artist-chips">${renderArtistChips(t.artist)}</div>
-            <div class="track-album" onclick="event.stopPropagation(); setAlbumFilter('${escHtml(t.album)}')">${escHtml(t.album)}</div>
+            <div class="track-album" data-album="${escHtml(t.album)}" onclick="event.stopPropagation(); apriAlbumDa(this)">${escHtml(t.album)}</div>
           </div>
         </div>
         <div class="track-year" title="${escHtml(t.release_date||'')}">${formatReleaseDate(t.release_date)}</div>

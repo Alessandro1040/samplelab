@@ -63,6 +63,11 @@ con `(2)` nella cartella locale:
   dell'album, anno, genere, compositore, BPM, tonalità, commento, testo, nome file
   oppure *Tutto*), funzione pura `branoCorrisponde`:
   `python3 -m unittest -v test_search_field`
+- `test_player_hero.py` — test delle **schede di artista e di album** (pagina
+  `/onyx`, due GUI diverse: avatar tondo + chip degli album per l'artista, cover
+  quadrata in stile vinile + numeri di traccia per l'album), funzioni pure
+  `monogramma`, `tintaDa`, `durataEstesa`, `riassuntoArtista`, `riassuntoAlbum`:
+  `python3 -m unittest -v test_player_hero`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -715,4 +720,55 @@ Da tenere presente nelle sessioni di lavoro successive:
   Solo la pagina del player è cambiata (`onyx_whosampled.html`, servita da
   `send_file` a ogni richiesta): nessuna modifica al backend, nessun riavvio
   necessario.
+- **SCHEDE DI ARTISTA E DI ALBUM: DUE GUI DIVERSE (17/09/2026, notte).** Richiesta
+  di Alessandro: «quando clicchi compare *Album: Everyday Is Christmas (Deluxe
+  Edition)*, oppure *Album: Mus*, oppure *Artista: Eminem* … non ho idea di come
+  sistemare ma è semplicemente brutto: potresti fare due cose diverse per quando
+  uno clicca su un artista e quando uno clicca su un album?». Prima il nome era una
+  riga di **testo piatto** nella barra in alto (`Artista: …` / `Album: …`) e
+  l'album segnaposto «Mus» (147 righe in libreria: è il nome della cartella di
+  caricamento) sembrava un disco vero. Ora un clic apre una **scheda** costruita da
+  `renderHero()` (pagina `/onyx`), **diversa nei due casi**:
+  1. **Artista** — avatar **tondo** col monogramma su gradiente generato, nome
+     grande (32 px, peso 700), riga «N brani · M album · anni · durata», pulsanti
+     ▶ *Riproduci* / 🔀 *Casuale* e sotto una **chip per album** (col pallino del
+     colore della sua cover e il numero di brani) che porta alla scheda dell'album;
+     oltre 12 album: «+N altri album».
+  2. **Album** — **cover quadrata** in stile vinile (monogramma + gradiente + solco
+     del disco disegnato in CSS), artista dell'album (o artisti), brani, anno,
+     durata totale, e nella lista i **numeri di traccia** del disco al posto della
+     posizione, senza ripetere l'album su ogni riga (`body.album-view`). Se il nome
+     è un segnaposto compare il badge **⚠ album segnaposto**.
+  Colori e copertine sono **generati dal nome** (`tintaDa`/`gradienteDa`,
+  hash stabile: lo stesso artista ha sempre lo stesso colore) perché nel database
+  `cover_art_path` è **vuota su tutte le 890 righe**: niente artwork da mostrare.
+  Funzioni pure: `monogramma` (iniziali delle prime due parole che contano:
+  «The Slim Shady LP» → `SS`, «Stan's Tape» → `ST`), `durataEstesa` («1 h 12 min»),
+  `intervalloAnni` («1999–2018»), `riassuntoArtista`, `riassuntoAlbum`.
+  Sistemato anche un **bug latente dei clic**: l'apostrofo dentro l'`onclick`
+  inline (`setArtistFilter('Knoc-Turn'al')`) generava JavaScript non valido e il
+  clic **non apriva niente** — in libreria sono **43 brani** con l'apostrofo in
+  artista o album (10 artisti e 14 album diversi, es. «Stan's Tape»,
+  «Royce Da 5'9"»): ora nome e album viaggiano in attributi
+  `data-artist`/`data-album` letti da `apriArtistaDa`/`apriAlbumDa`/`heroApriAlbum`.
+  Verifiche del 17/09/2026: **`test_player_hero.py`** → 17 test (8 di funzioni pure
+  eseguite in JavaScriptCore — monogrammi, tinte stabili, gradienti, segnaposto,
+  durate, anni, riassunti — e 9 di cablaggio: due GUI diverse, testo piatto
+  sparito, numeri di traccia, clic via `data-`); in **Chrome reale** (Selenium,
+  app viva) **29/29** — clic sulla chip *Eminem* → scheda artista (227 brani, 49
+  album, 1996–2026, 15 h 41 min), clic su *The Marshall Mathers LP* → scheda album
+  (14 brani · 2000 · 1 h 11 min · 10 artisti), «Mus» col badge ⚠, chiusura che
+  ripristina la barra, clic su *Knoc-Turn'al* che ora funziona, ▶ *Riproduci* che
+  parte dal primo brano della lista; **16/16 misure** della grafica (scheda dentro
+  il contenuto e che non copre la lista, titolo 32 px peso 700, etichetta Space Mono
+  spaziata, cover 104×104 tonda/quadrata, chip che non sbordano e si distinguono
+  dallo sfondo, titolo lungo su 2 righe, finestra a 880 px che manda i pulsanti a
+  capo); **8/8 sui pixel** degli screenshot (cover = gradiente reale con ~1000-1700
+  colori distinti, monogramma stampato, titolo testo chiaro, accento lime
+  nell'artista e teal nell'album). Tre difetti trovati **dai test** e corretti:
+  l'apostrofo spezzava il monogramma («Stan's Tape» dava `SS` invece di `ST`),
+  l'album **vuoto** non era marcato come segnaposto, e le chip degli album erano
+  invisibili (`#1a1a1a` su `#111` → ora `#222` con bordo più chiaro e pallino
+  colorato). README aggiornato (elenco file + questa nota). Screenshot delle due
+  schede in `~/Desktop/SampleLab_schede_player/`.
 
