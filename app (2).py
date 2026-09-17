@@ -764,6 +764,10 @@ def fetch_genius(artist, title):
         # può attivare il fallback YouTube per correggere il titolo.
         best = None
         best_score = 0.0
+        # Per la ricerca col solo titolo serve sapere se quel titolo è UNIVOCO:
+        # se lo stesso titolo appartiene a più artisti non identifica la canzone
+        # (misurato il 17/09/2026: 'Cha-Ching' → 2 artisti, 'Apex Predator' → 3).
+        artisti_con_stesso_titolo = set()
         for sec in hits:
             if sec.get("type") != "song":
                 continue
@@ -773,6 +777,8 @@ def fetch_genius(artist, title):
                     continue
                 hit_artist = re.sub(r'[\u200e\u200f\u202a-\u202e\u2066-\u2069]', '', (res.get("primary_artist") or {}).get("name", "")).strip()
                 hit_title = re.sub(r'[\u200e\u200f\u202a-\u202e\u2066-\u2069]', '', res.get("title", "")).strip()
+                if title and normalize(hit_title) == normalize(title):
+                    artisti_con_stesso_titolo.add(normalize(hit_artist))
                 sc = match_score(artist or "", title or "", hit_artist, hit_title)
                 if sc > best_score:
                     best_score = sc
@@ -797,6 +803,32 @@ def fetch_genius(artist, title):
             return None
         res, hit_artist, hit_title = best
         feat = [a.get("name", "") for a in res.get("featured_artists", [])]
+        # SENZA ARTISTA non basta il titolo identico: un titolo uguale può essere
+        # di un ALTRO artista (caso reale 17/09/2026: 'Cha-Ching' in libreria →
+        # "Cha-Ching!" di Unique Salonga, score 0.87). Si accetta solo se l'artista
+        # di Genius è riconoscibile nel titolo — direttamente o perché è un artista
+        # noto della libreria citato lì. Meglio nessun dato che un omonimo.
+        if artist_missing:
+            norm_titolo = normalize(title or "")
+            noto = known_artist_in_title(title or "", get_db_artist_list())
+            norm_noto = normalize(noto or "")
+
+            def _artista_identificabile(a):
+                na = normalize(a or "")
+                if not na:
+                    return False
+                if na in norm_titolo:
+                    return True
+                return bool(norm_noto) and (norm_noto in na or na in norm_noto)
+
+            titolo_univoco = len(artisti_con_stesso_titolo) == 1
+            identificabile = any(_artista_identificabile(a) for a in [hit_artist] + feat)
+            if not (titolo_univoco or identificabile):
+                print(f"[genius] ricerca col solo titolo: '{hit_title}' di {hit_artist} "
+                      f"non identificabile (titolo condiviso da "
+                      f"{len(artisti_con_stesso_titolo)} artisti, artista non citato) → scartato")
+                return None
+
         song = {
             "genius_url": res.get("url"),
             "title": hit_title,

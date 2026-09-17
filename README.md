@@ -514,14 +514,24 @@ Da tenere presente nelle sessioni di lavoro successive:
      generici di cartella e l'etichetta "Album sconosciuto" non entrano più nel
      database) e in `fetch_genius()` l'artista segnaposto non entra più nella
      query.
+  4. **Col solo titolo si rischiava l'omonimo.** Togliendo l'artista dalla query
+     tornavano risultati… anche sbagliati: 'Cha-Ching' della libreria prendeva
+     l'album di *Unique Salonga* ("Cha-Ching!", score 0.87). Misurato con la
+     search API: quel titolo è condiviso da **2 artisti** ('Apex Predator' da
+     **3**). Ora, quando l'artista manca, si accetta il risultato solo se il
+     titolo è **univoco** oppure se l'artista di Genius è **riconoscibile nel
+     titolo** (direttamente o come artista noto della libreria,
+     `known_artist_in_title`): meglio nessun dato che i credits di un omonimo.
   Verifiche del 17/09/2026: *Verifica* reale su **The Apple** (Eminem) → `year`
   da `None` a **2011** e album da `Mus` a **King Mathers**, con i messaggi
   «Anno ricavato dalla data (December 18, 2011): 2011» e «Album da Genius: King
   Mathers»; in Chrome la riga del database e il modale ✏️ Edit mostrano anno
   `2011` + album `King Mathers` (7/7 controlli Selenium); 12/12 controlli in
   JavaScriptCore sulle funzioni dell'album; **6/6 blocchi `<script>`** delle due
-  pagine compilati; **14 + 26 + 22 test** OK (i 6 nuovi test su anno/album sono in
-  `test_verify_genius.py`). Backfill delle righe già in libreria: **25 anni**
+  pagine compilati; **17 + 26 + 22 test** OK (i test nuovi su anno/album/omonimo
+  sono in `test_verify_genius.py`) e 7/7 casi reali su `/genius` (Cha-Ching e
+  Apex Predator scartati, *The Sauce* → Eminem perché titolo univoco, artisti
+  veri invariati). Backfill delle righe già in libreria: **25 anni**
   sistemati (13 ricavati dalle date già presenti, gli altri 12 arrivati con le
   date nuove) e **18 album** completati con **guardie strette** (artista
   compatibile, oppure stesso URL Genius già salvato: es. *Bounce* → *There Goes

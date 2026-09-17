@@ -79,6 +79,29 @@ class TestAnnoEAlbumPuri(unittest.TestCase):
             self.assertFalse(APP._album_segnaposto(v), f"{v!r} è un album vero")
 
 
+class TestAntiOmonimo(unittest.TestCase):
+    """Senza artista non basta il titolo uguale: un titolo identico può essere di
+    un altro artista (17/09/2026: 'Cha-Ching' → "Cha-Ching!" di Unique Salonga).
+    La ricerca col solo titolo accetta solo artisti riconoscibili nel titolo."""
+
+    ARTISTI = ["Chris Webby", "Eminem", "Hopsin", "Token"]
+
+    def test_artista_trovato_nel_titolo(self):
+        self.assertEqual(
+            APP.known_artist_in_title("Chris Webby freestyle on Sway in the Morning", self.ARTISTI),
+            "Chris Webby")
+        self.assertEqual(
+            APP.known_artist_in_title("Simon says hopsin freestyle", self.ARTISTI), "Hopsin")
+
+    def test_nessun_artista_nel_titolo(self):
+        self.assertIsNone(APP.known_artist_in_title("Cha-Ching", self.ARTISTI))
+        self.assertIsNone(APP.known_artist_in_title("The Sauce (Benzino Diss)", self.ARTISTI))
+
+    def test_confine_di_parola(self):
+        # 'Token' non deve essere trovato dentro un'altra parola
+        self.assertIsNone(APP.known_artist_in_title("Tokenizer demo", self.ARTISTI))
+
+
 class TestCreditiPuri(unittest.TestCase):
     def test_credits_missing_vero_se_manca_un_nome(self):
         self.assertTrue(APP._credits_missing("Chris Webby", ["Chris Webby", "ANoyd"]))
