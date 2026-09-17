@@ -952,6 +952,10 @@ def clean_filename(name):
     base = re.sub(r'\s*[-–]\s*cop[yi]a?\s*$', '', base, flags=re.IGNORECASE)
     # Remove trailing (1), (2), ...
     base = re.sub(r'\s*\(\d+\)\s*$', '', base)
+    # Remove l'[ID YouTube] (11 caratteri) del template di download:
+    # "Eminem - 'Till I Collapse [Explicit] [Pi3_Zs-oRUo]" → titolo pulito.
+    # Solo 11 caratteri alfanumerici, così "[Remix Version]" resta intatto.
+    base = re.sub(r'\s*\[[A-Za-z0-9_-]{11}\]\s*$', '', base)
     # Remove [Official Video], (Audio), etc.
     base = re.sub(r'\s*[\[\(][^\]\)]*(?:official|audio|video|lyric|hd|4k|mv|clip)[^\]\)]*[\]\)]\s*', '', base, flags=re.IGNORECASE)
     # Remove ★, •, and similar
@@ -1178,6 +1182,12 @@ DL_SEM = threading.Semaphore(2)
 # Estensioni considerate "file audio" della cartella download.
 AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".webm", ".mp4", ".ogg", ".opus", ".flac")
 
+# Nome dei file scaricati da YouTube: l'[id] del video è indispensabile perché
+# due video diversi possono avere lo STESSO titolo (bug del 16/09/2026: le cover
+# "8-Bit Misfits" e "Twinkle Twinkle Little Rock Star" di 'Till I Collapse
+# finivano nello stesso file e la seconda riproduceva l'audio della prima).
+DL_OUTTMPL = "%(title)s [%(id)s].%(ext)s"
+
 def _downloads_snapshot():
     """Nome file -> (mtime, size) della cartella download.
 
@@ -1315,7 +1325,12 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
 
         ydl_opts = {
             "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
-            "outtmpl": os.path.join(DL_DIR, "%(title)s.%(ext)s"),
+            # Il solo titolo YouTube NON distingue i file: due video diversi (es.
+            # le cover "8-Bit Misfits" e "Twinkle Twinkle Little Rock Star" di
+            # 'Till I Collapse) possono chiamarsi uguale e finire nello STESSO
+            # file, così la seconda card riproduceva l'audio della prima.
+            # L'[id] del video rende il nome unico (vedi DL_OUTTMPL).
+            "outtmpl": os.path.join(DL_DIR, DL_OUTTMPL),
             "progress_hooks": [progress_hook],
             "socket_timeout": 20,
             "retries": 3,
@@ -1454,7 +1469,7 @@ def do_download_playlist(job_id, url, fmt="mp3"):
 
         ydl_opts = {
             "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
-            "outtmpl": os.path.join(DL_DIR, "%(title)s [%(id)s].%(ext)s"),
+            "outtmpl": os.path.join(DL_DIR, DL_OUTTMPL),
             "progress_hooks": [progress_hook],
             "ignoreerrors": True,
             "cookiefile": os.path.join(BASE_DIR, "cookies.txt"),

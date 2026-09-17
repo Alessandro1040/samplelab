@@ -231,6 +231,27 @@ class TestYtSearchSelection(unittest.TestCase):
         self.assertEqual(url, "url-giusta")
 
 
+class TestNomiFileDownload(unittest.TestCase):
+    """Il nome del file scaricato deve distinguere video diversi con lo STESSO titolo.
+
+    Bug del 16/09/2026: le cover "8-Bit Misfits" (303 s) e "Twinkle Twinkle Little
+    Rock Star" (334 s) di *'Till I Collapse* hanno lo stesso titolo YouTube e
+    finivano nello stesso file: la seconda card riproduceva l'audio della prima."""
+
+    def test_template_include_l_id_del_video(self):
+        self.assertIn("%(id)s", APP.DL_OUTTMPL,
+                      "senza [%(id)s] due video con lo stesso titolo condividono il file")
+
+    def test_clean_filename_toglie_l_id_youtube(self):
+        self.assertEqual(APP.clean_filename("Eminem - Song [Pi3_Zs-oRUo].mp3"),
+                         "Eminem - Song")
+
+    def test_clean_filename_lascia_i_titoli_con_parentesi(self):
+        # Solo un [id] di 11 caratteri viene tolto: un titolo con parentesi no.
+        self.assertEqual(APP.clean_filename("Artist - Song [Remix Version].mp3"),
+                         "Artist - Song [Remix Version]")
+
+
 class TestDownloadsSnapshot(unittest.TestCase):
     def test_snapshot_ignora_i_file_nascosti(self):
         with tempfile.TemporaryDirectory() as d:
@@ -262,11 +283,18 @@ class TestConvertDownloadFormat(unittest.TestCase):
 class TestApiDownload(unittest.TestCase):
     """Contratto HTTP: un download fallito NON deve restituire un file altrui."""
 
-    def _download(self, query, expected_title="", timeout=240):
+    def _download(self, query, expected_title="", expected_artist="", min_duration=0,
+                  timeout=240):
+        body = {"query": query, "format": "mp3"}
+        if expected_title:
+            body["expected_title"] = expected_title
+        if expected_artist:
+            body["expected_artist"] = expected_artist
+        if min_duration:
+            body["min_duration"] = min_duration
         req = urllib.request.Request(
             SAMPLELAB_URL + "/download",
-            data=json.dumps({"query": query, "format": "mp3",
-                             "expected_title": expected_title}).encode(),
+            data=json.dumps(body).encode(),
             headers={"Content-Type": "application/json"})
         jid = json.load(urllib.request.urlopen(req, timeout=30))["job_id"]
         t0 = time.time()
@@ -292,6 +320,25 @@ class TestApiDownload(unittest.TestCase):
         else:
             self.assertEqual(job.get("status"), "error")
             self.assertFalse(filename, "job in errore ma con un filename: %r" % filename)
+
+    def test_due_cover_con_lo_stesso_titolo_hanno_file_diversi(self):
+        # Caso reale del 16/09/2026: *'Till I Collapse* ha due cover con lo stesso
+        # titolo YouTube (8-Bit Misfits 303 s, Twinkle Twinkle Little Rock Star
+        # 334 s) che finivano nello stesso file: la seconda riproduceva l'audio
+        # della prima. Test di rete: alla prima esecuzione i due file vengono
+        # scaricati, poi yt-dlp li riusa (l'[id] nel nome li rende distinti).
+        cover1 = self._download("https://www.youtube.com/watch?v=1l_SO4Ndd6o",
+                                expected_title="'Till I Collapse",
+                                expected_artist="8-Bit Misfits")
+        cover2 = self._download("https://www.youtube.com/watch?v=ZczdMEIW2rM",
+                                expected_title="'Till I Collapse",
+                                expected_artist="Twinkle Twinkle Little Rock Star")
+        self.assertEqual(cover1.get("status"), "done", cover1.get("error"))
+        self.assertEqual(cover2.get("status"), "done", cover2.get("error"))
+        nomi = {cover1.get("filename"), cover2.get("filename")}
+        self.assertNotIn(None, nomi)
+        self.assertEqual(len(nomi), 2,
+                         "le due cover condividono lo stesso file: %r" % nomi)
 
 
 if __name__ == "__main__":

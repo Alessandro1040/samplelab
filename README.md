@@ -290,4 +290,25 @@ Da tenere presente nelle sessioni di lavoro successive:
   test_fortissimo_compare` → **44 test OK**. Nota: durante la verifica è emerso
   anche un `NameError` (`ea` non definito in `yt_search_first`, introdotto in
   questo stesso fix) → corretto subito e ricontrollato con il job reale.
+- **DUE COVER CON LO STESSO TITOLO DAVANO LO STESSO AUDIO — CORRETTO
+  (16/09/2026, sera).** Nella sezione *cover* di *'Till I Collapse* le card
+  **"8-Bit Misfits"** e **"Twinkle Twinkle Little Rock Star"** riproducevano lo
+  stesso file. Causa: i due video YouTube si chiamano **entrambi**
+  `'Till I Collapse` (303 s e 334 s) e il download singolo scriveva su
+  `%(title)s.%(ext)s`: un solo file per due video, e il secondo job lo riusava
+  (yt-dlp non riscarica un file già presente) → la seconda card suonava l'audio
+  della prima. Fix: il nome del download singolo usa ora **`DL_OUTTMPL =
+  "%(title)s [%(id)s].%(ext)s"`** (l'`[id]` del video rende il nome unico; è lo
+  stesso schema che il download playlist usava già) e `clean_filename()` toglie
+  un `[ID YouTube]` di 11 caratteri in coda, così `/db/add_local` continua a
+  ricavare artista/titolo puliti (es. `Eminem - Song [Pi3_Zs-oRUo].mp3` →
+  *Eminem - Song*) senza toccare titoli tipo `[Remix Version]`.
+  Verifiche del 16/09/2026: riproduzione del bug (prima entrambe le cover
+  restituivano `'Till I Collapse.mp3`, 303 s) e fix verificato con lo stesso job
+  reale → `'Till I Collapse [1l_SO4Ndd6o].mp3` (303,0 s) e
+  `'Till I Collapse [ZczdMEIW2rM].mp3` (333,7 s), **2 file distinti su 2**.
+  ⚠️ Nota: i file scaricati **prima** di questo fix restano con il vecchio nome
+  (senza `[id]`) e vanno considerati "di una cover sola": i nuovi download
+  creano file nuovi col nome completo, quindi in `downloads/` possono convivere
+  il vecchio e il nuovo nome dello stesso brano.
 
