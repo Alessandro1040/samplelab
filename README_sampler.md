@@ -142,7 +142,8 @@ Dall'alto verso il basso il modale è organizzato in **nove fasce**:
    l'unità della griglia (1/4, 1/2, 1, 2, 4 battute), il **BPM** e il
    moltiplicatore con **Moltiplica**.
 5. **Griglia (riga 2)** — **Offset** (di quanto la griglia è spostata rispetto
-   allo zero), **Battute Sel.**, **Diventa Bar N°** e **Allinea griglia**.
+   allo zero), **Battute Sel.**, **Diventa Bar N°**, **Allinea griglia** e i due
+   interruttori dei trim: **✂ Trim giallo on/off** e **🎯 Battuta on/off** (§5.7).
 6. **Griglia (riga 3)** — **🎵 TAP**, **Metronomo** con la sua **tendina
    dell'unità** (`ogni 1/4`, `2/4`, `3/4`, `battuta`, `2`, `4 battute`),
    **↔ Sposta**, **↩ Undo**, **↪ Redo** e **✕ Deseleziona** (quest'ultimo compare
@@ -151,7 +152,10 @@ Dall'alto verso il basso il modale è organizzato in **nove fasce**:
    (il `1` è in giallo), con le maniglie ai bordi della battuta selezionata.
 8. **Forma d'onda** — l'audio (con la griglia disegnata sopra), le ombreggiature
    scure fuori dalla selezione, la selezione con le maniglie **IN** e **OUT**, il
-   **playhead** bianco, e i due bordi turchesi quando è selezionata una battuta.
+   **playhead** bianco, e la **fascia celeste piena** della battuta quando è
+   impostata (tutta la battuta cambia colore, non solo i bordi: §5.7). I due
+   riquadri si accendono e si spengono uno per uno coi pulsanti **✂ Trim giallo**
+   e **🎯 Battuta**.
 9. **Informazioni** — `IN ‹tempo› → OUT ‹tempo› | durata: ‹…› | sample: ±‹…›s |
    🔇/🔊` e il pulsante **⟳ Reset al sample**.
 10. **Download** — formato (MP3/WAV), **Scarica selezione**, **Scarica intero** e
@@ -274,9 +278,11 @@ versione del brano, librosa/ffmpeg misurano il file intero, intro compresa).
 | Controllo | Cosa fa |
 |---|---|
 | **🎯 Trova la battuta** | chiede al backend (`POST /beat/bar`) **dove comincia la battuta** — il primo colpo forte dove il tempo tiene: l'entrata della batteria, il drop — e **dove finisce**, e mette il risultato nel **trim celeste**. La riga sotto la forma d'onda racconta cosa ha trovato: `battuta a 0:20,4 → 0:22,4 · 120,1 BPM · 4/4 quarti a fuoco · batteria da 0:19,9`. Se i quarti a fuoco sono meno di 3 su 4 aggiunge *«⚠ pochi quarti a fuoco: controlla a orecchio e sposta il trim»*: la proposta c'è sempre, ma ti dice quando fidarti poco. |
-| **Trim CELESTE** | è la **battuta**: due barre celesti con le maniglie **BATTUTA** e **FINE BATTUTA**, da trascinare **liberamente** (non si agganciano alla griglia: è la battuta a decidere il tempo, non il contrario). Il BPM è **60 × quarti ÷ durata della battuta** (i quarti sono quelli di *Battute Sel.*, predefinito 4): mentre trascini, il numero sotto la forma d'onda e la casella **BPM** si aggiornano da soli. Il trim celeste è **indipendente dal trim giallo** del sample: il giallo dice *cosa ritaglio*, il celeste dice *quanto dura una battuta*. |
+| **Trim CELESTE** | è la **battuta**, disegnata come il trim giallo: una **fascia piena** che copre **tutta** la selezione (riempimento turchese + bordo sopra e sotto), non solo due bordi, e resta **sopra** la selezione gialla — quindi si vede anche quando la battuta sta dentro al sample. Le maniglie **BATTUTA** e **FINE BATTUTA** si trascinano **liberamente** (non si agganciano alla griglia: è la battuta a decidere il tempo, non il contrario). Il BPM è **60 × quarti ÷ durata della battuta** (i quarti sono quelli di *Battute Sel.*, predefinito 4): mentre trascini, il numero sotto la forma d'onda e la casella **BPM** si aggiornano da soli. Il trim celeste è **indipendente dal trim giallo** del sample: il giallo dice *cosa ritaglio*, il celeste dice *quanto dura una battuta*. |
 | **🔁 Battuta** | terza modalità di loop (con **✂ Sel** e **⟳ Tutto**): ripete **solo il trim celeste**. È il collaudo: se la battuta è giusta gira fluido, se sbaglia lo senti subito e sposti una maniglia. 🎯 attiva da sé questa modalità dopo aver trovato la battuta. |
 | **💾 Salva BPM** | scrive nel database il BPM misurato su quel trim (e segna **BPM verificato**, perché è una misura fatta a orecchio col loop). Serve il brano aperto da una canzone del database: dal player non registrato non c'è una riga da aggiornare. |
+| **✂ Trim giallo on/off** | mostra o **toglie di mezzo il riquadro giallo** del sample: da spento spariscono riempimento, ombreggiature, maniglie **IN/OUT** e perfino l'area di trascinamento (quindi *non si trascina più*), e sulla forma d'onda resta solo la fascia celeste. Misura e taglio non cambiano: IN e OUT restano quelli che erano, semplicemente non li vedi. Serve a misurare il tempo senza il giallo tra i piedi. |
+| **🎯 Battuta on/off** | accende o spegne **il riquadro celeste** della battuta: da spento il disegno sparisce ma la battuta resta (misura, loop **🔁 Battuta** e **💾 Salva BPM** continuano a funzionare). **🎯 Trova la battuta lo riaccende da sé**, perché un risultato che non si vede non serve a niente. |
 
 > 💡 **Come si usa in pratica**: apri la canzone nel sampler → **🎯 Trova la
 > battuta** → ascolta il loop **🔁 Battuta**: se «zoppica», trascina **BATTUTA** o
@@ -333,6 +339,12 @@ ritagliare e per misurare:
   **✂ Sel** attivo non esce dalla selezione.
 - **Bordi turchesi**: compaiono solo con una cella selezionata sul righello e
   fanno quello che fa il righello (sinistra = offset della griglia, destra = BPM).
+- **La fascia celeste della battuta** (§5.7) è piena: copre **tutta** la battuta e
+  sta sopra la selezione gialla, quindi le due si vedono insieme. Fuori dalla
+  battuta l'onda si scurisce un po' (come il giallo fa fuori dalla selezione).
+  I due riquadri si possono **spegnere uno per uno** coi pulsanti **✂ Trim giallo**
+  e **🎯 Battuta**: col giallo spento resta solo la fascia celeste — e il giallo non
+  si trascina più, perché sparisce anche la sua area di trascinamento.
 - **La riga in basso** riassume lo stato: `IN ‹tempo› → OUT ‹tempo›`, `durata:
   ‹…›`, `sample: ±‹…›s` (lo spostamento dato da **↔ Sposta**) e l'icona
   **🔇/🔊** del metronomo. Se compare un avviso rosso significa che il punto da
@@ -456,36 +468,36 @@ volo e lo monta in un iframe quando apri il modale. I numeri di riga qui sotto
 sono quelli **del documento del sampler** (1 = prima riga dentro la textarea) per
 le sue funzioni interne — così restano validi anche quando la pagina intorno
 cresce — e quelli del **file** per le cose che stanno fuori. La textarea apre a
-`index (2).html` riga **830** (il documento finisce a riga **3273**): una funzione
+`index (2).html` riga **830** (il documento finisce a riga **3345**): una funzione
 alla riga *N* del documento sta nel file alla riga *N + 830*.
 
 | Cosa | Dove |
 |---|---|
 | Modale del sampler (`#audio-editor-modal` + `iframe#audio-editor-iframe`) | `index (2).html` righe **820–828** |
-| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **830–3273** (`<textarea id="audio-editor-src">`) |
-| Apertura del modale | `index (2).html` riga **5745**: `openAudioEditor(url, filename, startSec, bpm, songId, etichetta)` — `filename` è il file in `downloads/`, `etichetta` è il nome da mostrare |
-| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5775**: `openInSampler(songIdOFile, opts)` |
-| Pulsante nella riga del database | dentro `renderDbTable` (riga **4646**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit / 📄 Scheda) |
-| Ricezione dal player (`openSampler`) | `index (2).html` riga **3374** · link diretti `?tab=` / `?sampler=` / `?sampler_file=` riga **3435** |
+| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **830–3345** (`<textarea id="audio-editor-src">`) |
+| Apertura del modale | `index (2).html` riga **5817**: `openAudioEditor(url, filename, startSec, bpm, songId, etichetta)` — `filename` è il file in `downloads/`, `etichetta` è il nome da mostrare |
+| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5847**: `openInSampler(songIdOFile, opts)` |
+| Pulsante nella riga del database | dentro `renderDbTable` (riga **4718**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit / 📄 Scheda) |
+| Ricezione dal player (`openSampler`) | `index (2).html` riga **3446** · link diretti `?tab=` / `?sampler=` / `?sampler_file=` riga **3507** |
 | Voce di menu nel player | `onyx_whosampled.html` (🎛 Apri nel sampler) |
 | Handshake col documento (`{action:'load', origin, url, filename, etichetta, startSec, bpm, songId}`) | mittente `openAudioEditor` (e `embedAudioEditorX` per l'editor embedded); ricezione in coda al documento del sampler (imposta `p.filename`, `p.songId`, `baseBackend`, e mostra `etichetta` — o il file — in testa) |
-| 💾 Salvataggio del BPM nel database | documento: `salvaBpm` **1453** → `postMessage({action:'saveBpm'})`; pagina: `salvaBpmDaSampler` riga **3383** → `updateSongField(id,'bpm',v)` (**marca anche `bpm_verified`**) |
-| Griglia: passo, snap, unità, etichetta on/off | `getGridStep` **1679** · `snapToGrid` **1684** · `snapTrimToGrid` **1721** · `setBpm` **1691** · `setGridOffset` **1703** · `setGridSubdivision` **1713** · `etichettaGriglia` **991** · `toggleGridVisibility` **995** |
-| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1010** · `alignGridToSelection` **1018** |
-| 🎯 **Trova la battuta** e trim CELESTE | `trovaBattuta` **1406** · `impostaBattuta` **1338** · `aggiornaBattuta` **1301** · funzioni pure: `bpmDaBattuta` **1267**, `barTrimClamp` **1275**, `etichettaBattuta` **1286**, `quartiBattuta` **1295** · maniglie: `startBarTrimDrag` **1354**, `startBarTrimDragTouch` **1375**, `applyBarTrimDrag` **1394** · URL del backend: `origineHttp` **2374** (pura, in coda al documento), `urlBackend` **2379** (pura: dal documento `blob:` una `fetch` relativa non parte) · **💾 Salva BPM**: `salvaBpm` **1453** → `salvaBpmDaSampler` (pagina, riga **3383**) · endpoint `POST /beat/bar` in `app (2).py` riga **3106** |
-| BPM dai battiti e dal fattore | `bpmDaTap` **1739** (media pura) · `tapTempo` **1760** · `updateTapLabel` **1753** · `multiplyBpm` **1782** |
-| Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **1811** (pura) · `accentoBattuta` **1821** (pura) · `etichettaUnita` **1830** (pura) · `getMetroStep` **1840** · `updateMetroStatus` **1846** · `setMetroSubdivision` **1853** · `toggleMetronome` **1861** · `checkMetronome` **1878** · `flashMetronome` **1906** |
-| Disegno della griglia e del righello | `updateGridUI` **1919** · `updateRuler` **1945** |
-| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2014** · `deselectBar` **2032** · `updateBarSelectionUI` **2047** · `_startCellBorderDrag` **2087** · `_moveCellBorderDrag` **2115** |
-| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2190** · `onAudioLayerMouseDown` **2199** · `startPlayheadDrag` **2290** · `applyHandleDrag` **1590** · `startSelDrag` **1603** · `resetTrimStart` **2324** |
-| Zoom, scorrimento, trasporto | `setZoom` **1181** · `adjustZoom` **1199** · `onTrimWheel` **1223** · `togglePlay` **1236** · `toggleFollow` **1054** |
-| Loop a tre modalità (✂ Sel · 🔁 Battuta · ⟳ Tutto) | `setLoopMode` **1476** · il ritorno al punto di inizio della battuta sta nel ciclo a 60 fps (`startAnimationLoop` **849**) |
-| Storico (Undo/Redo) | `pushHistory` **736** · `applyHistoryState` **769** · `undoAction` **792** · `redoAction` **799** |
-| Caricamento del brano | `initPlayer` **896** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
+| 💾 Salvataggio del BPM nel database | documento: `salvaBpm` **1520** → `postMessage({action:'saveBpm'})`; pagina: `salvaBpmDaSampler` riga **3455** → `updateSongField(id,'bpm',v)` (**marca anche `bpm_verified`**) |
+| Griglia: passo, snap, unità, etichetta on/off | `getGridStep` **1751** · `snapToGrid` **1756** · `snapTrimToGrid` **1793** · `setBpm` **1763** · `setGridOffset` **1775** · `setGridSubdivision` **1785** · `etichettaGriglia` **1000** · `toggleGridVisibility` **1004** |
+| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1073** · `alignGridToSelection` **1081** |
+| 🎯 **Trova la battuta** e trim CELESTE | `trovaBattuta` **1470** · `impostaBattuta` **1402** · `aggiornaBattuta` **1364** · funzioni pure: `bpmDaBattuta` **1330**, `barTrimClamp` **1338**, `etichettaBattuta` **1349**, `quartiBattuta` **1358** · maniglie: `startBarTrimDrag` **1418**, `startBarTrimDragTouch` **1439**, `applyBarTrimDrag` **1458** · URL del backend: `origineHttp` **2446** (pura, in coda al documento), `urlBackend` **2451** (pura: dal documento `blob:` una `fetch` relativa non parte) · visibilità dei due trim: `etichettaTrimGiallo` **1026** (pura), `etichettaBattutaVisibile` **1030** (pura), `aggiornaPulsantiTrim` **1034**, `toggleTrimGiallo` **1057**, `toggleBattutaVisibile` **1065** · **💾 Salva BPM**: `salvaBpm` **1520** → `salvaBpmDaSampler` (pagina, riga **3455**) · endpoint `POST /beat/bar` in `app (2).py` riga **3106** |
+| BPM dai battiti e dal fattore | `bpmDaTap` **1811** (media pura) · `tapTempo` **1832** · `updateTapLabel` **1825** · `multiplyBpm` **1854** |
+| Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **1883** (pura) · `accentoBattuta` **1893** (pura) · `etichettaUnita` **1902** (pura) · `getMetroStep` **1912** · `updateMetroStatus` **1918** · `setMetroSubdivision` **1925** · `toggleMetronome` **1933** · `checkMetronome` **1950** · `flashMetronome` **1978** |
+| Disegno della griglia e del righello | `updateGridUI` **1991** · `updateRuler` **2017** |
+| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2086** · `deselectBar` **2104** · `updateBarSelectionUI` **2119** · `_startCellBorderDrag` **2159** · `_moveCellBorderDrag` **2187** |
+| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2262** · `onAudioLayerMouseDown` **2271** · `startPlayheadDrag` **2362** · `applyHandleDrag` **1662** · `startSelDrag` **1675** · `resetTrimStart` **2396** |
+| Zoom, scorrimento, trasporto | `setZoom` **1244** · `adjustZoom` **1262** · `onTrimWheel` **1286** · `togglePlay` **1299** · `toggleFollow` **1117** |
+| Loop a tre modalità (✂ Sel · 🔁 Battuta · ⟳ Tutto) | `setLoopMode` **1543** · il ritorno al punto di inizio della battuta sta nel ciclo a 60 fps (`startAnimationLoop` **855**) |
+| Storico (Undo/Redo) | `pushHistory` **742** · `applyHistoryState` **775** · `undoAction` **798** · `redoAction` **805** |
+| Caricamento del brano | `initPlayer` **902** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
 | Taglio reale (player delle card) | `index (2).html` `downloadTrim` → `POST /trim` → `GET /status/<job_id>` → `GET /download-file/<nome>` (in `app (2).py`: righe **2528**, **2395**, **2308**) |
 | Test della stima TAP | `test_sampler_tap.py` (`python3 -m unittest -v test_sampler_tap`): esegue `bpmDaTap` con JavaScriptCore su 11 casi |
 | Test del metronomo | `test_sampler_metronomo.py` (`python3 -m unittest -v test_sampler_metronomo`): 8 test su `stepMetronomo`, `accentoBattuta` ed `etichettaUnita` (JavaScriptCore) |
-| Test della battuta (🎯 + trim celeste + 💾) | `test_sampler_battuta.py` (`python3 -m unittest -v test_sampler_battuta`): 25 test — pattern 4/4 sintetici con 20 s di intro senza batteria (il BPM deve venire entro 1 e la battuta cominciare dove entrano i tamburi), funzioni pure della pagina in JavaScriptCore (`bpmDaBattuta`, `barTrimClamp`, `etichettaBattuta`, `origineHttp`, `urlBackend` coi 9 casi di risoluzione), cablaggio (inclusi il nome del FILE contro l'etichetta e la sparizione della stima automatica) e `POST /beat/bar` sull'app viva |
+| Test della battuta (🎯 + trim celeste + 💾) | `test_sampler_battuta.py` (`python3 -m unittest -v test_sampler_battuta`): 28 test — pattern 4/4 sintetici con 20 s di intro senza batteria (il BPM deve venire entro 1 e la battuta cominciare dove entrano i tamburi), funzioni pure della pagina in JavaScriptCore (`bpmDaBattuta`, `barTrimClamp`, `etichettaBattuta`, `origineHttp`, `urlBackend` coi 9 casi di risoluzione, `etichettaTrimGiallo`, `etichettaBattutaVisibile`), cablaggio (nome del FILE contro etichetta, i due interruttori dei trim, il riempimento del celeste, la sparizione della stima automatica) e `POST /beat/bar` sull'app viva |
 | Streaming del file | `app (2).py` riga **2265**: `/stream/<path:filename>` (regge anche le richieste Range) |
 
 ## 13. Note, limiti e piccoli trucchi

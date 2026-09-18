@@ -235,6 +235,8 @@ class TestFunzioniPagina(unittest.TestCase):
             estrai_funzione(src, "etichettaBattuta"),
             estrai_funzione(src, "origineHttp"),
             estrai_funzione(src, "urlBackend"),
+            estrai_funzione(src, "etichettaTrimGiallo"),
+            estrai_funzione(src, "etichettaBattutaVisibile"),
         ])
         js += """
 // Il documento del sampler vive in un iframe blob:: qui `document` e `window` non
@@ -269,6 +271,8 @@ console.log(JSON.stringify({
               etichettaBattuta(null, 4, 0), etichettaBattuta(120, 8, 4)],
   url: urlCasi.map(c => urlDa(c[1], c[2], c[3], c[4])),
   url_nomi: urlCasi.map(c => c[0]),
+  trim: [etichettaTrimGiallo(true), etichettaTrimGiallo(false),
+         etichettaBattutaVisibile(true), etichettaBattutaVisibile(false)],
   origini: ['http://localhost:5070', 'http://localhost:5070/onyx?x=1',
             'blob:http://localhost:5070/abc', 'null', '',
             'https://esempio.test:8443/x', undefined].map(origineHttp)
@@ -337,6 +341,15 @@ console.log(JSON.stringify({
         self.assertEqual(o[4], "", "stringa vuota: nessuna origine")
         self.assertEqual(o[5], "https://esempio.test:8443", "https e porta valgono")
         self.assertEqual(o[6], "", "undefined: nessuna origine")
+
+    def test_etichette_dei_due_trim(self):
+        # I due pulsanti dicono lo STATO (come quello della griglia), non l'azione:
+        # "Trim giallo on/off" e "Battuta on/off".
+        et = self.risultati["trim"]
+        self.assertEqual(et[0], "✂ Trim giallo on")
+        self.assertEqual(et[1], "✂ Trim giallo off")
+        self.assertEqual(et[2], "🎯 Battuta on")
+        self.assertEqual(et[3], "🎯 Battuta off")
 
 
 class TestCablaggio(unittest.TestCase):
@@ -425,6 +438,46 @@ class TestCablaggio(unittest.TestCase):
         # l'interfaccia del sampler continua a mostrare il nome della canzone
         self.assertIn("e.data.etichetta || e.data.filename || 'audio'", self.pagina)
         self.assertIn("pl.filename = e.data.filename || pl.filename;", self.pagina)
+
+    def test_due_interruttori_per_i_trim(self):
+        # Richiesta di Alessandro (18/09/2026): «metti un pulsante per togliere il
+        # trim giallo … e uno per il riquadro blu, on ed off».
+        self.assertIn('id="trim-btn-main" onclick="toggleTrimGiallo(\'main\')"', self.pagina)
+        self.assertIn('id="battuta-btn-main" onclick="toggleBattutaVisibile(\'main\')"', self.pagina)
+        self.assertIn(">✂ Trim giallo on</button>", self.pagina)
+        self.assertIn(">🎯 Battuta on</button>", self.pagina)
+        for funzione in ("etichettaTrimGiallo", "etichettaBattutaVisibile",
+                         "aggiornaPulsantiTrim", "toggleTrimGiallo", "toggleBattutaVisibile"):
+            self.assertRegex(self.pagina, r"function\s+%s\s*\(" % funzione)
+        self.assertIn("trimVisibile: true,", self.pagina)
+        self.assertIn("barVisibile: true,", self.pagina)
+        self.assertIn("aggiornaPulsantiTrim(key); // etichette dei due interruttori", self.pagina)
+        # il trim GIALLO sparisce davvero: riquadro, ombreggiature, maniglie e area
+        # di trascinamento (senza drag area non si trascina più)
+        self.assertIn("const mostra = (el) => { if (el) el.style.display = visibile ? 'block' : 'none'; };",
+                      self.pagina)
+        for pezzo in ("mostra(sl);", "mostra(ss);", "mostra(sr);",
+                      "mostra(ths);", "mostra(the_);", "mostra(tda);"):
+            self.assertIn(pezzo, self.pagina)
+        # il CELESTE si spegne senza perdere la battuta: barStart/barEnd restano
+        self.assertIn("&& p.barVisibile !== false;   // 🎯 Battuta on/off spegne solo il disegno",
+                      self.pagina)
+        self.assertIn("\n  p.barVisibile = true;\n", self.pagina,
+                      "🎯 Trova la battuta riaccende il riquadro: il risultato va visto")
+
+    def test_il_celeste_e_pieno_come_il_giallo(self):
+        # «adesso ha solamente i bordi celesti ma … tutta la parte selezionata
+        # dall'inizio alla fine dovrebbe cambiare colore»: riempimento pieno, come
+        # il trim giallo, e ombreggiature scure fuori dalla battuta.
+        celeste = self.pagina.split(".bar-trim-selection {")[1].split("}")[0]
+        self.assertIn("background:rgba(45,212,191,.22);", celeste)
+        self.assertIn("border-top:2px solid #2dd4bf;", celeste)
+        self.assertIn("z-index:5;", celeste, "sta sopra la selezione gialla (z-index 2)")
+        giallo = self.pagina.split(".trim-selection {")[1].split("}")[0]
+        self.assertIn("background:rgba(200,240,0,.08);", giallo)
+        ombre = self.pagina.split(".bar-trim-shade-left, .bar-trim-shade-right {")[1].split("}")[0]
+        self.assertIn("background:rgba(0,0,0,.45);", ombre,
+                      "fuori dalla battuta si scurisce, come nel trim giallo")
 
     def test_endpoint_nellapp(self):
         self.assertIn('@app.route("/beat/bar", methods=["POST"])', self.app)

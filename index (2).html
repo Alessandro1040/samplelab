@@ -1244,12 +1244,16 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
    griglia): è la battuta a decidere il tempo, non il contrario. */
 .bar-trim-shade-left, .bar-trim-shade-right {
   position:absolute; top:0; bottom:0;
-  background:rgba(45,212,191,.10);
+  background:rgba(0,0,0,.45);
   pointer-events:none; z-index:5;
 }
+/* La BATTUTA cambia colore per INTERO (non solo i bordi), come il trim giallo:
+   riempimento deciso + bordo sopra e sotto. Sta sopra la selezione gialla
+   (z-index 5 contro 2), quindi si vede anche quando la battuta è dentro al
+   sample; se il giallo viene nascosto, questo resta l'unico riquadro. */
 .bar-trim-selection {
   position:absolute; top:0; bottom:0;
-  background:rgba(45,212,191,.06);
+  background:rgba(45,212,191,.22);
   border-top:2px solid #2dd4bf;
   border-bottom:2px solid #2dd4bf;
   pointer-events:none; z-index:5;
@@ -1425,6 +1429,8 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
         <button class="btn-align-grid" onclick="alignGridToSelection('main')">Allinea griglia</button>
         <button class="grid-btn" id="bar-btn-main" onclick="trovaBattuta('main')" title="Trova DOVE comincia la battuta (l'entrata della batteria o il drop) e la fine: la mette nel trim celeste e ne ricava il BPM">🎯 Trova la battuta</button>
         <button class="grid-btn" id="save-bpm-main" onclick="salvaBpm('main')" title="Salva nel database il BPM misurato sul trim celeste (per la canzone aperta)">💾 Salva BPM</button>
+        <button class="grid-btn active" id="trim-btn-main" onclick="toggleTrimGiallo('main')" title="Trim giallo visibile (selezione IN/OUT del sample) — clic per nasconderlo del tutto">✂ Trim giallo on</button>
+        <button class="grid-btn active" id="battuta-btn-main" onclick="toggleBattutaVisibile('main')" title="Riquadro celeste della battuta visibile — clic per spegnerlo">🎯 Battuta on</button>
       </div>
 
       <div class="grid-row">
@@ -1753,6 +1759,8 @@ function initPlayer(key, url, startSec) {
     barEnd: null,            // fine della battuta
     barQuarti: 4,            // quarti della battuta (da «Battute Sel.»)
     barInfo: '',             // messaggio dell'ultima ricerca della battuta
+    trimVisibile: true,      // il trim GIALLO (IN/OUT del sample) si può nascondere del tutto
+    barVisibile: true,       // il riquadro CELESTE della battuta si può spegnere
     songId: '',              // canzone del database aperta nel sampler (per 💾 Salva BPM)
     loopMode: 'sel',         // 'sel' (trim giallo) · 'all' (tutto) · 'bar' (trim celeste)
     tapTimes: [],
@@ -1811,6 +1819,7 @@ function initPlayer(key, url, startSec) {
   });
 
   updateMetroStatus(key);   // mostra subito "🔇 1/4" (unità del metronomo)
+  aggiornaPulsantiTrim(key); // etichette dei due interruttori dei trim (giallo/celeste)
   audio.load();
 }
 
@@ -1835,6 +1844,60 @@ function toggleGridVisibility(key) {
   }
   p.nextMetroBeatTime = null;
   fullRedraw(key);
+}
+
+// ─── VISIBILITÀ DEI DUE TRIM: giallo (sample) e celeste (battuta) ─────────────
+// Due interruttori separati, con l'etichetta che dice lo STATO (come il pulsante
+// della griglia). Nascondere il trim giallo toglie di mezzo riquadro,
+// ombreggiature e maniglie IN/OUT — quindi non si trascina più: serve a guardare
+// il riquadro celeste senza l'altro sopra. Sono indipendenti dal fatto che il
+// BPM nasca dal trim celeste, e 🎯 Trova la battuta riaccende il celeste se era
+// spento: un risultato che non si vede non serve a niente.
+function etichettaTrimGiallo(visibile) {
+  return visibile ? '✂ Trim giallo on' : '✂ Trim giallo off';
+}
+
+function etichettaBattutaVisibile(visibile) {
+  return visibile ? '🎯 Battuta on' : '🎯 Battuta off';
+}
+
+function aggiornaPulsantiTrim(key) {
+  const p = players[key];
+  if (!p) return;
+  const visibile = p.trimVisibile !== false;
+  const btnT = document.getElementById(`trim-btn-${key}`);
+  if (btnT) {
+    btnT.classList.toggle('active', visibile);
+    btnT.textContent = etichettaTrimGiallo(visibile);
+    btnT.title = visibile
+      ? 'Trim giallo visibile (selezione IN/OUT del sample) — clic per nasconderlo del tutto'
+      : 'Trim giallo nascosto — clic per mostrarlo di nuovo';
+  }
+  const mostra = p.barVisibile !== false;
+  const btnB = document.getElementById(`battuta-btn-${key}`);
+  if (btnB) {
+    btnB.classList.toggle('active', mostra);
+    btnB.textContent = etichettaBattutaVisibile(mostra);
+    btnB.title = mostra
+      ? 'Riquadro celeste della battuta visibile — clic per spegnerlo'
+      : 'Riquadro celeste della battuta spento — clic per riaccenderlo';
+  }
+}
+
+function toggleTrimGiallo(key) {
+  const p = players[key];
+  if (!p) return;
+  p.trimVisibile = (p.trimVisibile === false);   // spento → acceso, acceso → spento
+  aggiornaPulsantiTrim(key);
+  updateTrimUI(key);
+}
+
+function toggleBattutaVisibile(key) {
+  const p = players[key];
+  if (!p) return;
+  p.barVisibile = (p.barVisibile === false);
+  aggiornaPulsantiTrim(key);
+  aggiornaBattuta(key);
 }
 
 function snapSelectionToGrid(key) {
@@ -2141,7 +2204,8 @@ function aggiornaBattuta(key) {
   const t2 = document.getElementById(`bt-end-${key}`);
   const bpmEl = document.getElementById(`bt-bpm-${key}`);
   const info = document.getElementById(`bt-info-${key}`);
-  const attiva = p.barStart !== null && p.barStart !== undefined && p.barEnd !== null && dur > 0;
+  const attiva = p.barStart !== null && p.barStart !== undefined && p.barEnd !== null && dur > 0
+                 && p.barVisibile !== false;   // 🎯 Battuta on/off spegne solo il disegno
   for (const el of [sel, sl, sr, hs, he]) { if (el) el.style.display = attiva ? 'block' : 'none'; }
   if (!attiva) {
     if (t1) t1.textContent = '—';
@@ -2264,6 +2328,9 @@ async function trovaBattuta(key) {
     if (info) info.textContent = '❌ ' + ((esito && esito.message) || 'non riesco a misurare la battuta');
     return;
   }
+  // Il risultato va VISTO: se il riquadro celeste era spento si riaccende.
+  p.barVisibile = true;
+  aggiornaPulsantiTrim(key);
   const off = p.sampleOffset || 0;
   impostaBattuta(key, esito.bar_start + off, esito.bar_end + off, esito.message, true);
   if (info) info.textContent = esito.message;
@@ -2321,22 +2388,27 @@ function updateTrimUI(key) {
   const startPx = secToPx(key, p.trimStart);
   const endPx = secToPx(key, p.trimEnd);
   const W = getTrimAreaWidth(key);
+  // Il trim GIALLO si può nascondere del tutto (pulsante «✂ Trim giallo»): gli
+  // elementi restano nel DOM ma con display:none, quindi spariscono riquadro,
+  // ombreggiature e maniglie — e senza drag area non si trascina nemmeno.
+  const visibile = p.trimVisibile !== false;
+  const mostra = (el) => { if (el) el.style.display = visibile ? 'block' : 'none'; };
 
   const al = document.getElementById(`al-${key}`);
   if (al) al.style.transform = `translateX(${secToPx(key, p.sampleOffset)}px)`;
 
   const sl = document.getElementById(`tsl-${key}`);
-  if (sl) { sl.style.left = '0px'; sl.style.width = startPx + 'px'; }
+  if (sl) { mostra(sl); sl.style.left = '0px'; sl.style.width = startPx + 'px'; }
   const ss = document.getElementById(`tss-${key}`);
-  if (ss) { ss.style.left = startPx + 'px'; ss.style.width = (endPx - startPx) + 'px'; }
+  if (ss) { mostra(ss); ss.style.left = startPx + 'px'; ss.style.width = (endPx - startPx) + 'px'; }
   const sr = document.getElementById(`tsr-${key}`);
-  if (sr) { sr.style.left = endPx + 'px'; sr.style.width = (W - endPx) + 'px'; }
+  if (sr) { mostra(sr); sr.style.left = endPx + 'px'; sr.style.width = (W - endPx) + 'px'; }
   const ths = document.getElementById(`th-start-${key}`);
-  if (ths) { ths.style.left = (startPx - 7) + 'px'; }
+  if (ths) { mostra(ths); ths.style.left = (startPx - 7) + 'px'; }
   const the_ = document.getElementById(`th-end-${key}`);
-  if (the_) { the_.style.left = (endPx - 7) + 'px'; }
+  if (the_) { mostra(the_); the_.style.left = (endPx - 7) + 'px'; }
   const tda = document.getElementById(`tda-${key}`);
-  if (tda) { tda.style.left = startPx + 'px'; tda.style.width = (endPx - startPx) + 'px'; }
+  if (tda) { mostra(tda); tda.style.left = startPx + 'px'; tda.style.width = (endPx - startPx) + 'px'; }
 
   document.getElementById(`tt-start-${key}`).textContent = fmtTime(p.trimStart);
   document.getElementById(`tt-end-${key}`).textContent = fmtTime(p.trimEnd);

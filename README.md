@@ -1054,3 +1054,46 @@ Da tenere presente nelle sessioni di lavoro successive:
   aggiornata: il documento finisce a riga **3273** e i **34 numeri interni** dopo
   `trovaBattuta` sono stati ricalcolati dal file vero (non a mano).
 
+
+- **DUE INTERRUTTORI PER I TRIM E RIQUADRO CELESTE PIENO (18/09/2026).** Richiesta di
+  Alessandro: «metti un pulsante per togliere il trim giallo (nel senso che quando lo
+  clicchi l'utente non lo vede proprio più, scompare) e uno per il riquadro blu, on ed
+  off, però il riquadro blu deve essere costruito esattamente come il riquadro giallo a
+  livello di grafica: adesso ha solamente i bordi celesti ma in realtà … tutta la parte
+  selezionata dall'inizio alla fine dovrebbe cambiare colore».
+  1. **Il riquadro celeste è pieno come il giallo.** Il trim della battuta aveva
+     `background:rgba(45,212,191,.06)` (praticamente invisibile) e ombreggiature fuori
+     **celesti** (`.10`): la fascia selezionata risultava più *chiara* di quella fuori,
+     quindi si vedevano solo i due bordi (esattamente il difetto segnalato). Ora è
+     costruito come il trim giallo: riempimento deciso `rgba(45,212,191,.22)`, bordi
+     sopra e sotto, e ombreggiature **scure** fuori dalla battuta (`rgba(0,0,0,.45)`).
+     Resta **sopra** la selezione gialla (`z-index:5` contro `2`), quindi si vede anche
+     quando la battuta è dentro al sample — ed è quello il caso normale, visto che il
+     trim giallo parte con 30 s di finestra e la battuta ne dura 2.
+  2. **Due pulsanti nuovi** nella riga di *Battute Sel.*, con l'etichetta che dice lo
+     STATO e non l'azione (la lezione del pulsante della griglia, 17/09): **✂ Trim giallo
+     on/off** toglie di mezzo riquadro, ombreggiature, maniglie **IN/OUT** *e l'area di
+     trascinamento* — quindi con `display:none` su tutti e sei gli elementi il trim
+     giallo non si vede e non si trascina più; **🎯 Battuta on/off** spegne solo il
+     disegno del celeste, mentre misura, loop `🔁 Battuta` e `💾 Salva BPM` continuano a
+     funzionare. **🎯 Trova la battuta riaccende il celeste da sé**: un risultato che non
+     si vede non serve a niente. Stato per player (`trimVisibile`/`barVisibile`), due
+     funzioni pure per le etichette (`etichettaTrimGiallo`, `etichettaBattutaVisibile`),
+     `aggiornaPulsantiTrim`, `toggleTrimGiallo`, `toggleBattutaVisibile`; le funzioni
+     stanno con la famiglia della visibilità della griglia, i pulsanti accanto a 🎯 e 💾.
+  Verifiche del 18/09/2026: **3 test nuovi** in `test_sampler_battuta.py` (28 in tutto) e
+  **211 test di suite** (erano 208); **Chrome vero** (Selenium) sul sampler con giallo
+  0→20 s e celeste 4→12 s, misurando i **pixel** di `#tv-main` (a una quota senza barre
+  d'onda): con entrambi accesi la fascia della battuta è `(28,67,48)` — **turchese** —
+  contro `(12,14,4)` della fascia gialla e `(2,2,2)` fuori; con **✂ off** tutti e sei gli
+  elementi gialli risultano `display:none` e il punto dov'era il giallo torna a `(4,4,4)`
+  di sfondo mentre la battuta resta turchese `(16,53,48)`; con **🎯 off** il centro torna
+  `(23,26,7)` (nessun turchese) e il pulsante dice `🎯 Battuta off` senza `active`; la
+  riga dei pulsanti resta su **una linea** (5 pulsanti, `scrollWidth` 958 = larghezza
+  958: nessun trabocco) e i due nuovi dicono `on`↔`off` con la classe `active` a ogni
+  clic; dopo **🎯 Trova la battuta** sulla canzone vera («battuta a 0:00,9 → 0:03,0 ·
+  116,4 BPM · 3/4 quarti a fuoco · batteria da 0:00,0») il pulsante torna
+  `🎯 Battuta on` e il riquadro riappare. Mappa del codice in `README_sampler.md` §12
+  ricalcolata dal file vero: il documento del sampler ora finisce a riga **3345** e i
+  numeri interni (67 fra funzioni e ancore) sono stati riallineati.
+
