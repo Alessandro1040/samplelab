@@ -234,6 +234,8 @@ class TestFunzioniDelModale(unittest.TestCase):
         js = "\n".join([
             estrai_funzione(onyx, "escHtml"),
             lista_onyx,
+            # `campiDbHTML` chiama questo per i comandi della copertina (📂 🎬 📁 🗑)
+            estrai_funzione(onyx, "coverControlsHTML"),
             estrai_funzione(onyx, "campiDbHTML"),
             estrai_funzione(onyx, "leggiCampiDbDalModale"),
             estrai_funzione(onyx, "notifyDbTrackUpdated"),

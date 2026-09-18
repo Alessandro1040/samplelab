@@ -142,6 +142,14 @@ con `(2)` nella cartella locale:
   su un database temporaneo (upload dal computer, scelta fra i video già in
   `videos/`, 🗑 togli col file in `.trash/`) e l'app viva in sola lettura:
   `python3 -m unittest -v test_video_canzone`
+- `test_cover_canzone.py` — test della **copertina di una canzone** (`songs.cover_art_path`,
+  cartella `covers/`): le funzioni pure dei nomi (`nome_cover_archivio`,
+  `_estensione_da_nome_o_mime`), la validazione dei BYTE (si guarda la firma del
+  file: un `.jpg` che è una pagina HTML si rifiuta), «una sola copertina per
+  canzone» (la vecchia di un altro formato va in `.trash/`), le rotte del modale
+  su database e `covers/` temporanei (📂 upload, 🎬 miniatura del video, 📁 copertina
+  già presente, 🗑 che non tocca il file di un'altra canzone) e l'app viva:
+  `python3 -m unittest -v test_cover_canzone`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -623,6 +631,45 @@ apre su una canzone vera e **dice da dove prende il video**; app riavviata sulla
 salvano i metadati `yt_*` (data di caricamento, descrizione…), che arrivano con la
 **playlist** — se serve anche lì, è il prossimo passo.
 
+## La copertina: metterla o cambiarla dalla pagina — 18/09/2026
+
+Richiesta di Alessandro: «in Modifica Info Brano e anche in database dovrebbe
+comparire la possibilità di aggiungere (o modificare) la cover».
+
+Il campo `cover_art_path` c'era da sempre (lo scrive la **Verifica** col nome del
+file salvato in `covers/`, e in `covers/` si serve da `/cover/<file>`), ma dalla
+pagina si poteva solo **scrivere a mano un nome di file**. Ora ci sono quattro
+strade, **sia nel modale ✏️ Edit del tab Database sia nel «Modifica Info Brano»
+del player**:
+
+| comando | cosa fa |
+|---|---|
+| **📂 Carica dal computer** | `POST /db/songs/<id>/cover` (multipart): l'immagine si salva in `covers/<id>.<ext>` — **una sola per canzone** (la vecchia di un altro formato va in `.trash/`) |
+| **🎬 Dal video** | `{"da": "youtube"}`: prende la **miniatura del video** già salvata col download della playlist (`yt_thumbnail`); se la riga non ce l'ha lo dice |
+| **📁 Copertine in `covers/`** | `{"filename": …}` con l'elenco di `GET /covers`: si usa una copertina che c'è già, senza ricopiarla |
+| **🗑 Togli** | `DELETE`: svuota il campo e manda nel cesto il file… **solo se è la copertina SUA** (`<id>.<ext>`) |
+
+⚠️ **I byte devono essere un'immagine vera**: si guarda la **firma** del file
+(jpeg/png/webp/gif), non l'estensione — un `.jpg` che in realtà è una pagina HTML
+si rifiuta con un messaggio chiaro. ⚠️ Il 🗑 **non tocca** il file di un'altra
+canzone: una riga può puntare a una copertina che c'è già, e togliendola si svuota
+solo il campo (trovato il 18/09/2026 durante la prova dal vivo, che aveva mandato
+nel cesto la copertina di un'altra canzone: rimessa a posto a mano).
+
+**Verifiche (18/09/2026):** `test_cover_canzone.py` — 21 test OK (funzioni pure,
+validazione dei byte, «una sola copertina per canzone», rotte vere su database e
+`covers/` temporanei: upload di un PNG fatto con ffmpeg, file non-immagine,
+scelta di una copertina già presente, nome con percorso rifiutato, miniatura del
+video, 🗑 che lascia stare il file di un'altra canzone, elenco `/covers`);
+**prova dal vivo** sugli endpoint (riga di prova poi cancellata): upload →
+`200 caricata dal computer`, **miniatura vera scaricata da i.ytimg.com** →
+`200 miniatura del video YouTube`, scelta di una copertina esistente → `200`,
+file non-immagine → `400`, 🗑 → il file nel cesto; in **Chrome vero headless** il
+modale ✏️ ha anteprima + i quattro comandi e l'elenco con 17 copertine, il modale
+del player genera gli stessi comandi (e resta con 27 campi, come vuole il test
+dei modali), nessun errore JS; `/covers` 200 e `/cover/<file>` 404 sul file
+inesistente.
+
 ## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
@@ -739,6 +786,15 @@ Da tenere presente nelle sessioni di lavoro successive:
   cerca**: se quel video non è scaricabile il job lo dice, invece di prendere un
   altro video (caso vero: *Public Enemy* di Eminem aveva ricevuto il video di
   *Public Enemy #1*). Il modale 🎬 scrive sempre **da dove** prende il video.
+- **🖼 La copertina si mette (e si cambia) dalla pagina (18/09/2026).** Nel modale
+  ✏️ Edit del tab Database e nel «Modifica Info Brano» del player: **📂 Carica dal
+  computer** (si salva `covers/<id>.<ext>`, una sola immagine per canzone, la
+  vecchia va in `.trash/`), **🎬 Dal video** (la miniatura `yt_thumbnail`),
+  **📁 Copertine in `covers/`** (una già presente) e **🗑 Togli** (che manda nel
+  cesto solo la copertina SUA: quella di un'altra canzone non si tocca). Si
+  controlla la **firma** del file (un `.jpg` che è una pagina HTML si rifiuta).
+  Rotte: `GET /covers`, `POST/DELETE /db/songs/<id>/cover`. Dettagli nella sezione
+  «La copertina: metterla o cambiarla dalla pagina».
 - **⚠️ La suite completa, con l'app attiva, scrive sul database VERO.** Il 18/09/2026
   `python3 -m unittest discover -p 'test_*.py'` ha dato **436 test `OK`** ma ha anche
   aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`

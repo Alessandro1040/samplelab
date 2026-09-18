@@ -2256,9 +2256,107 @@ function campiDbHTML(song) {
         tipo.map(o => `<option value="${o}"${v(f) === o ? ' selected' : ''}>${etichetta}: ${o}</option>`).join('') +
         `</select>`;
     }
+    if (f === 'cover_art_path') {
+      // La copertina si può anche CAMBIARE da qui (18/09/2026): caricala dal
+      // computer, scegline una già in `covers/`, prendi la miniatura del video o
+      // toglila. Gli id non iniziano con `editdb-`: quelli sono i campi del PUT.
+      return `<input class="modal-input" type="text" id="editdb-${f}" placeholder="${etichetta}" value="${escHtml(v(f))}">` +
+             coverControlsHTML(song);
+    }
     return `<input class="modal-input" type="${tipo || 'text'}" id="editdb-${f}" ` +
       `placeholder="${etichetta}" value="${escHtml(v(f))}">`;
   }).join('');
+}
+
+// ── LA COPERTINA NEL MODALE DEL PLAYER (18/09/2026) ─────────────────────────
+// Stesse quattro strade della pagina principale: dal computer, dal video YouTube
+// (miniatura), fra quelle già in `covers/`, oppure togli. Dopo la modifica si
+// aggiorna il campo del modale e si avvisa la pagina principale (dbChanged), così
+// la tabella del database mostra la copertina nuova.
+function coverControlsHTML(song) {
+  const nome = (song && song.cover_art_path) ? String(song.cover_art_path) : '';
+  const anteprima = nome
+    ? `<img src="/cover/${encodeURIComponent(nome)}" alt="copertina" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border2)">`
+    : '<span style="font-size:10px;color:var(--muted)">nessuna copertina</span>';
+  return `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+    <span id="coverfile-preview">${anteprima}</span>
+    <label class="modal-btn" style="cursor:pointer;font-size:11px" title="Scegli un'immagine dal computer: si salva in covers/, una sola per canzone">
+      📂 Carica dal computer
+      <input type="file" id="coverfile-upload" accept="image/*,.jpg,.jpeg,.png,.webp,.gif" style="display:none" onchange="coverDalComputer(this.files)">
+    </label>
+    <button class="modal-btn" type="button" style="font-size:11px" onclick="coverDaYoutube()" title="La miniatura del video YouTube (quella salvata col download della playlist)">🎬 Dal video</button>
+    <select class="modal-input" id="coverfile-archivio" style="max-width:180px" onchange="coverDaArchivio(this.value)" title="Una copertina che è già in covers/"><option value="">📁 Copertine in covers/…</option></select>
+    <button class="modal-btn" type="button" style="font-size:11px" onclick="togliCover()" title="Toglie la copertina: il file va in .trash/ (recuperabile)">🗑 Togli</button>
+    <span id="coverfile-status" style="font-size:10px;color:var(--muted)"></span>
+  </div>`;
+}
+
+let _coverSongId = '';
+
+async function caricaCoverArchivio() {
+  const sel = document.getElementById('coverfile-archivio'); if (!sel) return;
+  try {
+    const files = await fetch('/covers').then(r => r.json());
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">📁 Copertine in covers/…</option>' +
+      files.map(f => `<option value="${escHtml(f.name)}">${escHtml(f.name)}</option>`).join('');
+    sel.value = cur;
+  } catch (_) {}
+}
+
+async function coverChiamata(url, opzioni) {
+  const st = document.getElementById('coverfile-status');
+  if (st) st.textContent = '⏳ …';
+  try {
+    const res = await fetch(url, opzioni).then(r => r.json());
+    if (res && res.ok) {
+      if (st) st.textContent = '✓ ' + (res.origine || 'fatto');
+      coverAggiornaModale(res.cover_art_path || '');
+      try { if (window.self !== window.top) window.parent.postMessage({action:'dbChanged'}, '*'); } catch (_) {}
+      return true;
+    }
+    if (st) st.textContent = '✕ ' + ((res && res.error) || 'non riuscito');
+  } catch (e) { if (st) st.textContent = '✕ ' + e.message; }
+  return false;
+}
+
+// Aggiorna campo e anteprima del modale con la copertina appena messa/tolta.
+function coverAggiornaModale(nome) {
+  const campo = document.getElementById('editdb-cover_art_path');
+  if (campo) campo.value = nome || '';
+  const box = document.getElementById('coverfile-preview');
+  if (box) {
+    box.innerHTML = nome
+      ? `<img src="/cover/${encodeURIComponent(nome)}" alt="copertina" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border2)">`
+      : '<span style="font-size:10px;color:var(--muted)">nessuna copertina</span>';
+  }
+  const track = tracks.find(t => t.id === editTrackId);
+  if (track) { track.cover = nome || ''; }   // la copertina si vede subito nel player
+}
+
+async function coverDalComputer(files) {
+  if (!files || !files.length || !_coverSongId) return;
+  const fd = new FormData(); fd.append('file', files[0]);
+  await coverChiamata(`/db/songs/${_coverSongId}/cover`, {method:'POST', body:fd});
+  const inp = document.getElementById('coverfile-upload'); if (inp) inp.value = '';
+}
+
+async function coverDaYoutube() {
+  if (!_coverSongId) return;
+  await coverChiamata(`/db/songs/${_coverSongId}/cover`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({da:'youtube'})});
+}
+
+async function coverDaArchivio(nome) {
+  if (!_coverSongId || !nome) return;
+  await coverChiamata(`/db/songs/${_coverSongId}/cover`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({filename:nome})});
+}
+
+async function togliCover() {
+  if (!_coverSongId) return;
+  if (!confirm('Togliere la copertina da questa canzone?\nIl file va in .trash/ (recuperabile).')) return;
+  await coverChiamata(`/db/songs/${_coverSongId}/cover`, {method:'DELETE'});
 }
 
 // Funzione PURA con `doc` iniettabile (il test le passa un DOM finto): legge i

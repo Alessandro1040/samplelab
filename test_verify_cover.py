@@ -435,8 +435,12 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("${coverThumb(s.cover_art_path, 26)}", self.index)
         # feedback della Verifica: la cover appena trovata si vede subito
         self.assertIn("${coverThumb(song.cover_art_path, 54)}", self.index)
-        # editor ✏️: anteprima accanto al campo «Cover path»
-        self.assertIn("${coverThumb(v('cover_art_path'),72)}", self.index)
+        # editor ✏️: anteprima accanto al campo «Cover path». Dal 18/09/2026
+        # l'anteprima è nel blocco `coverControlsHTML`, che porta anche i comandi
+        # per CAMBIARE la copertina (📂 carica · 🎬 dal video · 📁 in covers/ · 🗑):
+        # l'anteprima c'è sempre, quindi l'intento di questo controllo è rispettato.
+        self.assertIn('id="dbe-cover-preview"', self.index)
+        self.assertIn("${coverControlsHTML(s)}", self.index)
 
     def test_scheda_usa_la_copertina_nellhero(self):
         self.assertIn("const arte = s.cover_art_path ? '/cover/' + encodeURIComponent(s.cover_art_path) : '';", self.scheda)

@@ -1329,6 +1329,61 @@ def _cover_da_tag_audio(path):
         print(f"[cover] tag audio: {e}")
     return b"", ""
 
+def _estensione_da_nome_o_mime(nome="", mime=""):
+    """L'estensione dell'immagine ('cover.PNG' → 'png', 'image/webp' → 'webp').
+
+    Funzione PURA. Default 'jpg': è il formato con cui arrivano quasi tutte le
+    copertine. Un'estensione che non è un'immagine si ignora.
+    """
+    ext = str(nome or "").rsplit(".", 1)[-1].lower()
+    if ext == "jpeg":
+        ext = "jpg"
+    if ext in _ESTENSIONI_IMMAGINE:
+        return ext
+    m = str(mime or "").lower().split(";")[0].strip()
+    return _MIME_ESTENSIONI.get(m, "jpg")
+
+def salva_copertina_bytes(song_id, dati, ext="jpg"):
+    """Scrive la copertina di una canzone in `covers/<id>.<ext>`.
+
+    Ritorna `(nome_file, errore)`: `("", motivo)` se i byte non sono un'immagine
+    vera (si guarda la FIRMA del file, non l'estensione: dal web può arrivare una
+    pagina HTML travestita da .jpg). Una sola immagine per canzone: la vecchia di
+    un ALTRO formato va in `.trash/` (recuperabile), come fa la Verifica quando il
+    formato cambia. È la strada delle copertine caricate/scelte a mano (18/09/2026).
+    """
+    if not _looks_like_image(dati):
+        return "", "il file non è un'immagine (jpg, png, webp o gif)"
+    ext = str(ext or "jpg").lower()
+    if ext not in _ESTENSIONI_IMMAGINE:
+        ext = "jpg"
+    sid = re.sub(r'[^A-Za-z0-9_]', '', str(song_id or "")) or "cover"
+    nome = f"{sid}.{ext}"
+    try:
+        with open(_cover_local_path(nome), "wb") as fh:
+            fh.write(dati)
+    except OSError as e:
+        return "", f"non riesco a salvare la copertina ({str(e)[:60]})"
+    for altro in os.listdir(COVERS_DIR):
+        if altro != nome and altro.startswith(f"{sid}."):
+            try:
+                move_to_trash(os.path.join(COVERS_DIR, altro))
+            except Exception:
+                pass
+    return nome, ""
+
+def nome_cover_archivio(nome):
+    """Un nome di copertina è utilizzabile? (semplice nome di file, immagine).
+
+    Funzione PURA: niente percorsi (`../`), niente nomi vuoti, estensione di
+    immagine. Serve a `POST /db/songs/<id>/cover` quando si SCEGLIE una copertina
+    già presente in `covers/` invece di caricarla.
+    """
+    base = os.path.basename(str(nome or "").strip())
+    if not base or base != str(nome or "").strip():
+        return False
+    return os.path.splitext(base)[1].lower().lstrip(".") in _ESTENSIONI_IMMAGINE
+
 def _salva_copertina(song_id, cover_url="", local_file=""):
     """Salva la copertina della canzone in `covers/`. Ritorna (nome_file|None, msg).
 
@@ -4269,6 +4324,117 @@ def db_song_delete_video(song_id):
                      "WHERE id=?", (song_id,))
     print(f"[db {song_id}] video tolto dalla riga ({nome}) → {spostato or 'file già assente'}")
     return jsonify({"ok": True, "video_file": None, "spostato_in": spostato})
+
+
+@app.route("/covers")
+def list_cover_files():
+    """Le copertine che ci sono in `covers/` (per il selettore «📁 copertine»)."""
+    files = []
+    for f in sorted(os.listdir(COVERS_DIR)):
+        if f.startswith(".") or not nome_cover_archivio(f):
+            continue
+        fp = os.path.join(COVERS_DIR, f)
+        if not os.path.isfile(fp):
+            continue
+        files.append({"name": f, "size": os.path.getsize(fp),
+                      "ext": os.path.splitext(f)[1].lower().lstrip(".")})
+    return jsonify(files)
+
+@app.route("/db/songs/<song_id>/cover", methods=["POST"])
+def db_song_set_cover(song_id):
+    """La COPERTINA di una canzone: caricata dal computer, scelta fra quelle già in
+    `covers/` o presa dalla MINIATURA del video YouTube (18/09/2026).
+
+    Tre modi, stessa rotta:
+    - multipart con `file` (pulsante «📂 Carica dal computer») → si salva in
+      `covers/<id>.<ext>` (una sola immagine per canzone: la vecchia di un altro
+      formato va in `.trash/`);
+    - JSON `{"filename": "song_…jpg"}` → si usa una copertina che c'è già;
+    - JSON `{"da": "youtube"}` → la miniatura del video salvata col download
+      della playlist (`yt_thumbnail`).
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return jsonify({"error": "Canzone non trovata"}), 404
+
+    upload = request.files.get("file")
+    origine = ""
+    if upload:
+        dati = upload.read()
+        ext = _estensione_da_nome_o_mime(upload.filename, upload.mimetype)
+        origine = "caricata dal computer"
+    else:
+        data = request.json or {}
+        if data.get("da") == "youtube":
+            url = (s.get("yt_thumbnail") or "").strip()
+            if not url:
+                return jsonify({"error": "Questa canzone non ha la miniatura del video "
+                                         "(arriva col download della playlist)"}), 400
+            dati, ext = _scarica_immagine(url), _cover_ext_from_url(url)
+            origine = "miniatura del video YouTube"
+            if not dati:
+                return jsonify({"error": "Non sono riuscito a scaricare la miniatura"}), 502
+        elif data.get("filename"):
+            richiesto = str(data["filename"]).strip()
+            if not nome_cover_archivio(richiesto):
+                return jsonify({"error": "Nome di copertina non valido"}), 400
+            percorso = _cover_local_path(richiesto)
+            if not os.path.isfile(percorso) or not _dentro_la_cartella(COVERS_DIR, percorso):
+                return jsonify({"error": f"Copertina non trovata in covers/: {richiesto}"}), 404
+            with get_db() as conn:
+                conn.execute("UPDATE songs SET cover_art_path=?, updated_at=datetime('now') "
+                             "WHERE id=?", (richiesto, song_id))
+                riga = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+            print(f"[db {song_id}] copertina scelta fra quelle in covers/: {richiesto}")
+            return jsonify({"ok": True, "cover_art_path": richiesto,
+                            "origine": "scelta fra le copertine dell'app", "song": riga})
+        else:
+            return jsonify({"error": "Serve un file, un «filename» o «da: youtube»"}), 400
+
+    nome, errore = salva_copertina_bytes(song_id, dati, ext)
+    if errore:
+        return jsonify({"error": errore}), 400
+    with get_db() as conn:
+        conn.execute("UPDATE songs SET cover_art_path=?, updated_at=datetime('now') WHERE id=?",
+                     (nome, song_id))
+        riga = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    print(f"[db {song_id}] copertina agganciata ({origine}): {nome}")
+    return jsonify({"ok": True, "cover_art_path": nome, "origine": origine, "song": riga})
+
+@app.route("/db/songs/<song_id>/cover", methods=["DELETE"])
+def db_song_delete_cover(song_id):
+    """Toglie la copertina dalla riga: il FILE va in `.trash/`, la colonna si svuota.
+
+    ⚠️ Nel cesto va solo la copertina **sua** (`<id>.<ext>`): una riga può puntare a
+    una copertina che c'è già in `covers/` (magari di un'altra canzone), e quella non
+    si tocca — si svuota solo il campo (18/09/2026: la prova dal vivo ha mandato nel
+    cesto la copertina di un'altra canzone, poi rimessa a posto a mano).
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT cover_art_path FROM songs WHERE id=?",
+                                  (song_id,)).fetchone())
+        if not s:
+            return jsonify({"error": "Canzone non trovata"}), 404
+        nome = s.get("cover_art_path") or ""
+        sid_pulito = re.sub(r'[^A-Za-z0-9_]', '', str(song_id or "")) or "cover"
+        sua = bool(nome) and nome.startswith(f"{sid_pulito}.")
+        percorso = _cover_local_path(nome)
+        spostato, lasciato = "", ""
+        if nome and os.path.isfile(percorso) and _dentro_la_cartella(COVERS_DIR, percorso):
+            if sua:
+                try:
+                    spostato = move_to_trash(percorso)
+                except OSError as e:
+                    return jsonify({"error": f"Non riesco a spostare il file: {e}"}), 500
+            else:
+                lasciato = nome     # è la copertina di un'altra canzone: resta dov'è
+        conn.execute("UPDATE songs SET cover_art_path=NULL, updated_at=datetime('now') "
+                     "WHERE id=?", (song_id,))
+    print(f"[db {song_id}] copertina tolta ({nome or 'nessuna'}) → "
+          f"{spostato or ('lasciato ' + lasciato if lasciato else 'file già assente')}")
+    return jsonify({"ok": True, "cover_art_path": None, "spostato_in": spostato,
+                    "file_lasciato": lasciato})
 
 
 # ── DB: UNISCI DUE RIGHE CHE SONO LA STESSA CANZONE ──────────────────────────

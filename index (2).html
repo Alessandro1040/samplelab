@@ -6276,7 +6276,8 @@ function dbEditFormHTML(s){
     ${inp('release_date','Data rilascio')}${inp('track_number','N° traccia')}${inp('disc_number','N° disco')}${sel('compilation','Compilation',[[0,'No'],[1,'Sì']])}
     ${inp('rating','Rating','number')}${inp('bpm','BPM','number')}${inp('musical_key','Chiave')}${inp('play_count','Play count','number')}
     ${inp('duration','Durata (s)','number')}${sel('analyzed_status','Stato analisi',[['none','none'],['analyzing','analyzing'],['done','done'],['error','error']])}
-    ${inp('youtube_url','URL YouTube')}${inp('genius_url','URL Genius')}${inp('whosampled_url','URL WhoSampled')}${inp('tunebat_url','URL Tunebat')}${inp('cover_art_path','Cover path')}${v('cover_art_path')?`<label class="dbe-field"><span>Copertina</span>${coverThumb(v('cover_art_path'),72)}</label>`:''}
+    ${inp('youtube_url','URL YouTube')}${inp('genius_url','URL Genius')}${inp('whosampled_url','URL WhoSampled')}${inp('tunebat_url','URL Tunebat')}${inp('cover_art_path','Cover path')}
+    ${coverControlsHTML(s)}
     ${inp('local_file','File locale')}
     ${inp('video_file','Video (in videos/)')}
     ${ta('comment','Commento')}${ta('lyrics','Testo')}
@@ -6290,8 +6291,10 @@ async function openDbEditor(id){
   const res=await fetch(`/db/songs/${id}`).then(r=>r.json());
   if(!res || res.error || !res.id){ toast('Impossibile caricare la canzone','err'); return; }
   dbEditSongId=id;
+  coverSongId=id;                       // il modale ✏️ può cambiare la copertina
   document.getElementById('dbe-title').textContent=`✏️ ${res.title||res.local_file||id}`;
   document.getElementById('dbe-form').innerHTML=dbEditFormHTML(res);
+  caricaCoverArchivio();                // riempie l'elenco «📁 Copertine in covers/…»
   const preview=document.getElementById('dbe-preview');
   if(res.local_file){
     preview.style.display='block';
@@ -6695,6 +6698,89 @@ async function togliVideo(){
       await aggiornaVideoModale(); loadDb();
     }else status.textContent='✕ '+((res&&res.error)||'non riuscito');
   }catch(e){ status.textContent='✕ '+e.message; }
+}
+
+
+// ── LA COPERTINA: caricala, scegli, prendila dal video o toglila ────────────
+// Richiesta del 18/09/2026: «in Modifica Info Brano e anche in database dovrebbe
+// comparire la possibilità di aggiungere (o modificare) la cover». Il campo
+// `cover_art_path` c'era già (e lo scrive anche la Verifica): qui si carica
+// un'immagine dal computer, si sceglie fra quelle già in `covers/`, si prende la
+// miniatura del video YouTube o si toglie quella che c'è.
+let coverSongId=null;
+
+function coverControlsHTML(song){
+  const nome=(song && song.cover_art_path) ? String(song.cover_art_path) : '';
+  const anteprima = nome
+    ? `<img src="/cover/${encodeURIComponent(nome)}" alt="copertina" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--border2)">`
+    : '<span style="font-size:10px;color:var(--muted)">nessuna copertina</span>';
+  return `<div class="dbe-full" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span id="dbe-cover-preview" title="Copertina attuale">${anteprima}</span>
+    <label class="btn-sm" style="cursor:pointer;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:6px 12px;border-radius:6px;font-family:'Space Mono',monospace;font-size:10px"
+           title="Scegli un'immagine dal computer: si salva in covers/ (una sola per canzone, la vecchia di un altro formato va in .trash/)">
+      📂 Carica dal computer
+      <input type="file" id="dbe-cover-upload" accept="image/*,.jpg,.jpeg,.png,.webp,.gif" style="display:none" onchange="coverDalComputer(this.files)">
+    </label>
+    <button class="btn-sm" type="button" onclick="coverDaYoutube()" title="La miniatura del video YouTube (quella salvata col download della playlist)">🎬 Dal video</button>
+    <select class="db-add-input" id="dbe-cover-archivio" style="max-width:210px" onchange="coverDaArchivio(this.value)" title="Una copertina che è già in covers/"><option value="">📁 Copertine in covers/…</option></select>
+    <button class="btn-sm" type="button" onclick="togliCover()" style="color:var(--accent4)" title="Toglie la copertina dalla canzone: il file va in .trash/ (recuperabile)">🗑 Togli</button>
+    <span id="dbe-cover-status" style="font-size:10px;color:var(--muted)"></span>
+  </div>`;
+}
+
+async function caricaCoverArchivio(){
+  const sel=document.getElementById('dbe-cover-archivio'); if(!sel) return;
+  try{
+    const files=await fetch('/covers').then(r=>r.json());
+    const cur=sel.value;
+    sel.innerHTML='<option value="">📁 Copertine in covers/…</option>'+
+      files.map(f=>`<option value="${escA(f.name)}">${esc(f.name)}</option>`).join('');
+    sel.value=cur;
+  }catch(_){}
+}
+
+async function coverChiamata(url, opzioni){
+  const st=document.getElementById('dbe-cover-status');
+  if(st) st.textContent='⏳ …';
+  try{
+    const res=await fetch(url, opzioni).then(r=>r.json());
+    if(res && res.ok){
+      if(st) st.textContent='✓ '+(res.origine||'fatto');
+      toast('🖼 Copertina '+(res.origine||'aggiornata'),'ok');
+      if(dbEditSongId && document.getElementById('db-edit-modal').classList.contains('visible')){
+        await openDbEditor(dbEditSongId);     // ridisegna campo, anteprima ed elenco
+      }
+      loadDb();
+      return true;
+    }
+    if(st) st.textContent='✕ '+((res&&res.error)||'non riuscito');
+  }catch(e){ if(st) st.textContent='✕ '+e.message; }
+  return false;
+}
+
+async function coverDalComputer(files){
+  if(!files||!files.length||!coverSongId) return;
+  const fd=new FormData(); fd.append('file', files[0]);
+  await coverChiamata(`/db/songs/${coverSongId}/cover`, {method:'POST', body:fd});
+  const inp=document.getElementById('dbe-cover-upload'); if(inp) inp.value='';
+}
+
+async function coverDaYoutube(){
+  if(!coverSongId) return;
+  await coverChiamata(`/db/songs/${coverSongId}/cover`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({da:'youtube'})});
+}
+
+async function coverDaArchivio(nome){
+  if(!coverSongId||!nome) return;
+  await coverChiamata(`/db/songs/${coverSongId}/cover`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({filename:nome})});
+}
+
+async function togliCover(){
+  if(!coverSongId) return;
+  if(!confirm('Togliere la copertina da questa canzone?\nIl file va in .trash/ (recuperabile).')) return;
+  await coverChiamata(`/db/songs/${coverSongId}/cover`, {method:'DELETE'});
 }
 
 
