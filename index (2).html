@@ -1496,9 +1496,9 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
             <div class="trim-handle" id="th-start-main" onmousedown="startDrag(event,'main','start')" ontouchstart="startDragTouch(event,'main','start')"><div class="trim-handle-bar"><div class="trim-handle-label">IN</div></div></div>
             <div class="trim-handle" id="th-end-main" onmousedown="startDrag(event,'main','end')" ontouchstart="startDragTouch(event,'main','end')"><div class="trim-handle-bar"><div class="trim-handle-label">OUT</div></div></div>
             <div class="bar-selected-overlay" id="bar-overlay-main" style="display:none"></div>
-            <div class="cell-waveform-border" id="cell-border-left-main" style="display:none"
+            <div class="cell-waveform-border" id="cell-border-left-main" style="display:none" title="Trascina: sposta offset"
                  onmousedown="startCellBorderDrag(event,'main','left')" ontouchstart="startCellBorderDragTouch(event,'main','left')"></div>
-            <div class="cell-waveform-border" id="cell-border-right-main" style="display:none"
+            <div class="cell-waveform-border" id="cell-border-right-main" style="display:none" title="Trascina: allunga o accorcia la battuta (BPM) — il suo inizio resta fermo"
                  onmousedown="startCellBorderDrag(event,'main','right')" ontouchstart="startCellBorderDragTouch(event,'main','right')"></div>
           </div>
           <div class="playhead" id="tph-main" style="left:0px" onmousedown="startPlayheadDrag(event,'main')" ontouchstart="startPlayheadDragTouch(event,'main')"></div>
@@ -2707,7 +2707,7 @@ function updateRuler(key) {
 
       const rightH = document.createElement('div');
       rightH.className = 'cell-border-handle cell-border-right';
-      rightH.title = 'Trascina: modifica BPM';
+      rightH.title = 'Trascina: allunga o accorcia la battuta (BPM) — il suo inizio resta fermo';
       rightH.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); startCellBorderDragFromRuler(e, key, 'right'); });
       rightH.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); startCellBorderDragFromRulerTouch(e, key, 'right'); }, { passive: false });
       cell.appendChild(rightH);
@@ -2849,9 +2849,22 @@ function _moveCellBorderDrag(key, clientX, isShiftPressed = false) {
     p.bpm = newBpm;
     document.getElementById(`bpm-${key}`).value = newBpm.toFixed(2);
     
+    // ── L'INIZIO DELLA BATTUTA RESTA DOVE STA ──────────────────────────────
+    // Il bordo DESTRO cambia la lunghezza della battuta (e quindi il BPM): con un
+    // passo diverso, se l'offset restasse quello di prima, la battuta N
+    // partirebbe da un altro istante — l'inizio "scapperebbe" di (N−1) ×
+    // (passo nuovo − passo vecchio) — e non deve (richiesta di Alessandro,
+    // 18/09/2026: «se l'utente cambia solo la fine allora l'inizio rimane lo
+    // stesso per tale barra?»). Si sposta quindi la GRIGLIA di quanto serve
+    // perché quell'inizio resti inchiodato: cambia solo la fine, e con il passo
+    // nuovo cambiano lunghezza anche le altre celle. (Il bordo SINISTRO fa
+    // l'opposto: somma il trascinamento all'offset e trasla tutto, compresa la
+    // battuta — ed è giusto così.)
     const updatedStep = getGridStep(key);
-    const offset = p.gridOffset || 0;
-    p.selectedBarStartTime = offset + (state.barNum - 1) * updatedStep;
+    const newOffset = offsetPerBattutaAncorata(state.barNum, state.startTime, updatedStep);
+    p.gridOffset = newOffset;
+    document.getElementById(`offset-${key}`).value = newOffset.toFixed(4);
+    p.selectedBarStartTime = state.startTime;
 
     p.tapTimes = [];
     updateTapLabel(key);
@@ -3092,6 +3105,26 @@ function urlBackend(percorso) {
     if (base) return base + (p.charAt(0) === '/' ? p : '/' + p);
   }
   return p;   // aperto da http (non dal blob): la relativa va bene così
+}
+
+// ── BORDO DESTRO DELLA CELLA: L'INIZIO NON SI MUOVE ──────────────────────────
+// Trascinando il bordo destro di una cella selezionata (la barra turchese) cambia
+// la lunghezza della battuta e quindi il BPM; con un passo diverso, lasciando
+// fermo l'offset, la battuta N partirebbe da un altro istante — l'inizio
+// "scapperebbe" di (N−1) × (passo nuovo − passo vecchio). Questa funzione (pura)
+// dice dove deve andare l'OFFSET perché quell'inizio resti inchiodato: si sposta
+// la griglia, la cella si allunga solo dalla parte della fine e con lei cambiano
+// lunghezza anche le altre. Richiesta di Alessandro (18/09/2026): «se l'utente
+// cambia solo la fine allora l'inizio rimane lo stesso per tale barra? e si
+// adegui solo la fine e anche i bpm e la lunghezza degli altri?».
+// Il bordo SINISTRO non la usa: lì l'offset si somma al trascinamento e trasla
+// tutto, battuta compresa (è il comportamento voluto).
+function offsetPerBattutaAncorata(barNum, startTime, passo) {
+  const n = Math.max(1, Math.round(Number(barNum) || 1));
+  const inizio = Number(startTime) || 0;
+  const p = Number(passo) || 0;      // passo della griglia = (240 / BPM) × unità
+  if (p <= 0) return inizio;         // passo nullo: non c'è griglia da ancorare
+  return inizio - (n - 1) * p;
 }
 
 window.addEventListener('message', function(e) {
@@ -4261,6 +4294,16 @@ function applyBarTimeChange(key,barIndex,newTime,which,shiftKey){
     if(newDuration>0.05){
       const newBpm=(240*p.gridSubdivision)/newDuration;
       setBpm(key,newBpm);
+      // Il bordo destro cambia la lunghezza della battuta (e il BPM): con il nuovo
+      // passo la battuta N partirebbe altrove, quindi si sposta la GRIGLIA di
+      // quanto serve perché il suo INIZIO resti dov'è — stessa regola del sampler
+      // del modale (`offsetPerBattutaAncorata`): si allunga solo la fine, e con il
+      // passo nuovo cambiano lunghezza anche le altre celle. (Il bordo sinistro fa
+      // l'opposto: somma il trascinamento all'offset e trasla tutto.)
+      p.gridOffset=startTime-(barIndex-1)*getGridStep(key);
+      const offInput=document.getElementById(`offset-${key}`);
+      if(offInput)offInput.value=p.gridOffset.toFixed(4);
+      updateGridUI(key);updateRuler(key);
     }
   }
   updateBarSelection(key);

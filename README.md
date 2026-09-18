@@ -51,6 +51,12 @@ con `(2)` nella cartella locale:
   OUT, URL assoluta per l'audio nel documento `blob:`): funzioni pure in
   JavaScriptCore, cablaggio e app viva:
   `python3 -m unittest -v test_sampler_trim`
+- `test_sampler_cella.py` — test del **bordo destro della cella** del sampler (la
+  barra turchese del righello): allunga solo la fine e **l'inizio non si muove**
+  (funzione pura `offsetPerBattutaAncorata`: l'offset si ricalcola), il bordo
+  sinistro che invece **trasla tutto**, i tooltip delle maniglie e la stessa
+  regola nel player inline delle card di 🔍 Trova Campioni:
+  `python3 -m unittest -v test_sampler_cella`
 - `fortissimo_compare_v3.py` — modello **Fortissimo Compare v3**: confronto tra
   due output `AudioAnalysis` (MIDI + one-shot), score [0,1]
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
@@ -1233,4 +1239,38 @@ Da tenere presente nelle sessioni di lavoro successive:
   `varianti-body`, `sample-body` — **nessun 404** — e il link 💿 porta a
   `/browse?album=Mus` («Esplora»); **201 test di suite** (erano 197); pagine
   `/` `/browse` `/onyx` `/scheda` → 200.
+
+- **BORDO DESTRO DELLA CELLA — NON SPOSTA PIÙ L'INIZIO (18/09/2026).** Richiesta di
+  Alessandro: «dopo che l'utente seleziona una barra dalla griglia (quella che
+  diventa celeste) … è corretto che spostando l'inizio di tale barra
+  automaticamente trasli tutti ma potresti fare in modo che se l'utente cambia solo
+  la fine allora l'inizio rimane lo stesso per tale barra? e si adegui solo la fine
+  e anche i bpm e la lunghezza degli altri?». Nel sampler il **bordo destro** della
+  cella selezionata riscriveva il BPM tenendo fermo l'offset: con il passo nuovo la
+  battuta N ricominciava a `offset + (N − 1) × passo`, quindi **l'inizio scappava di
+  (N − 1) × (passo nuovo − passo vecchio)** — e sulla **prima** battuta non si
+  vedeva, perché lì l'offset *è* l'inizio (`N − 1 = 0`): è il motivo per cui il
+  difetto non era emerso prima. Ora l'inizio resta inchiodato e a muoversi è
+  l'**Offset**, calcolato dalla funzione pura `offsetPerBattutaAncorata(barNum,
+  startTime, passo)` = `inizio − (N − 1) × passo`: si allunga solo la fine, e sono
+  le altre celle a cambiare lunghezza con il nuovo passo. Il **bordo sinistro**
+  continua a traslare tutto (era già giusto) e i due tooltip ora lo dicono. Lo
+  stesso difetto c'era nel **player inline delle card** di 🔍 Trova Campioni
+  (`applyBarTimeChange`, la copia minificata dentro la pagina): anche lì il bordo
+  destro ora riscrive l'offset ancorando l'inizio, così i due player non si
+  comportano diversamente.
+  Verifiche del 18/09/2026: in **Chrome vero** (Selenium, dentro l'iframe `blob:`
+  del sampler) su *IDGAF (with blackbear)* — 64,6 BPM, passo 3,7152 s — cella 3
+  selezionata con l'inizio a **7,4303 s**: trascinando il bordo destro con il mouse
+  vero il BPM va a **18,62** (passo 12,8873 s) e l'offset a **−18,3442**
+  (`−18,3442 + 2 × 12,8873 = 7,4303`, quindi l'inizio non si è mosso), con l'overlay
+  turchese fermo a **48,606 px** e la cella allungata (da 24,3 a 84,3 px); col bordo
+  sinistro inizio e offset si spostano insieme (**13,5451 s** e offset −12,2295).
+  **12 test nuovi** (`test_sampler_cella.py`: `offsetPerBattutaAncorata` in
+  JavaScriptCore su 12 casi con la prova che l'ancoraggio torni sempre, il caso vero
+  del trascinamento a confronto con la formula vecchia, e i controlli sui sorgenti),
+  **213 test di suite** (erano 201); pagine `/` `/browse` `/onyx` `/scheda` → 200
+  (nessun riavvio: le pagine si servono dal disco a ogni richiesta); mappa del codice
+  in `README_sampler.md` §12 ricalcolata dal file vero (documento del sampler ora
+  830–**3176**).
 

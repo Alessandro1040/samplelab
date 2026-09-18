@@ -9,7 +9,7 @@
 > quello vero, e se non lo è lo **ricavi dalla musica**: selezioni una battuta,
 > dici quante battute è e premi **Allinea griglia**.
 
-SampleLab · Alessandro Lo Curcio · aggiornato al **17/09/2026**
+SampleLab · Alessandro Lo Curcio · aggiornato al **18/09/2026**
 
 ---
 
@@ -298,13 +298,21 @@ Il righello in alto non è decorativo: è **la griglia stessa, numerata**.
   cella la deseleziona, come il pulsante **✕ Deseleziona**.
 - **Trascinare il bordo di sinistra** sposta **la griglia**: cambiano l'**Offset**
   e, con esso, tutte le linee (utile per far combaciare la griglia con la prima
-  cassa del brano).
+  cassa del brano). È il "trasla tutto": la cella selezionata si muove insieme
+  alle altre.
 - **Trascinare il bordo di destra** allunga o accorcia la cella selezionata e
   quindi **riscrive il BPM**: il sampler prende la nuova lunghezza e ne fa
   `BPM = 240 × unità / lunghezza`. Se tieni premuto **Shift** il BPM viene
   arrotondato all'unità; altrimenti resta con i decimali. È il modo più diretto
   per "aggiustare" il tempo a occhio: fai combaciare la cella con la musica e il
   numero si aggiorna da solo.
+  **L'inizio della cella, però, non si muove** (18/09/2026): cambiando il passo
+  della griglia, la battuta N partirebbe da un altro istante; il sampler invece
+  sposta l'**Offset** di quanto serve perché quella battuta cominci ancora dove
+  cominciava, `offset = inizio − (N − 1) × passo nuovo` — si allunga solo la fine,
+  e con il passo nuovo cambiano lunghezza anche le altre celle (mentre con la
+  **prima** battuta non cambia niente: l'offset *è* il suo inizio). Vedi §8 e,
+  per il perché, la nota su `offsetPerBattutaAncorata` in §12.
 - **Lo scorrimento** del righello è lo stesso della forma d'onda: la rotella del
   mouse (3 s per tacca) e la vista si ricentrano quando cambi zoom.
 
@@ -326,7 +334,8 @@ ritagliare e per misurare:
   mouse (o col dito) e durante la riproduzione si muove da solo a 60 fps. Con
   **✂ Sel** attivo non esce dalla selezione.
 - **Bordi turchesi**: compaiono solo con una cella selezionata sul righello e
-  fanno quello che fa il righello (sinistra = offset della griglia, destra = BPM).
+  fanno quello che fa il righello — **sinistra** = offset della griglia (trasla
+  tutto), **destra** = BPM (allunga/accorcia la cella e **l'inizio resta fermo**, §6).
 - **Col trim spento** (pulsante **✂ Trim giallo**, §5.7) l'onda dentro la selezione
   **torna grigia**: non resta niente di giallo e non si trascina più niente, perché
   sparisce anche l'area di trascinamento.
@@ -356,6 +365,7 @@ vale `240 / BPM` secondi** (4 quarti × 60/BPM). Da lì:
 | **Allinea griglia**: BPM | `BPM = 60 × Battute Sel. / durata della selezione` | 2,000 s con `4` → **120 BPM**; 2,000 s con `8` → **240 BPM** |
 | **Allinea griglia**: offset | `offset = IN − (Diventa Bar N° − 1) × passo` | IN 10 s con `1` → **10**; con `3` (passo 1 s) → **8** |
 | BPM dal **bordo destro** della cella (Shift = intero) | `BPM = 240 × unità / nuova lunghezza` | cella da 2 s con unità 1 bar → **120 BPM** |
+| offset col **bordo destro** (l'inizio della cella non si muove) | `offset = inizio − (N − 1) × passo nuovo` | battuta 2 a 10 s, passo da 2 s a 3 s → offset **7** (e la battuta riparte da 10: prima sarebbe ripartita da 11) |
 | **Moltiplica** | `BPM × fattore` (virgola o punto) | 120 × `2,3` → **276** |
 | **Segui** e playhead | il playhead è a `timeline = audio.currentTime + sample`; il metronomo suona sui `t = offset + k × passo` | a 1/4 bar e 120 BPM: un colpo ogni 0,5 s |
 | **metronomo**: passo fra due colpi | `passo = (240 / BPM) × unità_metronomo` (unità: 0,25 = ogni 1/4, 0,5 = 2/4, 1 = battuta, 2 = 2 battute…) | a 120 BPM: 1/4 → **0,5 s** · 2/4 → 1 s · 3/4 → 1,5 s · battuta → 2 s |
@@ -456,29 +466,29 @@ volo e lo monta in un iframe quando apri il modale. I numeri di riga qui sotto
 sono quelli **del documento del sampler** (1 = prima riga dentro la textarea) per
 le sue funzioni interne — così restano validi anche quando la pagina intorno
 cresce — e quelli del **file** per le cose che stanno fuori. La textarea apre a
-`index (2).html` riga **830** (il documento finisce a riga **3143**): una funzione
+`index (2).html` riga **830** (il documento finisce a riga **3176**): una funzione
 alla riga *N* del documento sta nel file alla riga *N + 830*.
 
 | Cosa | Dove |
 |---|---|
 | Modale del sampler (`#audio-editor-modal` + `iframe#audio-editor-iframe`) | `index (2).html` righe **820–828** |
-| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **830–3143** (`<textarea id="audio-editor-src">`) |
-| Apertura del modale | `index (2).html` riga **5590**: `openAudioEditor(url, filename, startSec, bpm, etichetta)` — `filename` è il file in `downloads/`, `etichetta` è il nome da mostrare |
-| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5619**: `openInSampler(songIdOFile, opts)` |
-| Pulsante nella riga del database | dentro `renderDbTable` (riga **4491**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit / 📄 Scheda) |
-| Ricezione dal player (`openSampler`) | `index (2).html` riga **3244** · link diretti `?tab=` / `?sampler=` / `?sampler_file=` riga **3280** |
+| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **830–3176** (`<textarea id="audio-editor-src">`) |
+| Apertura del modale | `index (2).html` riga **5633**: `openAudioEditor(url, filename, startSec, bpm, etichetta)` — `filename` è il file in `downloads/`, `etichetta` è il nome da mostrare |
+| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5662**: `openInSampler(songIdOFile, opts)` |
+| Pulsante nella riga del database | dentro `renderDbTable` (riga **4534**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit / 📄 Scheda) |
+| Ricezione dal player (`openSampler`) | `index (2).html` riga **3277** · link diretti `?tab=` / `?sampler=` / `?sampler_file=` riga **3313** |
 | Legenda dei controlli della griglia | `index (2).html` riga **1416**: `<details class="grid-legend" id="legenda-griglia-main">` (si apre da sé, nessun JavaScript; spiega Offset, Battute Sel., Diventa Bar N° e Allinea griglia con un esempio) |
 | Voce di menu nel player | `onyx_whosampled.html` (🎛 Apri nel sampler) |
 | Handshake col documento (`{action:'load', origin, url, filename, etichetta, startSec, bpm}`) | mittente `openAudioEditor` (e `embedAudioEditorX` per l'editor embedded); ricezione in coda al documento del sampler (imposta `p.filename` e `baseBackend`, e mostra `etichetta` — o il file — in testa) |
 | Salvataggio del BPM nel database | dalla pagina: `updateSongField(id,'bpm',v)` (lo usano ✏️ Edit e i pannelli del database); il sampler **non scrive più nulla** da solo |
 | Griglia: passo, snap, unità, etichetta on/off | `getGridStep` **1558** · `snapToGrid` **1563** · `snapTrimToGrid` **1600** · `setBpm` **1570** · `setGridOffset` **1582** · `setGridSubdivision` **1592** · `etichettaGriglia` **1051** · `toggleGridVisibility` **1055** |
 | **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1101** · `alignGridToSelection` **1109** |
-| ✂ **Trim giallo on/off**, onda grigia e URL assoluta | `etichettaTrimGiallo` **1075** (pura) · `aggiornaPulsantiTrim` **1079** · `toggleTrimGiallo` **1093** · l'onda dentro la selezione col trim spento: `drawWaveform` **1199** · URL del backend (il documento vive in un iframe `blob:`): `origineHttp` **2251** (pura), `urlBackend` **2256** (pura) |
+| ✂ **Trim giallo on/off**, onda grigia e URL assoluta | `etichettaTrimGiallo` **1075** (pura) · `aggiornaPulsantiTrim` **1079** · `toggleTrimGiallo` **1093** · l'onda dentro la selezione col trim spento: `drawWaveform` **1199** · URL del backend (il documento vive in un iframe `blob:`): `origineHttp` **2264** (pura), `urlBackend` **2269** (pura) |
 | BPM dai battiti e dal fattore | `bpmDaTap` **1618** (media pura) · `tapTempo` **1639** · `updateTapLabel` **1632** · `multiplyBpm` **1661** |
 | Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **1690** (pura) · `accentoBattuta` **1700** (pura) · `etichettaUnita` **1709** (pura) · `getMetroStep` **1719** · `updateMetroStatus` **1725** · `setMetroSubdivision` **1732** · `toggleMetronome` **1740** · `checkMetronome` **1757** · `flashMetronome` **1785** |
 | Disegno della griglia e del righello | `updateGridUI` **1798** · `updateRuler` **1824** |
-| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **1893** · `deselectBar` **1911** · `updateBarSelectionUI` **1926** · `_startCellBorderDrag` **1966** · `_moveCellBorderDrag` **1994** |
-| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2069** · `onAudioLayerMouseDown` **2078** · `startPlayheadDrag` **2169** · `applyHandleDrag` **1469** · `startSelDrag` **1482** · `resetTrimStart` **2203** |
+| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **1893** · `deselectBar` **1911** · `updateBarSelectionUI` **1926** · `_startCellBorderDrag` **1966** · `_moveCellBorderDrag` **1994** · **bordo destro ancorato all'inizio** (l'offset si ricalcola): `offsetPerBattutaAncorata` **2292** (pura) · player inline delle card: `applyBarTimeChange` **4281** (`index (2).html`, fuori dal documento) |
+| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2082** · `onAudioLayerMouseDown` **2091** · `startPlayheadDrag` **2182** · `applyHandleDrag` **1469** · `startSelDrag` **1482** · `resetTrimStart` **2216** |
 | Zoom, scorrimento, trasporto | `setZoom` **1272** · `adjustZoom` **1290** · `onTrimWheel` **1314** · `togglePlay` **1327** · `toggleFollow` **1145** |
 | Loop (✂ Sel · ⟳ Tutto) | `setLoopMode` **1351** · il ritorno all'inizio sta nel ciclo a 60 fps (`startAnimationLoop` **912**), con l'anticipo per non sfondare il punto di OUT: `anticipoRitorno` **874** (pura), `anticipoLoop` **882** (pura), `aggiornaLatenzaUscita` **890**, `leggiLatenzaUscita` **904** |
 | Storico (Undo/Redo) | `pushHistory` **746** · `applyHistoryState` **779** · `undoAction` **802** · `redoAction` **809** |
@@ -487,6 +497,7 @@ alla riga *N* del documento sta nel file alla riga *N + 830*.
 | Test della stima TAP | `test_sampler_tap.py` (`python3 -m unittest -v test_sampler_tap`): esegue `bpmDaTap` con JavaScriptCore su 11 casi |
 | Test del metronomo | `test_sampler_metronomo.py` (`python3 -m unittest -v test_sampler_metronomo`): 8 test su `stepMetronomo`, `accentoBattuta` ed `etichettaUnita` (JavaScriptCore) |
 | Test del trim e del loop | `test_sampler_trim.py` (`python3 -m unittest -v test_sampler_trim`): 13 test — il pulsante del trim giallo con gli elementi che spariscono, l'onda grigia col trim spento, l'anticipo del loop (`anticipoRitorno` su 6 casi e `anticipoLoop` su 5, in JavaScriptCore), `urlBackend`/`origineHttp` coi 9 casi di risoluzione, e il controllo che «Trova la battuta» non resti né nella pagina né nel backend (la rotta risponde 404) |
+| Test del bordo destro della cella (l'inizio che non si muove) | `test_sampler_cella.py` (`python3 -m unittest -v test_sampler_cella`): 12 test — `offsetPerBattutaAncorata` in JavaScriptCore su **12 casi** (battuta 1, battute in mezzo, passo nullo, numeri arrivati come stringhe) con la prova che l'ancoraggio torni sempre, il caso vero del trascinamento (battuta 2 da 10 s, bordo destro a 13 s → 80 BPM, passo 3, offset 7 *contro l'11 della formula vecchia*) e i controlli sui sorgenti: bordo destro che riscrive l'offset, bordo sinistro che trasla tutto, tooltip delle maniglie, stessa formula nel player inline delle card |
 | Streaming del file | `app (2).py` riga **2265**: `/stream/<path:filename>` (regge anche le richieste Range) |
 
 ## 13. Note, limiti e piccoli trucchi
@@ -514,7 +525,7 @@ alla riga *N* del documento sta nel file alla riga *N + 830*.
 | **✂ Sel** su 4 o 8 battute invece di tutto il brano | il tempo si giudica sul giro, non sull'intro |
 | **Allinea griglia** su 4 o 8 battute (non su una) | più battute nella selezione = stima del BPM più precisa |
 | **Diventa Bar N°** invece di ritoccare l'offset a mano | sposta i numeri del righello dove ti servono, in un colpo |
-| Trascina il **bordo destro** della cella finché combacia con la musica | il BPM lo calcola lui (Shift per farlo intero) |
+| Trascina il **bordo destro** della cella finché combacia con la musica | il BPM lo calcola lui (Shift per farlo intero) e **l'inizio resta fermo**: si allunga solo la fine |
 | **Adatta alla griglia** prima di ritagliare | IN/OUT finiscono su tempi "tondi" e il taglio esce pulito |
 | Guarda `sample: ±…s` in basso | ti dice se hai spostato l'audio (nella tabella non c'è: è solo nel sampler) |
 | Se il pulsante non c'è → **Cmd+Shift+R** | il browser tiene in cache il JavaScript vecchio |
@@ -574,4 +585,26 @@ Cosa **non** cambia: la selezione disegnata, **IN/OUT** e il taglio scaricato
 restano esatti; cambia solo dove si riporta indietro la testina, quindi il pezzo
 **suonato** è ~30 ms più corto di quello selezionato (1,5% su due secondi) e in
 cambio **non si sente più musica oltre il punto di OUT**.
+
+**Il bordo destro della cella allunga solo la fine (18/09/2026).** Alessandro:
+«dopo che l'utente seleziona una barra dalla griglia (quella che diventa celeste)
+… è corretto che spostando l'inizio di tale barra automaticamente trasli tutti ma
+potresti fare in modo che se l'utente cambia solo la fine allora l'inizio rimane
+lo stesso per tale barra? e si adegui solo la fine e anche i bpm e la lunghezza
+degli altri?». Il difetto era **vero**: con l'offset fermo, cambiando il passo
+della griglia la battuta N ricominciava a `offset + (N − 1) × passo nuovo`, cioè
+**scappava di (N − 1) × (passo nuovo − passo vecchio)** — e con **N = 1** non si
+vedeva (l'offset *è* l'inizio della prima battuta), che è il motivo per cui non era
+emerso prima. Ora il bordo destro **àncora l'inizio** (`offsetPerBattutaAncorata`,
+pura) e a muoversi è l'**Offset**: si allunga solo la fine, e sono le altre celle a
+cambiare lunghezza con il nuovo passo. Il bordo **sinistro** continua a traslare
+tutto (era già giusto). La stessa regola vale nel player inline delle card di
+🔍 Trova Campioni (`applyBarTimeChange`), che aveva lo stesso difetto.
+Misurato in **Chrome vero** su *IDGAF (with blackbear)* (64,6 BPM, passo 3,7152 s):
+cella 3 selezionata (inizio **7,4303 s**, overlay a **48,606 px**), poi bordo destro
+trascinato col mouse vero → BPM **18,62** (passo 12,8873 s), offset **−18,3442**
+(provato: `−18,3442 + 2 × 12,8873 = 7,4303`), inizio **7,4303 s** (fermo) e overlay
+**48,606 px** (fermo, larghezza da 24,3 a 84,3 px); bordo sinistro trascinato →
+inizio **13,5451 s** e offset **−12,2295** (tutto traslato). 12 test nuovi
+(`test_sampler_cella.py`).
 
