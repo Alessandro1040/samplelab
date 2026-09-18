@@ -127,6 +127,13 @@ con `(2)` nella cartella locale:
   in JavaScriptCore, il giro completo sull'app viva (import, ricarica senza
   doppioni, ✏️ Rinomina in massa sulle etichette + ↩️ Undo, 🗑 cancellazione della
   sessione) e le rotte: `python3 -m unittest -v test_stem_upload`
+- `test_metadati_youtube.py` — test dei **metadati del video YouTube** nella riga
+  (`songs.yt_*`), dalla **playlist** scaricata: le funzioni pure `data_da_yt`,
+  `id_video_dal_nome_file`, `campi_youtube`, `mappa_metadati_playlist`,
+  `do_download_playlist` per intero con un yt-dlp finto (nessuna rete), la
+  migrazione delle colonne su un database vecchio e le regole di scrittura
+  (anno solo se vuoto, campi fuori lista ignorati, valori vuoti che non spengono i
+  dati): `python3 -m unittest -v test_metadati_youtube`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -421,7 +428,78 @@ pulsante su ogni riga di **🔗 Campionamenti** (apre solo quella coppia) e sul
 contatore **🔗 n**; **📄 Scheda completa**, in alto a destra nel modale, porta alla
 pagina `/scheda` (stem, remix e cover, analisi audio).
 
-## Note operative e stato corrente (11/09/2026, aggiornate al 19/09/2026)
+## Playlist YouTube: ogni riga porta i dati del video — 18/09/2026
+
+Domanda di Alessandro: «se carico una playlist da YouTube viene scaricata tutta
+automaticamente giusto? puoi fare in modo che prenda automaticamente l'anno da
+YouTube? dalla data di caricamento del video? e che prenda in input anche la
+descrizione del video e tutte le altre informazioni disponibili da YouTube?»
+
+**Sì, la playlist si scarica tutta**: `do_download_playlist` (`app (2).py`) passa
+l'URL a yt-dlp con `extract_info(url, download=True)`, `ignoreerrors` e **senza**
+`noplaylist`, poi converte in mp3 e registra ogni file. Quello che *non* faceva era
+**leggere il video**: l'info_dict serviva solo per il titolo della playlist e ogni
+riga nasceva dal NOME del file — anno, descrizione, canale e il resto andavano
+persi.
+
+### Cosa fa ora
+
+Ogni voce scaricata passa da `campi_youtube()` e finisce in **14 colonne `yt_*`**
+di `songs` (migrazione automatica in `init_db`, come tutte le altre: le colonne si
+aggiungono da sole a un database che c'è già):
+
+| colonna | cosa contiene |
+|---|---|
+| `yt_video_id` | l'id del video (è l'`[id]` che `DL_OUTTMPL` scrive nel nome) |
+| `yt_upload_date` | data di **caricamento** su YouTube (`YYYY-MM-DD`) → **dà l'anno** |
+| `yt_release_date` | data di uscita dichiarata dal video, quando c'è |
+| `yt_channel` / `yt_channel_url` | canale (o uploader) che l'ha pubblicato |
+| `yt_description` | la descrizione del video, **intera** |
+| `yt_views` / `yt_likes` / `yt_comments` | visualizzazioni, like, commenti al momento della lettura |
+| `yt_tags` / `yt_category` | tag (separati da `, `) e categoria (es. `Music`) |
+| `yt_thumbnail` | URL della miniatura (un link, non un file in `covers/`) |
+| `yt_duration` | durata dichiarata dal video, in secondi |
+| `yt_meta_at` | quando questi dati sono stati letti |
+
+### Le due regole (e perché)
+
+1. **Il file si riconosce dall'`[id]`, non dal titolo** — `id_video_dal_nome_file()`
+   legge la coda `[IX7UWaSoVv0]` che il template scrive sempre: il titolo invece
+   YouTube e il disco lo scrivono in modi diversi (caratteri vietati, lunghezza) e
+   la conversione in mp3 non tocca la coda.
+2. **`year` solo se è vuoto, i `yt_*` si riscrivono** — l'anno è un campo *curato*
+   (la Verifica lo prende da Genius e si corregge a mano), i campi `yt_*` sono
+   *fatti* letti da YouTube: un valore vuoto non spegne quello che c'era già.
+   ⚠️ **La data di caricamento NON è l'anno del brano**: misurato sui dati veri,
+   «Who Knew» di Eminem è caricato il **31/07/2018** (`upload_date = 20180731`) ma
+   il disco è del **2000** (`release_date = 20000523`) — per questo si salvano
+   **entrambe** le date, e l'anno della riga viene dal *caricamento*, come chiesto.
+
+`resolve_or_create_song(..., extra=…)` scrive **solo** le colonne di
+`CAMPI_YOUTUBE` (più `year`): un nome fuori lista non arriva nell'SQL. In pagina il
+download della playlist dice anche quanti brani hanno preso i dati
+(`con_metadati` / `con_anno` nella risposta di `/status`).
+
+**Verifiche (18/09/2026):** `test_metadati_youtube.py` — 37 test OK (funzioni pure,
+`do_download_playlist` per intero con un yt-dlp finto, migrazione su un database
+creato con lo schema vecchio, regole di scrittura su un database temporaneo,
+cablaggio dei sorgenti, app viva in sola lettura); prova su **YouTube vero** (info
+di «Who Knew»: le due date, 453 caratteri di descrizione, 23.003.706 viste, tag e
+categoria); app riavviata (porta 5070), 14 colonne in `samplelab (2).db`,
+`/db/schema` le documenta tutte, pagine `/` `/browse` `/onyx` `/verifica` `/scheda`
+200, URL di playlist sbagliato → job in `error` senza crash. ⚠️ Il giro *reale* su
+una playlist non è stato fatto (in libreria non c'è nessun URL di playlist): il
+primo download vero lo facciamo quando vuoi.
+
+⚠️ **Peso e prossimo passo**: le descrizioni possono pesare qualche KB per brano e
+il database è versionato — dopo una playlist grossa valutare se committarlo. I
+campi `yt_*` per ora si **leggono** dal database (📖 Legenda dello schema e
+`/db/songs/<id>`): non compaiono ancora né nella 📄 scheda canzone né nelle liste
+dei modali ✏️ Edit e 🗄️ Campi del database (`CAMPI_DB_MODALE`, `CAMPI_DB_INFO` e
+`allowed` del PUT — le tre liste che `test_onyx_modifica_db.py` confronta), quindi
+non si correggono a mano dalla pagina: è il prossimo passo naturale.
+
+## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
 

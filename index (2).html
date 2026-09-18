@@ -5989,7 +5989,8 @@ async function dbDownloadPlaylist(){
         status.textContent=`⏳ ${j.status}…${p.percent!=null?` ${p.percent}%`:''}${p.filename?` · ${p.filename}`:''}`;
         if(j.status==='done'){
           clearInterval(poll);
-          status.textContent=`✅ ${j.playlist_title?`"${j.playlist_title}" · `:''}${j.count||0} brani scaricati, ${j.registered||0} registrati nel database`;
+          const meta=[j.con_anno?`anno da YouTube per ${j.con_anno}`:'',j.con_metadati?`metadati del video su ${j.con_metadati}`:''].filter(Boolean).join(' · ');
+          status.textContent=`✅ ${j.playlist_title?`"${j.playlist_title}" · `:''}${j.count||0} brani scaricati, ${j.registered||0} registrati nel database${meta?` · ${meta}`:''}`;
           urlEl.value='';
           loadDb();
           refreshDbFileSelect();

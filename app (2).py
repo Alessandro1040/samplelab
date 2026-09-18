@@ -385,7 +385,12 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               # questa non si sa QUALE file è stato confrontato (la
                               # cartella `anteprime/` non è versionata e il nome del file
                               # cambia con l'id iTunes)
-                              ("anteprima_file", "TEXT")):
+                              ("anteprima_file", "TEXT")
+                              # ── Metadati del video YouTube (18/09/2026) ──
+                              # La lista sta in `CAMPI_YOUTUBE` per non averla in due
+                              # posti: le stesse colonne le usa `resolve_or_create_song`
+                              # per filtrare quello che arriva da yt-dlp.
+                              ) + CAMPI_YOUTUBE:
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
 
@@ -600,9 +605,21 @@ def find_existing_song(conn, title, artist, youtube_url="", exclude_id=""):
     return None, ""
 
 
-def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", duration=None):
+def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", duration=None,
+                           extra=None):
     """La riga di questa canzone, creandola solo se non c'è davvero. Ritorna
-    `(song_id, creata, come)`: `come` è la prova del riconoscimento."""
+    `(song_id, creata, come)`: `come` è la prova del riconoscimento.
+
+    `extra` sono i campi `yt_*` del video YouTube (vedi `campi_youtube`) e, se
+    c'è, l'anno che ne deriva: si scrivono SOLO le colonne di `CAMPI_YOUTUBE`
+    (un nome fuori lista si ignora, così dall'esterno non si può scegliere una
+    colonna qualsiasi) e `year` si riempie **solo se è vuoto**, perché l'anno è
+    un campo curato (Genius, o corretto a mano).
+    """
+    extra = dict(extra or {})
+    anno_yt = extra.pop("year", None) or None
+    extra = {k: v for k, v in extra.items()
+             if k in CAMPI_YOUTUBE_NOMI and v is not None and str(v).strip() != ""}
     sid, come = find_existing_song(conn, title, artist, youtube_url)
     if sid:
         # Nella riga che c'è già si COMPLETANO solo i campi vuoti: quello che è
@@ -618,10 +635,27 @@ def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", d
         if duration is not None:
             conn.execute("UPDATE songs SET duration=COALESCE(duration,?), "
                          "updated_at=datetime('now') WHERE id=?", (duration, sid))
+        if extra:
+            # I dati del video si riscrivono a ogni download riuscito: sono fatti
+            # letti da YouTube, non scelte fatte a mano.
+            conn.execute("UPDATE songs SET " + ", ".join(f"{k}=?" for k in extra) +
+                         ", updated_at=datetime('now') WHERE id=?",
+                         (*extra.values(), sid))
+        if anno_yt:
+            conn.execute("UPDATE songs SET year=?, updated_at=datetime('now') "
+                         "WHERE id=? AND (year IS NULL OR year='')", (anno_yt, sid))
         return sid, False, come
     sid = "song_" + hashlib.sha256(f"{title}|{artist}|{time.time()}".encode()).hexdigest()[:12]
-    conn.execute("INSERT INTO songs(id,title,artist,youtube_url,local_file,duration) "
-                 "VALUES(?,?,?,?,?,?)", (sid, title, artist, youtube_url, local_file, duration))
+    colonne = ["id", "title", "artist", "youtube_url", "local_file", "duration"]
+    valori = [sid, title, artist, youtube_url, local_file, duration]
+    if extra:
+        colonne += list(extra)
+        valori += list(extra.values())
+    if anno_yt:
+        colonne.append("year")
+        valori.append(anno_yt)
+    conn.execute("INSERT INTO songs(" + ", ".join(colonne) + ") VALUES(" +
+                 ", ".join(["?"] * len(colonne)) + ")", valori)
     return sid, True, "nuova riga"
 
 
@@ -664,7 +698,8 @@ def check_pair_exists_loose(data,song_x_meta,song_yi_meta,category):
     return False
 
 # ── SONG HELPERS (SQLite) ────────────────────────────────────────────────────
-def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", duration=None):
+def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", duration=None,
+                          extra=None):
     """La riga di questa canzone (id), creandola **solo se manca davvero**.
 
     Dal 19/09/2026 passa da `resolve_or_create_song`, cioè dal confronto
@@ -676,7 +711,8 @@ def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", du
     Nota storica: deve reggere anche i NULL — in libreria ci sono righe con
     `title` a NULL e `None.lower()` faceva fallire ogni chiamata con 500.
     """
-    sid, _, _ = resolve_or_create_song(conn, title, artist, youtube_url, local_file, duration)
+    sid, _, _ = resolve_or_create_song(conn, title, artist, youtube_url, local_file, duration,
+                                       extra)
     return sid
 
 # ── AUDIO ANALYSIS ────────────────────────────────────────────────────────────
@@ -936,6 +972,157 @@ def _year_from_date(value):
     """'September 2, 2025' → 2025 · '2002-10-28' → 2002 · None se non c'è."""
     m = _ANNO_RE.search(str(value or ""))
     return int(m.group(1)) if m else None
+
+# ── METADATI DEL VIDEO YOUTUBE (18/09/2026) ──────────────────────────────────
+# Richiesta di Alessandro: «se carico una playlist da YouTube … puoi fare in modo
+# che prenda automaticamente l'anno dalla data di caricamento del video? e che
+# prenda in input anche la descrizione e tutte le altre informazioni disponibili
+# da YouTube?» → ogni riga che nasce da una playlist scaricata porta con sé
+# quello che il video dice di sé: data di CARICAMENTO (e da lì l'anno), canale,
+# descrizione, viste/like/commenti, tag, categoria, miniatura e durata.
+#
+# Due regole, perché sono due tipi di dato diversi:
+# 1) il file scaricato si riconosce dall'`[id]` nel NOME — `DL_OUTTMPL` lo scrive
+#    sempre («Titolo [IX7UWaSoVv0].mp3») e ci si arriva anche dopo la conversione
+#    in mp3 o una rinomina; col titolo no: YouTube e il disco lo scrivono diverso.
+# 2) `year` è un campo CURATO (la Verifica lo scrive da Genius, si corregge a
+#    mano): si riempie **solo se è vuoto**. I campi `yt_*` sono fatti letti da
+#    YouTube: si riscrivono a ogni download riuscito, e un campo che YouTube non
+#    dà non spegne quello che c'era già.
+#
+# La stessa tupla serve alla migrazione di `init_db` (le colonne si aggiungono da
+# sole a un database che esiste già) e al filtro di `resolve_or_create_song`.
+CAMPI_YOUTUBE = (
+    ("yt_video_id", "TEXT"),        # l'id del video (l'`[id]` nel nome del file)
+    ("yt_upload_date", "TEXT"),     # data di CARICAMENTO su YouTube, 'YYYY-MM-DD'
+    ("yt_release_date", "TEXT"),    # data di uscita dichiarata dal video (se c'è)
+    ("yt_channel", "TEXT"),         # canale (o uploader) che l'ha pubblicato
+    ("yt_channel_url", "TEXT"),
+    ("yt_description", "TEXT"),     # la descrizione del video, intera
+    ("yt_views", "INTEGER"),        # view_count
+    ("yt_likes", "INTEGER"),        # like_count
+    ("yt_comments", "INTEGER"),     # comment_count
+    ("yt_tags", "TEXT"),            # tag del video, separati da ', '
+    ("yt_category", "TEXT"),        # categorie YouTube (es. 'Music')
+    ("yt_thumbnail", "TEXT"),       # URL della miniatura (è un URL, non un file)
+    ("yt_duration", "REAL"),        # durata dichiarata dal video, in secondi
+    ("yt_meta_at", "TEXT"),         # quando questi dati sono stati letti
+)
+CAMPI_YOUTUBE_NOMI = tuple(nome for nome, _ in CAMPI_YOUTUBE)
+
+_DATA_RE = re.compile(r"^\s*(\d{4})-?(\d{2})-?(\d{2})\s*$")
+
+def data_da_yt(value):
+    """'20250915' (formato di yt-dlp) → '2025-09-15'; '' se non è una data.
+
+    yt-dlp dà `upload_date` (e `release_date`) come otto cifre attaccate; nella
+    riga si salva la data leggibile, così si confronta con `release_date`.
+    """
+    m = _DATA_RE.match(str(value or ""))
+    if not m:
+        return ""
+    anno, mese, giorno = (int(x) for x in m.groups())
+    if not (1900 <= anno <= 2999 and 1 <= mese <= 12 and 1 <= giorno <= 31):
+        return ""
+    return f"{anno:04d}-{mese:02d}-{giorno:02d}"
+
+def id_video_dal_nome_file(nome):
+    """'Artista - Titolo [IX7UWaSoVv0].mp3' → 'IX7UWaSoVv0' (o '').
+
+    È la stessa coda che `register_local_file` toglie dal titolo: da lì si sa a
+    QUALE voce della playlist appartiene il file scaricato.
+    """
+    base = os.path.splitext(os.path.basename(str(nome or "")))[0]
+    m = re.search(r"\[([A-Za-z0-9_-]{5,})\]\s*$", base)
+    return m.group(1) if m else ""
+
+def campi_youtube(info):
+    """I campi `yt_*` (e l'anno che ne deriva) che il video racconta di sé, o `{}`.
+
+    `info` è l'info_dict di yt-dlp. Si mettono solo i valori che ci sono davvero:
+    un campo assente non spegne quello che era già nella riga.
+    """
+    if not isinstance(info, dict):
+        return {}
+
+    def primo(*chiavi):
+        """Il primo valore non vuoto (le liste — tag, categorie — unite da ', ')."""
+        for k in chiavi:
+            v = info.get(k)
+            if isinstance(v, (list, tuple)):
+                v = ", ".join(str(x).strip() for x in v if str(x).strip())
+            v = str(v or "").strip()
+            if v:
+                return v
+        return ""
+
+    def numero(chiave):
+        try:
+            return float(info.get(chiave))
+        except (TypeError, ValueError):
+            return None
+
+    campi = {}
+    vid = primo("id")
+    if vid:
+        campi["yt_video_id"] = vid
+    # Data di CARICAMENTO (è quella che diventa l'anno della riga, come chiesto) e,
+    # quando il video la dichiara, anche la data di uscita: NON sono la stessa cosa
+    # (caso vero misurato il 18/09/2026: «Who Knew» di Eminem è caricato il
+    # 31/07/2018 ma il disco è del 2000), quindi si salvano entrambe invece di
+    # scegliere per l'utente. L'anno si ricava dalla data di caricamento e, solo se
+    # quella manca, da quella di uscita.
+    caricamento = data_da_yt(info.get("upload_date"))
+    uscita = data_da_yt(info.get("release_date"))
+    if caricamento:
+        campi["yt_upload_date"] = caricamento
+    if uscita:
+        campi["yt_release_date"] = uscita
+    data_anno = caricamento or uscita
+    for colonna, chiavi in (("yt_channel", ("channel", "uploader")),
+                            ("yt_channel_url", ("channel_url", "uploader_url")),
+                            ("yt_description", ("description",)),
+                            ("yt_tags", ("tags",)),
+                            ("yt_category", ("categories", "category")),
+                            ("yt_thumbnail", ("thumbnail",))):
+        valore = primo(*chiavi)
+        if valore:
+            campi[colonna] = valore
+    for colonna, chiave in (("yt_views", "view_count"), ("yt_likes", "like_count"),
+                            ("yt_comments", "comment_count")):
+        n = numero(chiave)
+        if n is not None:
+            campi[colonna] = int(n)
+    durata = numero("duration")
+    if durata is not None:
+        campi["yt_duration"] = durata
+    campi["yt_meta_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    anno = _year_from_date(data_anno) if data_anno else None
+    if anno:
+        campi["year"] = anno
+    return campi
+
+def mappa_metadati_playlist(entries):
+    """{id del video: campi `yt_*`} per le voci scaricate di una playlist.
+
+    `entries` è `info["entries"]` di yt-dlp: una voce per video, `None` per i
+    video che non si sono potuti scaricare (si saltano). L'id si prende dalla
+    voce e, se la voce non lo dice, dall'`[id]` del file che ne è uscito.
+    """
+    mappa = {}
+    for voce in entries or []:
+        if not isinstance(voce, dict):
+            continue
+        campi = campi_youtube(voce)
+        file = ""
+        richieste = voce.get("requested_downloads") or []
+        if richieste and isinstance(richieste[0], dict):
+            file = richieste[0].get("filepath") or ""
+        vid = campi.get("yt_video_id") or id_video_dal_nome_file(
+            file or voce.get("_filename") or "")
+        if vid:
+            mappa[vid] = campi
+    return mappa
 
 # Valori che NON sono il nome di un album: segnaposto delle etichette/degli
 # store o del caricamento per cartella (il player usava il nome della cartella:
@@ -1953,8 +2140,13 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         jobs[job_id]["error"] = str(e)
 
 # ── PLAYLIST DOWNLOAD ─────────────────────────────────────────────────────────
-def register_local_file(filename):
-    """Registra un file scaricato nella tabella songs (parsing artista - titolo)."""
+def register_local_file(filename, campi=None):
+    """Registra un file scaricato nella tabella songs (parsing artista - titolo).
+
+    `campi` sono i metadati del video YouTube (vedi `campi_youtube`): la riga
+    nasce già con la data di caricamento, l'anno, il canale, la descrizione…
+    Senza (`None`) il comportamento è quello di sempre.
+    """
     raw = clean_filename(filename)
     # Rimuove il suffisso ' [idYouTube]' aggiunto da yt-dlp nel template
     base = re.sub(r"\s*\[[^\]]{5,}\]\s*$", "", raw)
@@ -1962,7 +2154,7 @@ def register_local_file(filename):
     artist = parts[0].strip() if len(parts) == 2 else ""
     title = parts[1].strip() if len(parts) == 2 else base.strip()
     with get_db() as conn:
-        sid = get_or_create_song_db(conn, title, artist, local_file=filename)
+        sid = get_or_create_song_db(conn, title, artist, local_file=filename, extra=campi)
     return sid
 
 # ── DOWNLOAD AUTOMATICO DI UNA RIGA DEL DATABASE ─────────────────────────────
@@ -2085,6 +2277,10 @@ def do_download_playlist(job_id, url, fmt="mp3"):
             info = ydl.extract_info(url, download=True)
 
         after = snapshot()
+        # Metadati del video per OGNI voce scaricata (18/09/2026): l'`[id]` nel
+        # nome del file dice quale voce è quale (vedi `id_video_dal_nome_file`).
+        # Le voci che YouTube non ha lasciato scaricare sono `None`: si saltano.
+        per_id = mappa_metadati_playlist((info or {}).get("entries") or [])
         new_files = sorted(
             f for f, v in after.items()
             if f not in before or (before[f][0], before[f][1]) != v
@@ -2119,16 +2315,27 @@ def do_download_playlist(job_id, url, fmt="mp3"):
                     converted.append(f)
             new_files = converted
 
-        # Registra ogni brano nel database
+        # Registra ogni brano nel database. Con i metadati del video, quando ci
+        # sono: la riga nasce già con data di caricamento, anno, canale,
+        # descrizione, viste, tag, categoria, miniatura e durata (campi `yt_*`).
         registered = 0
+        con_metadati = 0
+        con_anno = 0
         for f in new_files:
-            if register_local_file(f):
+            campi = per_id.get(id_video_dal_nome_file(f)) or {}
+            if campi:
+                con_metadati += 1
+            if register_local_file(f, campi):
                 registered += 1
+                if campi.get("year"):
+                    con_anno += 1
 
         jobs[job_id]["status"] = "done"
         jobs[job_id]["files"] = new_files
         jobs[job_id]["count"] = len(new_files)
         jobs[job_id]["registered"] = registered
+        jobs[job_id]["con_metadati"] = con_metadati
+        jobs[job_id]["con_anno"] = con_anno
         jobs[job_id]["playlist_title"] = info.get("title", "") if info else ""
 
     except Exception as e:
@@ -5634,6 +5841,20 @@ COLUMN_DOCS = {"songs": {
     "testo_audio_nostro": "il file che è stato trascritto, relativo ('downloads/…' o 'anteprime/acapella_…/vocals.mp3'): si ascolta nel confronto in /verifica",
     "testo_audio_riferimento": "l'audio di riferimento confrontato (anteprima ufficiale), relativo a 'anteprime/'",
     "anteprima_file": "l'anteprima ufficiale di iTunes usata dal controllo audio (in 'anteprime/', cartella non versionata)",
+    "yt_video_id": "l'id del video YouTube (è l'`[id]` nel nome del file in downloads/)",
+    "yt_upload_date": "data di CARICAMENTO del video su YouTube ('YYYY-MM-DD'; è quella che dà l'anno della riga)",
+    "yt_release_date": "data di uscita dichiarata dal video, quando c'è ('YYYY-MM-DD'; non è l'anno del brano: «Who Knew» è caricato nel 2018 ma è del 2000)",
+    "yt_channel": "canale che ha pubblicato il video (o l'uploader)",
+    "yt_channel_url": "link del canale",
+    "yt_description": "la descrizione del video, intera, come l'ha scritta chi l'ha pubblicato",
+    "yt_views": "visualizzazioni dichiarate al momento della lettura",
+    "yt_likes": "like dichiarati al momento della lettura",
+    "yt_comments": "commenti dichiarati al momento della lettura",
+    "yt_tags": "tag del video, separati da ', '",
+    "yt_category": "categoria YouTube (es. 'Music')",
+    "yt_thumbnail": "URL della miniatura del video (un link, non un file in covers/)",
+    "yt_duration": "durata dichiarata dal video (secondi)",
+    "yt_meta_at": "quando questi dati del video sono stati letti (gli `yt_*` si riscrivono a ogni download, `year` no: si riempie solo se è vuoto)",
     "created_at": "quando è stata aggiunta",
     "updated_at": "ultima modifica",
 }}
