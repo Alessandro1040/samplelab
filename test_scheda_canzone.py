@@ -585,15 +585,45 @@ class TestCablaggio(unittest.TestCase):
     def setUpClass(cls):
         cls.pagina = leggi(PAGINA_PATH)
         cls.index = leggi(INDEX_PATH)
+        cls.browse = leggi(os.path.join(BASE_DIR, "browse.html"))
         with open(APP_PATH, encoding="utf-8") as fh:
             cls.app = fh.read()
 
     def test_pulsante_su_ogni_riga_del_database(self):
         # il link sta nella cella delle azioni, fuori da ogni condizione: c'è su
-        # ogni canzone, anche su quelle senza file locale
-        self.assertIn('href="scheda.html?song=${encodeURIComponent(s.id)}"', self.index)
+        # ogni canzone, anche su quelle senza file locale.
+        # ⚠️ Il 18/09/2026 puntava a `scheda.html?song=…`: quel file NON esiste (la
+        # pagina si serve sulla rotta `/scheda`) e il clic apriva una pagina
+        # inesistente. La rotta giusta è quella, senza estensione.
+        self.assertIn('href="/scheda?song=${encodeURIComponent(s.id)}"', self.index)
         self.assertIn(">📄 Scheda</a>", self.index)
         self.assertIn("a.db-stem-btn{display:inline-block;text-decoration:none}", self.index)
+
+    def test_i_link_della_tabella_si_aprono_in_una_scheda_nuova(self):
+        # `<base target="_blank">` nell'head di index (2).html: i link della tabella
+        # (📄 Scheda, 💿 album, i chip artista) si aprono in una scheda NUOVA. È il
+        # motivo per cui il 404 del pulsante «📄 Scheda» compariva «altrove» e la
+        # pagina del database restava dov'era. Il tag era scritto CINQUE volte (conta
+        # solo il primo): ora ce n'è uno, con il commento che spiega cosa fa.
+        self.assertEqual(self.index.count('<base target="_blank">'), 1)
+        self.assertIn("<!-- I link della tabella (📄 Scheda", self.index)
+        self.assertIn("si aprono in una\n     scheda NUOVA", self.index)
+
+    def test_nessun_link_a_file_html(self):
+        # Le pagine dello stesso sito si linkano con la ROTTA (`/scheda`, `/browse`,
+        # `/onyx`) e non col nome del file: `scheda.html` e `browse.html` rispondono
+        # 404, e il browser mostra «pagina inesistente».
+        for nome, testo in (("index (2).html", self.index), ("scheda.html", self.pagina),
+                            ("browse.html", self.browse)):
+            for pezzo in ('href="scheda.html', 'href="browse.html',
+                          "'scheda.html?song='", "'browse.html?artist='", "'browse.html?album='"):
+                self.assertNotIn(pezzo, testo, "%s: resta il link %r" % (nome, pezzo))
+        # ...e i link ci sono, nella forma giusta
+        self.assertIn('href="/browse?artist=${encodeURIComponent(a)}"', self.index)
+        self.assertIn('href="/browse?album=${encodeURIComponent(s.album)}"', self.index)
+        self.assertIn("'/scheda?song='+encodeURIComponent(id||'')", self.pagina)
+        self.assertIn("'/browse?artist='+encodeURIComponent(a)", self.pagina)
+        self.assertIn("'/browse?album='+encodeURIComponent(a)", self.browse)
 
     def test_sezioni_della_pagina(self):
         for pezzo in ('id="hero"', 'id="stem-body"', 'id="varianti-body"', 'id="sample-body"',
@@ -630,7 +660,7 @@ class TestCablaggio(unittest.TestCase):
 
     def test_la_pagina_apre_dal_pulsante_e_dal_link_diretto(self):
         self.assertIn("const songId=(params.get('song')||'').trim();", self.pagina)
-        self.assertIn("'scheda.html?song='+encodeURIComponent(id||'')", self.pagina)
+        self.assertIn("'/scheda?song='+encodeURIComponent(id||'')", self.pagina)
 
 
 def app_is_up(url):
@@ -686,6 +716,31 @@ class TestEndpointVivo(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(SAMPLELAB_URL + "/db/songs/non-esiste/scheda", timeout=30)
         self.assertEqual(ctx.exception.code, 404)
+
+    def test_il_link_della_tabella_apre_una_pagina_vera(self):
+        # Il difetto del 18/09/2026 non l'avrebbe visto un controllo sul testo
+        # dell'href: il link «sembrava» giusto (`scheda.html?song=…`) ma portava a un
+        # 404. Qui si CHIEDE all'app la pagina che quel link apre, con un id vero.
+        with urllib.request.urlopen(
+                SAMPLELAB_URL + "/scheda?song=" + urllib.parse.quote(self.brano["id"]),
+                timeout=30) as r:
+            self.assertEqual(r.status, 200)
+            corpo = r.read().decode("utf-8", "replace")
+        self.assertIn("Tracce di cui è composta", corpo)
+        # ...e il vecchio indirizzo (il nome del file) davvero non esiste: era quello
+        # che faceva comparire la pagina inesistente.
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(SAMPLELAB_URL + "/scheda.html", timeout=30)
+        self.assertEqual(ctx.exception.code, 404)
+
+    def test_anche_artista_e_album_portano_a_pagine_vere(self):
+        artista = (self.brano.get("artist") or "").split(" / ")[0].strip()
+        if not artista:
+            self.skipTest("il primo brano della libreria non ha artista")
+        with urllib.request.urlopen(
+                SAMPLELAB_URL + "/browse?artist=" + urllib.parse.quote(artista),
+                timeout=30) as r:
+            self.assertEqual(r.status, 200)
 
     def test_libreria_intatta(self):
         with urllib.request.urlopen(SAMPLELAB_URL + "/db/stats", timeout=30) as r:

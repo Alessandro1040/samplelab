@@ -139,9 +139,9 @@ let mixerAttivo=false, mixerTimer=null;
 // ─── utilità (come nelle altre pagine: browse.html / index (2).html) ───
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function fmtTime(sec){if(sec==null||sec===''||isNaN(sec))return'—';const m=Math.floor(sec/60);return m+':'+String(Math.floor(sec%60)).padStart(2,'0')}
-function artistHref(a){return a?'browse.html?artist='+encodeURIComponent(a):''}
-function albumHref(a){return a?'browse.html?album='+encodeURIComponent(a):''}
-function schedaHref(id){return 'scheda.html?song='+encodeURIComponent(id||'')}
+function artistHref(a){return a?'/browse?artist='+encodeURIComponent(a):''}
+function albumHref(a){return a?'/browse?album='+encodeURIComponent(a):''}
+function schedaHref(id){return '/scheda?song='+encodeURIComponent(id||'')}
 // Multi-artista: un link per ogni artista (stessa regola di browse.html).
 function artistChipsHtml(artist){
   const parts=String(artist||'').split(/\s*(?:\s+\/\s*|\s*\/\s+|,|;|\||\+|&|feat\.?|ft\.?|\bwith\b)\s*/gi).map(a=>a.trim()).filter(Boolean);

@@ -478,10 +478,10 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
 .ver-chip:active{transform:scale(.97)}
 
 </style>
-<base target="_blank">
-<base target="_blank">
-<base target="_blank">
-<base target="_blank">
+<!-- I link della tabella (📄 Scheda, 💿 album, i chip artista) si aprono in una
+     scheda NUOVA: è questo <base> a dirlo, per tutti i link senza `target` — per
+     questo un indirizzo sbagliato compariva "altrove" e non nella pagina. Era
+     scritto cinque volte (conta solo il primo): ora ce n'è uno. -->
 <base target="_blank">
 </head>
 <body>
@@ -3428,7 +3428,7 @@ function splitArtists(s){
 function dbArtistChips(artist){
   const list=splitArtists(artist);
   if(!list.length) return '';
-  return '<div class="db-artist-chips">'+list.map(a=>`<a class="db-artist-chip" href="browse.html?artist=${encodeURIComponent(a)}" title="Tutte le canzoni di ${esc(a)}">${esc(a)}</a>`).join('')+'</div>';
+  return '<div class="db-artist-chips">'+list.map(a=>`<a class="db-artist-chip" href="/browse?artist=${encodeURIComponent(a)}" title="Tutte le canzoni di ${esc(a)}">${esc(a)}</a>`).join('')+'</div>';
 }
 // Chips cliccabili nella barra in basso → filtro artista nel player Onyx
 function nowbarArtistChips(artist){
@@ -4510,7 +4510,7 @@ function renderDbTable(songs){
       <td><div class="db-cell-stack">
         <div class="db-cell-flex">
           <input class="db-cell-edit ${v('title',s.title)}" value="${esc(s.title||s.local_file||'')}" onchange="updateSongField('${s.id}','title',this.value)" title="Clicca per modificare">
-          ${s.album?`<a class="db-browse-link" href="browse.html?album=${encodeURIComponent(s.album)}" title="Vai all'album di questa canzone">💿</a>`:''}
+          ${s.album?`<a class="db-browse-link" href="/browse?album=${encodeURIComponent(s.album)}" title="Vai all'album di questa canzone">💿</a>`:''}
         </div>
         <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted)">${esc(s.local_file||'')}</span>
       </div></td>
@@ -4520,7 +4520,7 @@ function renderDbTable(songs){
       </div></td>
       <td><div class="db-cell-flex">
         <input class="db-cell-edit" value="${esc(s.album||'')}" onchange="updateSongField('${s.id}','album',this.value)" style="color:var(--text)" title="Clicca per modificare">
-        ${s.album?`<a class="db-browse-link" href="browse.html?album=${encodeURIComponent(s.album)}" title="Vai all'album">💿</a>`:''}
+        ${s.album?`<a class="db-browse-link" href="/browse?album=${encodeURIComponent(s.album)}" title="Vai all'album">💿</a>`:''}
       </div></td>
       <td><input class="db-cell-edit" value="${esc(producers)}" onchange="updateSongField('${s.id}','producers',this.value)" style="color:var(--text)" title="Produttori"></td>
       <td><input class="db-cell-edit" value="${s.year||''}" onchange="updateSongField('${s.id}','year',this.value)" style="color:var(--text);width:60px"></td>
@@ -4531,7 +4531,7 @@ function renderDbTable(songs){
   ${s.stem_count>0?`<span class="db-rel-badge" style="color:var(--accent)">✂️ ${s.stem_count}</span>`:`<button class="db-stem-btn" onclick="quickStem('${s.id}','${escA(s.local_file||'')}')">✂️ Stem</button>`}
   <button class="db-stem-btn" onclick="openDbEditor('${s.id}')">✏️ Edit</button>
   ${s.local_file?`<button class="db-stem-btn" onclick="openInSampler('${s.id}')" title="Apri nel sampler FL-Studio: griglia/metronomo/TAP per controllare il BPM vero">🎛 Sampler</button>`:''}
-  <a class="db-stem-btn" href="scheda.html?song=${encodeURIComponent(s.id)}" title="Apri la scheda della canzone: le tracce stem di cui è composta, i remix e le cover, i campionamenti WhoSampled">📄 Scheda</a>
+  <a class="db-stem-btn" href="/scheda?song=${encodeURIComponent(s.id)}" title="Apri la scheda della canzone: le tracce stem di cui è composta, i remix e le cover, i campionamenti WhoSampled">📄 Scheda</a>
 </td>
       <td>${s.relation_count>0?`<span class="db-rel-badge">🔗 ${s.relation_count}</span>`:`<span style="color:var(--muted);font-size:10px">—</span>`}</td>
       <td>
@@ -5371,12 +5371,12 @@ function dbSongAlbum(title,artist){
 function relTitleLink(title,artist){
   const album=dbSongAlbum(title,artist);
   return album
-    ?`<a class="db-browse-link" href="browse.html?album=${encodeURIComponent(album)}" title="Vai all'album" style="font-weight:700">${esc(title||'—')}</a>`
+    ?`<a class="db-browse-link" href="/browse?album=${encodeURIComponent(album)}" title="Vai all'album" style="font-weight:700">${esc(title||'—')}</a>`
     :esc(title||'—');
 }
 function relArtistLink(artist){
   return artist
-    ?`<a class="db-browse-link" href="browse.html?artist=${encodeURIComponent(artist)}" title="Tutte le canzoni di questo artista">${esc(artist)}</a>`
+    ?`<a class="db-browse-link" href="/browse?artist=${encodeURIComponent(artist)}" title="Tutte le canzoni di questo artista">${esc(artist)}</a>`
     :'';
 }
 

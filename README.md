@@ -188,7 +188,7 @@ evidenziarli, non è codice nostro):
 ## Scheda canzone (pagina `/scheda`) — tutto quello che il database sa di un brano
 
 Nella tabella del **Database** (pagina `/`) ogni riga ha il pulsante **📄 Scheda**:
-apre `scheda.html?song=<id>`, una schermata dedicata a quella canzone con quattro
+apre `/scheda?song=<id>`, una schermata dedicata a quella canzone con quattro
 riquadri, riempiti **solo** con i dati del database.
 
 | Riquadro | Cosa mostra | Da dove viene |
@@ -929,8 +929,9 @@ Da tenere presente nelle sessioni di lavoro successive:
 
 
 - **SCHEDA CANZONE (18/09/2026).** Nella tabella del database ogni riga ha il
-  pulsante **📄 Scheda**: è un link a `scheda.html?song=<id>` (non un `onclick`,
-  così si può aprire anche in una scheda nuova del browser). La schermata
+  pulsante **📄 Scheda**: è un link a `/scheda?song=<id>` (non un `onclick`, così si
+  può aprire anche in una scheda nuova del browser — e si apre **davvero** in una
+  scheda nuova: nell'head di `index (2).html` c'è `<base target="_blank">`). La schermata
   `/scheda` mette insieme gli **stem** (`stem_sessions` + `stem_tracks` + la
   cartella di Demucs), i **remix/cover** e i **campionamenti WhoSampled**
   (`sample_relations`) e le **analisi audio** (`audio_analyses`), con un mixer
@@ -1203,4 +1204,33 @@ Da tenere presente nelle sessioni di lavoro successive:
   clic (contenuto visibile, `offsetHeight` > 0), si richiude al secondo clic e il
   riquadro resta largo quanto la riga dei controlli; mappa del codice §12 ricalcolata
   dal file vero (il documento del sampler ora finisce a riga **3143**).
+
+
+- **PULSANTE «📄 SCHEDA»: APERTURA CORRETTA (18/09/2026).** Segnalazione di Alessandro:
+  «il pulsante scheda su ogni canzone non funziona, viene aperta una pagina
+  inesistente». Il pulsante c'era dal 17/09 ma linkava il **nome del FILE**
+  (`scheda.html?song=<id>`, href relativo): l'app quella pagina la serve sulla rotta
+  **`/scheda`**, quindi il browser chiedeva `/scheda.html` e riceveva un **404** — in
+  una scheda nuova, perché nell'head di `index (2).html` c'è `<base target="_blank">`
+  (ed è per questo che la pagina inesistente «compariva altrove» mentre la tabella del
+  database restava al suo posto). Corretti **tutti** i link interni che usavano i nomi
+  dei file invece delle rotte — **11 sostituzioni in 3 pagine**: `/scheda?song=…` (il
+  pulsante), `/browse?artist=…` e `/browse?album=…` (i chip artista, le 💿 nel database
+  e i link interni di `browse.html` e `scheda.html`). Ripulito anche il
+  `<base target="_blank">` **duplicato cinque volte** (conta solo il primo): ora ce n'è
+  uno, con il commento che spiega cosa fa.
+  **Perché non se n'era accorto nessuno:** il test controllava la *stringa* dell'href
+  (giusta per sbaglio) e la pagina veniva aperta per la sua rotta vera `/scheda`: la
+  domanda che mancava — «il link che vedo porta a una pagina che l'app serve?» — non
+  era coperta da nessun test. Ora sì (**4 test nuovi** in `test_scheda_canzone.py`,
+  42 in tutto): nessun link a file `.html`, l'href del pulsante è `/scheda?song=…`, il
+  `<base>` è uno solo, e due prove sull'**app viva** chiedono `/scheda?song=<id vero>`
+  (200, con le sezioni della scheda) e `/browse?artist=…` (200) — più il fatto che
+  `/scheda.html` risponde 404.
+  Verifiche del 18/09/2026: in **Chrome vero**, cliccando 📄 Scheda nella tabella si
+  apre una **seconda scheda** su `/scheda?song=song_f5dfab2c474a` con titolo
+  «SampleLab (2) — off the wall remix» e le sezioni `hero`, `stem-body`,
+  `varianti-body`, `sample-body` — **nessun 404** — e il link 💿 porta a
+  `/browse?album=Mus` («Esplora»); **201 test di suite** (erano 197); pagine
+  `/` `/browse` `/onyx` `/scheda` → 200.
 

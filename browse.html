@@ -114,8 +114,8 @@ let playingId=null;
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function escA(s){return String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
 function fmtTime(sec){if(sec==null||isNaN(sec))return'—';const m=Math.floor(sec/60);return m+':'+String(Math.floor(sec%60)).padStart(2,'0')}
-function artistHref(a){return a?'browse.html?artist='+encodeURIComponent(a):''}
-function albumHref(a){return a?'browse.html?album='+encodeURIComponent(a):''}
+function artistHref(a){return a?'/browse?artist='+encodeURIComponent(a):''}
+function albumHref(a){return a?'/browse?album='+encodeURIComponent(a):''}
 // Multi-artista: ogni artista diventa un link cliccabile separato.
 // Separatori: / , ; | + & feat. ft. with. Lo slash "/" vale solo con spazi
 // attorno (es. "Eminem / D12"), così "AC/DC" non viene spezzato.
