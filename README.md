@@ -417,9 +417,12 @@ Da tenere presente nelle sessioni di lavoro successive:
   modello): senza, la pagina funziona e il controllo voce dice "non verificabile" col
   motivo. «Verifica tutto» continua a lavorare in blocco (percorso inline).
 - **Confronto voce (`/verifica`, 18/09/2026).** Sotto la pastiglia 🗣 c'è **📄 Confronta
-  testi e audio**: i due testi affiancati (trascrizione | liriche, con le **parole in
-  comune evidenziate**) e **due player** (il file locale o l'a-cappella · l'anteprima
-  ufficiale) — estetica del sampler ma **senza trim giallo, griglia e BPM**. I testi e i
+  testi e audio** (lo stesso pulsante è anche nella sezione **3 · Confronto voce** in
+  fondo alla pagina, sempre raggiungibile: quello dentro il blocco del progresso resta
+  invisibile finché non lanci una verifica): i due testi affiancati (trascrizione |
+  liriche, con le **parole in comune evidenziate**) e **due player** (il file locale o
+  l'a-cappella · l'anteprima ufficiale) — estetica del sampler ma **senza trim giallo,
+  griglia e BPM**. I testi e i
   due file si **salvano** nel database (`testo_trascrizione`, `testo_riferimento`,
   `testo_parole_uniche`, `testo_audio_nostro`, `testo_audio_riferimento`,
   `anteprima_file`) e si leggono da `GET /db/songs/<id>/confronto`; le anteprime si
@@ -1947,7 +1950,13 @@ Da tenere presente nelle sessioni di lavoro successive:
     `/stream`). `/stream` e `/anteprima` passano ora da `_risposta_audio` e rifiutano
     un `../` (`_dentro_la_cartella`).
   - **In pagina** (`/verifica`): sotto la pastiglia 🗣 c'è **📄 Confronta testi e
-    audio**. Si apre un pannello con i due testi affiancati — sinistra la trascrizione,
+    audio**, e lo stesso pulsante è anche nella sezione **3 · Confronto voce** in fondo
+    alla pagina — *fuori* dal blocco del progresso, che resta nascosto finché non lanci
+    una verifica: la prima prova in Chrome vero non riusciva a cliccare quello dentro
+    (`.progress{display:none}`), quindi su una canzone già verificata il confronto era
+    irraggiungibile. La sezione scrive anche il verdetto in una riga («verdetto: ✓
+    confermato · 75.8% · 273 parole») o perché non c'è ancora.
+    Il pannello mostra i due testi affiancati (sinistra la trascrizione,
     destra le liriche — con le **parole in comune evidenziate** in verde, e sotto **due
     player a forma d'onda** (sinistra il file locale o l'a-cappella, destra l'anteprima
     ufficiale): ▶/⏸, ⏹, **click sull'onda per andare al punto**, «▶ avvia entrambi».
@@ -1973,7 +1982,7 @@ Da tenere presente nelle sessioni di lavoro successive:
     **JavaScriptCore**; `percorso_relativo`, `campi_dal_risultato_testo`,
     `_audio_del_confronto`, `_dentro_la_cartella`, rotta e legenda; e sull'**app viva**
     `/db/songs/<id>/confronto`, 404 su id inesistente, `/anteprima/…` col `Range` → 206
-    con `Content-Range: bytes 0-1023/994898` e 404 su `../`) e **403 test di suite**
+    con `Content-Range: bytes 0-1023/994898` e 404 su `../`) e **404 test di suite**
     (`OK`, erano 390); sul caso vero
     `POST /db/songs/song_abf47df2aae9/audio_check` → **1230 hash allineati a 76,0 s**
     con `anteprima_file` = `anteprime/6811474800_21_Questions__feat__Nate_Dogg_.m4a`.
@@ -1988,6 +1997,17 @@ Da tenere presente nelle sessioni di lavoro successive:
     Whisper non danno la stessa trascrizione parola per parola — il verdetto resta
     "confermato" in entrambe. Backup del database **prima** di scrivere in
     `/tmp/samplelab_backup_18set2026_pre_confronto.db`.
+  - **In CHROME VERO** (undetected_chromedriver, `/verifica?song=song_abf47df2aae9`):
+    il pulsante della sezione §3 apre il pannello (`pannello: true`), la nota dice
+    «verdetto: ✓ confermato · 75.8% · 273 parole», i numeri sono
+    «parole attese 152 · sentite 273 · uniche 153 · in comune 116», i due testi sono lì
+    (2.922 caratteri la trascrizione, 3.078 le liriche) con **229 parole evidenziate**
+    nella trascrizione e **234** nelle liriche, **2 canvas** con **7.802 pixel** di onda
+    disegnati davvero (Web Audio + canvas: la sola parte che JavaScriptCore non può
+    provare) e le due etichette «a cappella (demucs)» / «anteprima ufficiale (iTunes)»
+    con le durate giuste (**0:00 / 4:18** e **0:00 / 0:30**). Premendo ▶ il tempo
+    AVANZA davvero («0:00 → **0:02** / 4:18» dopo 3 s, il pulsante diventa ⏸ e ⏹ torna
+    a «0:00 / 4:18»): è la prova che i due file si possono ascoltare affiancati.
 
 
 

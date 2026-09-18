@@ -859,11 +859,27 @@ class TestConfrontoVoce(unittest.TestCase):
     def test_la_pagina_ha_il_pannello(self):
         for pezzo in ('id="confrontoBox"', 'id="confrontoNumeri"', 'id="playerNostro"',
                       'id="playerRiferimento"', 'id="testoTrascrizione"', 'id="testoRiferimento"',
+                      'id="btnConfronto"', 'id="confrontoNota"',
                       "apriConfronto(", "avviaEntrambi()", "fermaEntrambi()", "/confronto"):
             self.assertIn(pezzo, self.verifica, pezzo)
         # dopo una verifica il pannello aperto si aggiorna da solo (testo appena salvo)
         corpo = estrai_funzione(self.verifica, "avviaVerifica")
         self.assertIn("apriConfronto(true)", corpo)
+
+    def test_il_pulsante_e_raggiungibile_anche_a_pagina_ricaricata(self):
+        """Il pulsante dentro il blocco del progresso resta invisibile finché non si
+        lancia una verifica (`.progress{display:none}`): su una canzone già verificata
+        serviva un pulsante FUORI da quel blocco (lo ha trovato la prova in Chrome
+        vero del 18/09/2026, che non riusciva a cliccarlo)."""
+        fuori = self.verifica.index('id="btnConfronto"')
+        fra = self.verifica[self.verifica.index('id="verdicts"'):fuori]
+        self.assertGreaterEqual(fra.count("</div>"), 2,
+                                "fra i verdetti e il pulsante devono chiudersi "
+                                ".verdicts e .progress: il pulsante è fuori dal blocco")
+        # e la sezione dice DA DOVE viene il verdetto (o perché non c'è ancora)
+        corpo = estrai_funzione(self.verifica, "carica")
+        self.assertIn('document.getElementById("confrontoNota").textContent', corpo)
+        self.assertIn("etichettaVerdetto(s.testo_esito)", corpo)
 
     def test_i_due_player_non_hanno_il_trim_giallo(self):
         corpo = estrai_funzione(self.verifica, "creaPlayer")
