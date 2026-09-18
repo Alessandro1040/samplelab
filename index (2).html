@@ -4805,6 +4805,18 @@ const AUDIO_CHIP = {
   'ambiguo':         ['#fbbf24', '? ambiguo'],
   'non verificabile':['var(--muted)', '– non verificabile'],
 };
+// Il motivo è una frase lunga («nessuna anteprima ufficiale: iTunes 0 risultati per
+// «50 Cent 1998 Freestyle»»): nella pastiglia se ne mostra la prima parte, la frase
+// intera resta nel tooltip. Funzione PURA (test_audio_match.py la esegue in JavaScriptCore).
+function motivoBreve(motivo, max){
+  const t = String(motivo || '').trim();
+  if(!t) return '';
+  const taglio = t.search(/[:;,.]/);            // prima clausola: "nessuna anteprima ufficiale"
+  let breve = taglio > 0 ? t.slice(0, taglio) : t;
+  const limite = max || 34;
+  if(breve.length > limite) breve = breve.slice(0, limite - 1).trim() + '…';
+  return breve;
+}
 function chipAudio(s, quale){
   const prefisso = (quale === 'whosampled') ? 'ws_audio_' : 'audio_match_';
   const esito = (s && s[prefisso + 'esito']) || '';
@@ -4814,9 +4826,14 @@ function chipAudio(s, quale){
   const off = (s[prefisso + 'offset'] == null) ? '' : ` · offset ${Number(s[prefisso + 'offset']).toFixed(1)} s`;
   const fonte = s[prefisso + 'fonte'] ? ` · ${esc(s[prefisso + 'fonte'])}` : '';
   const quando = s[prefisso + 'at'] ? ` · ${esc(s[prefisso + 'at'])}` : '';
+  // PERCHÉ non si è potuto confrontare (campo `*_motivo`): si vede in riga e per intero
+  // nel tooltip, così "non verificabile" non resta un mistero.
+  const motivo = String(s[prefisso + 'motivo'] || '').trim();
+  const motivoTesto = motivo ? ` · ${esc(motivoBreve(motivo))}` : '';
+  const motivoTitolo = motivo ? `${esc(motivo)} — ` : '';
   const oggetto = (quale === 'whosampled') ? 'il link WhoSampled' : 'la canzone trovata su Genius';
   return `<span class="db-rel-badge" style="color:${stile[0]};cursor:help" `+
-         `title="Conferma AUDIO (${oggetto}) con l'anteprima ufficiale iTunes${fonte}${voti}${off}${quando}">🔊 ${stile[1]}</span>`;
+         `title="${motivoTitolo}Conferma AUDIO (${oggetto}) con l'anteprima ufficiale iTunes${fonte}${voti}${off}${quando}">🔊 ${stile[1]}${motivoTesto}</span>`;
 }
 
 function renderDbTable(songs){

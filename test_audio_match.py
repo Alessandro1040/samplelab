@@ -411,7 +411,8 @@ class TestChipNellaPagina(unittest.TestCase):
             raise AssertionError("AUDIO_CHIP assente in index (2).html")
         codice = ("function esc(s){return String(s==null?'':s)"
                   ".replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}\n"
-                  + m.group(0) + "\n" + estrai_funzione(src, "chipAudio") + "\n"
+                  + m.group(0) + "\n" + estrai_funzione(src, "motivoBreve") + "\n"
+                  + estrai_funzione(src, "chipAudio") + "\n"
                   + "const out = %s;\nJSON.stringify(out);\n" % casi)
         return esegui_js(codice)
 
@@ -479,6 +480,36 @@ class TestChipNellaPagina(unittest.TestCase):
         self.assertIn("40.8 s", html[1])
         self.assertIn("il link WhoSampled", html[1])
         self.assertIn("la canzone trovata su Genius", html[0])
+
+    def test_motivo_breve(self):
+        html = self._chip(
+            "[motivoBreve('nessuna anteprima ufficiale: iTunes 0 risultati per «50 Cent 1998 Freestyle»'),"
+            "motivoBreve(''),motivoBreve(null),"
+            "motivoBreve('audio non verificabile: manca il file locale in downloads/'),"
+            "motivoBreve('una frase senza separatori che e davvero molto molto lunga')]")
+        self.assertEqual(html[0], "nessuna anteprima ufficiale")     # si taglia ai due punti
+        self.assertEqual(html[1], "")
+        self.assertEqual(html[2], "")
+        self.assertEqual(html[3], "audio non verificabile")
+        self.assertTrue(html[4].endswith("…"))
+        self.assertLessEqual(len(html[4]), 34)
+
+    def test_pastiglia_con_il_motivo(self):
+        html = self._chip("[chipAudio({audio_match_esito:'non verificabile',"
+                          "audio_match_motivo:'nessuna anteprima ufficiale: iTunes 0 risultati "
+                          "per «50 Cent 1998 Freestyle»',audio_match_at:'2026-09-18 16:10:00'})]")[0]
+        self.assertIn("🔊 – non verificabile", html)
+        self.assertIn("nessuna anteprima ufficiale", html)                  # si vede in riga
+        self.assertIn("iTunes 0 risultati per «50 Cent 1998 Freestyle»", html)  # frase intera nel title
+        self.assertNotIn("nessuna anteprima ufficiale · nessuna", html)
+
+    def test_pastiglia_del_link_anche_col_motivo(self):
+        html = self._chip("[chipAudio({ws_audio_esito:'non verificabile',"
+                          "ws_audio_motivo:'nessuna anteprima ufficiale: i 3 risultati con anteprima "
+                          "per «End of the World» sono di altri artisti'},'whosampled')]")[0]
+        self.assertIn("🔊 – non verificabile", html)
+        self.assertIn("il link WhoSampled", html)
+        self.assertIn("i 3 risultati con anteprima", html)                  # frase intera nel title
 
 
 class TestEsitoWhosampled(unittest.TestCase):
@@ -577,12 +608,14 @@ class TestCampiDalRisultatoAudio(unittest.TestCase):
     def test_prefisso_genius(self):
         campi = APP.campi_dal_risultato_audio(
             {"esito": "confermato", "voti": 12, "comuni": 30, "offset": 1.5,
-             "fonte": "iTunes 1 · X — Y"}, "audio_match_")
+             "fonte": "iTunes 1 · X — Y", "motivo_testo": None}, "audio_match_")
         self.assertEqual(set(campi), {"audio_match_esito", "audio_match_voti",
                                       "audio_match_comuni", "audio_match_offset",
-                                      "audio_match_fonte", "audio_match_at"})
+                                      "audio_match_fonte", "audio_match_motivo",
+                                      "audio_match_at"})
         self.assertEqual(campi["audio_match_esito"], "confermato")
         self.assertEqual(campi["audio_match_voti"], 12)
+        self.assertIsNone(campi["audio_match_motivo"])      # il confronto è stato fatto
         self.assertTrue(campi["audio_match_at"])
 
     def test_prefisso_whosampled(self):
@@ -593,6 +626,77 @@ class TestCampiDalRisultatoAudio(unittest.TestCase):
         self.assertEqual(campi["ws_audio_voti"], 8)
         self.assertEqual(campi["ws_audio_offset"], 40.8)
         self.assertNotIn("audio_match_esito", campi)
+
+    def test_il_motivo_finisce_nel_campo(self):
+        campi = APP.campi_dal_risultato_audio(
+            {"esito": "non verificabile", "voti": None, "comuni": None, "offset": None,
+             "fonte": None, "motivo_testo": "nessuna anteprima ufficiale: iTunes 0 risultati per «X»"},
+            "audio_match_")
+        self.assertEqual(campi["audio_match_motivo"],
+                         "nessuna anteprima ufficiale: iTunes 0 risultati per «X»")
+
+
+class TestMotivoSenzaAnteprima(unittest.TestCase):
+    """PERCHÉ non si è potuto confrontare: la frase che finisce in `*_motivo` e nel
+    tooltip, così «non verificabile» non resta un mistero (richiesta di Alessandro)."""
+
+    def test_zero_risultati(self):
+        testo = APP.motivo_senza_anteprima(
+            {"termine": "50 Cent 1998 Freestyle", "risultati": 0, "con_anteprima": 0},
+            "50 Cent", "1998 Freestyle")
+        self.assertEqual(testo,
+                         "nessuna anteprima ufficiale: iTunes 0 risultati per «50 Cent 1998 Freestyle»")
+
+    def test_risultati_senza_anteprima(self):
+        testo = APP.motivo_senza_anteprima({"termine": "X Y", "risultati": 3, "con_anteprima": 0})
+        self.assertIn("3 risultati su iTunes", testo)
+        self.assertIn("nessuno ha l'anteprima", testo)
+
+    def test_risultati_di_altri_artisti(self):
+        testo = APP.motivo_senza_anteprima({"termine": "End of the World", "risultati": 5,
+                                            "con_anteprima": 3, "artisti_scartati": 3})
+        self.assertIn("sono di altri artisti", testo)
+        self.assertIn("«End of the World»", testo)
+
+    def test_candidato_sotto_soglia(self):
+        testo = APP.motivo_senza_anteprima({"termine": "X", "risultati": 2, "con_anteprima": 1,
+                                            "migliore": "Shadi — 1998 Freestyle",
+                                            "punteggio": 0.42})
+        self.assertIn("è troppo diverso", testo)
+        self.assertIn("0.42 < 0.55", testo)
+
+    def test_errore_di_rete(self):
+        self.assertIn("ricerca iTunes non riuscita",
+                      APP.motivo_senza_anteprima({"termine": "X", "errore": "URLError: timeout"}))
+
+    def test_termine_ricostruito_se_manca(self):
+        self.assertIn("«50 Cent 1998 Freestyle»",
+                      APP.motivo_senza_anteprima({}, "50 Cent", "1998 Freestyle"))
+
+    def test_diagnostica_della_ricerca_vera(self):
+        # la ricerca VERA compila la diagnostica: il caso misurato il 18/09/2026
+        diag = {}
+        try:
+            APP.cerca_anteprima_itunes("50 Cent", "1998 Freestyle", diagnostica=diag)
+        except Exception as e:
+            self.skipTest("iTunes non raggiungibile: %s" % e)
+        self.assertEqual(diag.get("termine"), "50 Cent 1998 Freestyle")
+        self.assertEqual(diag.get("risultati"), 0)
+        self.assertEqual(APP.motivo_senza_anteprima(diag, "50 Cent", "1998 Freestyle"),
+                         "nessuna anteprima ufficiale: iTunes 0 risultati per «50 Cent 1998 Freestyle»")
+        self.assertEqual(APP.motivo_senza_anteprima({}, "50 Cent", "1998 Freestyle"),
+                         "nessuna anteprima ufficiale: iTunes 0 risultati per «50 Cent 1998 Freestyle»")
+
+    def test_diagnostica_con_artista_scartato(self):
+        diag = {}
+        try:
+            APP.cerca_anteprima_itunes("Big Sean", "Control", diagnostica=diag)
+        except Exception as e:
+            self.skipTest("iTunes non raggiungibile: %s" % e)
+        self.assertGreaterEqual(diag.get("risultati") or 0, 1)
+        # il candidato "Control (Kendrick Lamar Diss)" di The Rap Mafia viene scartato
+        self.assertGreaterEqual(diag.get("artisti_scartati") or 0, 1)
+        self.assertIn("altri artisti", APP.motivo_senza_anteprima(diag, "Big Sean", "Control"))
 
 
 def estrai_funzione_py(src, nome):
@@ -697,6 +801,20 @@ class TestCablaggio(unittest.TestCase):
         riga = estrai_funzione(self.index_src, "renderDbTable")
         self.assertIn("chipAudio(s,'whosampled')", riga)
         self.assertIn("function chipAudio(s, quale)", self.index_src)
+
+    def test_il_motivo_e_collegato(self):
+        # le due colonne del motivo, la legenda, la frase nel backend e la pastiglia
+        for colonna in ("audio_match_motivo", "ws_audio_motivo"):
+            self.assertIn('("%s", "TEXT")' % colonna, self.app_src)
+            self.assertIn('"%s":' % colonna, self.app_src)
+        corpo = estrai_funzione_py(self.app_src, "verifica_audio_riferimento")
+        self.assertIn("motivo_senza_anteprima(", corpo)
+        self.assertIn('"motivo_testo"', corpo)
+        diagnostica = estrai_funzione_py(self.app_src, "cerca_anteprima_itunes")
+        self.assertIn("diagnostica", diagnostica)
+        self.assertIn("artisti_scartati", diagnostica)
+        self.assertIn("function motivoBreve(motivo, max)", self.index_src)
+        self.assertIn("motivoBreve(", estrai_funzione(self.index_src, "chipAudio"))
 
 
 @unittest.skipUnless(app_is_up(SAMPLELAB_URL), "app non attiva su " + SAMPLELAB_URL)

@@ -346,9 +346,14 @@ Da tenere presente nelle sessioni di lavoro successive:
   si rileggono dall'URL (`/Artista/Titolo/`, niente browser). Un link si **rimuove**
   solo con una prova contraria (audio non confermato/ambiguo: caso vero *End of the
   World* → pagina di Skeeter Davis, 9 hash contro 289-2410 dei link giusti), mai per
-  semplice mancanza di dati. ⚠️ Limite noto: freestyle, mixtape e brani fuori
-  catalogo non hanno anteprima ufficiale → "non verificabile", cioè nessun verdetto
-  invece di un sì.
+  semplice mancanza di dati. **Quando il confronto non si può fare, il PERCHÉ finisce
+  nel dato** (`audio_match_motivo` / `ws_audio_motivo`: «nessuna anteprima ufficiale:
+  iTunes 0 risultati per «50 Cent 1998 Freestyle»», «…i 5 risultati con anteprima sono
+  di altri artisti», «…troppo diverso (0.42 < 0.55)», «ricerca iTunes non riuscita: …»)
+  e la pastiglia lo mostra: la prima parte in riga, la frase intera nel tooltip —
+  così «non verificabile» non resta un mistero. ⚠️ Limite noto: freestyle, mixtape e
+  brani fuori catalogo non hanno anteprima ufficiale → "non verificabile", cioè
+  nessun verdetto invece di un sì.
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
   `do_download_playlist`): con yt-dlp recenti provocava "Video unavailable"/403.
 - **FORTISSIMO COMPARE (11/09/2026).** Aggiunti `fortissimo_compare_v3.py`, la
@@ -1638,5 +1643,47 @@ Da tenere presente nelle sessioni di lavoro successive:
   ("non confermato" = allarme da leggere, non condanna) e con l'anteprima ufficiale
   assente il verdetto resta "non verificabile" — la rimozione del link, però, scatta
   solo quando c'è una prova contraria.
+
+- **«NON VERIFICABILE» ORA DICE PERCHÉ (18/09/2026, sera).** Richiesta di Alessandro:
+  «scrivi il motivo nel dato (es. «nessuna anteprima ufficiale: iTunes 0 risultati
+  per …») e mostralo nella pastiglia/nel tooltip, così la riga si spiega da sé».
+  Prima, quando il confronto non si poteva fare, nel database restavano solo i campi
+  vuoti (`audio_match_fonte` NULL) e la pastiglia diceva "non verificabile" senza
+  dire altro. Ora:
+  - `cerca_anteprima_itunes` compila una **diagnostica** (quanti risultati, quanti
+    senza anteprima, quanti scartati perché di un altro artista, il miglior candidato
+    scartato con il suo punteggio, l'eventuale errore di rete);
+  - la funzione PURA `motivo_senza_anteprima(diagnostica, artista, titolo)` ne ricava
+    la frase da scrivere nel dato: «nessuna anteprima ufficiale: iTunes 0 risultati per
+    «50 Cent 1998 Freestyle»», «…i 5 risultati con anteprima per «Big Sean Control»
+    sono di altri artisti», «…«Shadi — 1998 Freestyle» è troppo diverso (0.42 < 0.55)»,
+    «ricerca iTunes non riuscita: …», «audio non verificabile: manca il file locale in
+    downloads/»;
+  - due colonne nuove (`audio_match_motivo`, `ws_audio_motivo`) portano la frase nel
+    database (NULL quando il confronto è stato fatto: lì parlano i numeri) e la
+    pastiglia la mostra — la prima parte in riga (`🔊 – non verificabile · nessuna
+    anteprima ufficiale`), la frase intera nel tooltip — con la funzione pura
+    `motivoBreve` (taglio alla prima clausola, massimo 34 caratteri) in pagina;
+  - il messaggio della Verifica è la stessa frase, quindi database e interfaccia non
+    possono divergere.
+  Verifiche del 18/09/2026: i motivi scritti sulle 6 righe controllate — *1998
+  Freestyle* «iTunes 0 risultati per «50 Cent 1998 Freestyle»», *Fast Lane(Eminem &
+  Royce Da 5'9 Remix)* «0 risultati», *Imperfect* «0 risultati», *Control* «i 5
+  risultati con anteprima per «Big Sean Control» sono di altri artisti» (e per il link
+  WhoSampled «i 1 risultati … sono di altri artisti»), *Game Fucked Up* «i 2 risultati
+  … di altri artisti», *End of the World* «i 5 risultati … di altri artisti» sul lato
+  Genius (il link WhoSampled resta "non confermato", perché lì il confronto è stato
+  fatto: 9 hash) — mentre *21 Questions* e i 4 link giusti non hanno motivo (confronto
+  eseguito); in **Chrome vero** la pastiglia di *1998 Freestyle* mostra «🔊 – non
+  verificabile · nessuna anteprima ufficiale» col tooltip «nessuna anteprima ufficiale:
+  iTunes 0 risultati per «50 Cent 1998 Freestyle» — …» e quella di *End of the World*
+  le due pastiglie distinte; **89 test** in `test_audio_match.py` (erano 76) e **371
+  test di suite** (erano 358, `OK`); pagine `/` `/browse` `/onyx` `/scheda` → 200 dopo
+  il riavvio (le due colonne del motivo migrate da sole); backup del database in
+  `/tmp/samplelab_backup_18set2026_pre_motivo.db`. Da sapere: la frase racconta la
+  ricerca fatta dall'app (artista principale + titolo), quindi un titolo "sporco" può
+  portare a "0 risultati" anche se il brano esiste con un altro nome — è il motivo per
+  cui il campo dice anche *cosa* è stato cercato.
+
 
 

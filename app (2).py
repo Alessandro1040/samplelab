@@ -325,6 +325,7 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               ("audio_match_offset", "REAL"),
                               ("audio_match_comuni", "INTEGER"),
                               ("audio_match_fonte", "TEXT"),
+                              ("audio_match_motivo", "TEXT"),
                               ("audio_match_at", "TEXT"),
                               # stesso controllo, ma sul candidato WhoSampled (18/09/2026):
                               # il link si salvava col solo confronto testuale e con
@@ -336,6 +337,7 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               ("ws_audio_offset", "REAL"),
                               ("ws_audio_comuni", "INTEGER"),
                               ("ws_audio_fonte", "TEXT"),
+                              ("ws_audio_motivo", "TEXT"),
                               ("ws_audio_at", "TEXT")):
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
@@ -4512,6 +4514,7 @@ COLUMN_DOCS = {"songs": {
     "audio_match_comuni": "hash in comune con l'anteprima (anche non allineati)",
     "audio_match_offset": "dove sta l'anteprima ufficiale dentro il file locale (secondi)",
     "audio_match_fonte": "anteprima usata: 'iTunes <id> · artista — titolo (durata)'",
+    "audio_match_motivo": "PERCHÉ non si è potuto confrontare (es. 'nessuna anteprima ufficiale: iTunes 0 risultati per …'); vuoto quando il confronto è stato fatto",
     "audio_match_at": "quando è stato fatto il confronto audio",
     "ws_match_score": "somiglianza del match WhoSampled (0-1)",
     "ws_audio_esito": "conferma AUDIO del link WhoSampled ('confermato'/'non confermato'/'ambiguo'/'non verificabile')",
@@ -4519,6 +4522,7 @@ COLUMN_DOCS = {"songs": {
     "ws_audio_comuni": "hash in comune col candidato WhoSampled (anche non allineati)",
     "ws_audio_offset": "dove sta l'anteprima del candidato dentro il file locale (secondi)",
     "ws_audio_fonte": "anteprima usata per il link WhoSampled: 'iTunes <id> · artista — titolo'",
+    "ws_audio_motivo": "PERCHÉ il confronto del link WhoSampled non si è potuto fare (vuoto se è stato fatto)",
     "ws_audio_at": "quando è stato fatto il confronto audio del link WhoSampled",
     "created_at": "quando è stata aggiunta",
     "updated_at": "ultima modifica",
@@ -4859,7 +4863,7 @@ def artista_compatibile(artisti, candidato, soglia=0.7):
     return False
 
 
-def cerca_anteprima_itunes(artist, title, min_score=0.55):
+def cerca_anteprima_itunes(artist, title, min_score=0.55, diagnostica=None):
     """Anteprima UFFICIALE della canzone da iTunes (API pubblica, senza chiave).
 
     Genius non ha audio: l'unico modo per sentire "ciò che Genius ha trovato" è
@@ -4868,9 +4872,21 @@ def cerca_anteprima_itunes(artist, title, min_score=0.55):
     l'artista compatibile** (`artista_compatibile`), come dict {"preview_url",
     "track", "artist", "album", "durata", "id", "score"}: None se non c'è nessun
     candidato decente — meglio nessun verdetto che un verdetto sul brano sbagliato.
+
+    Se si passa un dict in `diagnostica`, ci si scrive DENTRO perché la ricerca è
+    fallita (quanti risultati, quanti scartati per artista, il migliore scartato,
+    l'errore di rete): è quello che permette di scrivere il motivo nel database
+    («nessuna anteprima ufficiale: iTunes 0 risultati per …») invece di un
+    "non verificabile" che non spiega niente.
     """
     termine = " ".join(p for p in [(artist or "").strip(), (title or "").strip()] if p)
+    if diagnostica is not None:
+        diagnostica.update({"termine": termine, "risultati": 0, "con_anteprima": 0,
+                            "artisti_scartati": 0, "migliore": None, "punteggio": None,
+                            "errore": None})
     if not termine:
+        if diagnostica is not None:
+            diagnostica["errore"] = "nessun termine di ricerca (artista e titolo vuoti)"
         return None
     import urllib.request
     url = "https://itunes.apple.com/search?" + urllib.parse.urlencode(
@@ -4881,17 +4897,28 @@ def cerca_anteprima_itunes(artist, title, min_score=0.55):
             data = json.loads(r.read())
     except Exception as e:
         print(f"[anteprima] iTunes: {e}")
+        if diagnostica is not None:
+            diagnostica["errore"] = f"{type(e).__name__}: {e}"[:120]
         return None
-    migliore, punteggio = None, 0.0
-    for res in data.get("results", []):
-        if not res.get("previewUrl"):
-            continue
+    risultati = data.get("results", []) or []
+    con_anteprima = [res for res in risultati if res.get("previewUrl")]
+    migliore, punteggio, scartati = None, 0.0, 0
+    for res in con_anteprima:
         if not artista_compatibile(artist, res.get("artistName", "")):
+            scartati += 1
             continue
         sc = match_score(artist or "", title or "",
                          res.get("artistName", ""), res.get("trackName", ""))
         if sc > punteggio:
             migliore, punteggio = res, sc
+    if diagnostica is not None:
+        diagnostica.update({
+            "risultati": len(risultati), "con_anteprima": len(con_anteprima),
+            "artisti_scartati": scartati,
+            "migliore": ("%s — %s" % (migliore.get("artistName", ""),
+                                      migliore.get("trackName", ""))) if migliore else None,
+            "punteggio": round(punteggio, 3) if migliore else None,
+        })
     if not migliore:
         print(f"[anteprima] nessun candidato con l'artista compatibile per '{termine}'")
         return None
@@ -4908,6 +4935,34 @@ def cerca_anteprima_itunes(artist, title, min_score=0.55):
         "id": str(migliore.get("trackId") or ""),
         "score": round(punteggio, 3),
     }
+
+
+def motivo_senza_anteprima(diagnostica, artista="", titolo="", min_score=0.55):
+    """Funzione PURA. PERCHÉ non si è potuto confrontare, in una frase: è il testo
+    che finisce in `songs.audio_match_motivo` / `ws_audio_motivo` e che la pastiglia
+    mostra nel tooltip, così una riga spiegata da sé non chiede di fidarsi.
+
+    Esempi: «nessuna anteprima ufficiale: iTunes 0 risultati per «50 Cent 1998
+    Freestyle»», «…i 3 risultati con anteprima sono di altri artisti», «…«Shadi —
+    1998 Freestyle» è troppo diverso (0.42 < 0.55)», «ricerca iTunes non riuscita: …».
+    """
+    d = diagnostica or {}
+    termine = (d.get("termine") or "").strip() or " ".join(
+        p for p in [(artista or "").strip(), (titolo or "").strip()] if p)
+    if d.get("errore"):
+        return f"ricerca iTunes non riuscita: {d['errore']}"
+    risultati = d.get("risultati") or 0
+    if not risultati:
+        return f"nessuna anteprima ufficiale: iTunes 0 risultati per «{termine}»"
+    con_anteprima = d.get("con_anteprima") or 0
+    if not con_anteprima:
+        return (f"nessuna anteprima ufficiale: {risultati} risultati su iTunes per "
+                f"«{termine}» ma nessuno ha l'anteprima")
+    if d.get("migliore"):
+        return (f"nessuna anteprima ufficiale: «{d['migliore']}» è troppo diverso "
+                f"({d.get('punteggio')} < {min_score}) per «{termine}»")
+    return (f"nessuna anteprima ufficiale: i {con_anteprima} risultati con anteprima per "
+            f"«{termine}» sono di altri artisti")
 
 
 def scarica_anteprima(info):
@@ -5050,28 +5105,31 @@ def verifica_audio_riferimento(percorso, artista, titolo, status=None):
             except Exception:
                 pass
 
-    def senza_confronto(motivo, messaggio):
+    def senza_confronto(codice, motivo_testo, emoji="⚪"):
+        """Niente confronto → si registra PERCHÉ (il testo va nel campo `*_motivo`
+        e nel messaggio: la riga si spiega da sé)."""
         return {"esito": "non verificabile", "voti": None, "offset": None, "comuni": None,
-                "fonte": None, "messaggio": messaggio, "confronto": False, "motivo": motivo}
+                "fonte": None, "messaggio": f"{emoji} {motivo_testo}", "confronto": False,
+                "motivo": codice, "motivo_testo": motivo_testo}
 
     if not percorso or not os.path.exists(percorso):
-        return senza_confronto("file", "⚪ Audio non verificabile: manca il file locale in downloads/")
+        return senza_confronto("file", "audio non verificabile: manca il file locale in downloads/")
 
     segnala("🔊 Cerco l'anteprima ufficiale…")
-    info = cerca_anteprima_itunes(artista, titolo)
+    diagnostica = {}
+    info = cerca_anteprima_itunes(artista, titolo, diagnostica=diagnostica)
     if not info:
-        chi = f"{artista} — {titolo}".strip(" —") if (artista or "").strip() else (titolo or "")
-        return senza_confronto("anteprima", f"⚪ Nessuna anteprima ufficiale su iTunes per \"{chi}\"")
+        return senza_confronto("anteprima", motivo_senza_anteprima(diagnostica, artista, titolo))
 
     segnala("🔊 Scarico l'anteprima ufficiale…")
     anteprima_path = scarica_anteprima(info)
     if not anteprima_path:
-        return senza_confronto("download", "⚠️ Anteprima trovata ma non scaricabile")
+        return senza_confronto("download", "anteprima ufficiale non scaricabile", "⚠️")
 
     segnala("🔊 Confronto l'audio del file locale con l'anteprima…")
     calcolo = confronto_audio_file(percorso, anteprima_path)
     if not calcolo:
-        return senza_confronto("calcolo", "⚠️ Confronto audio non riuscito (decodifica/spettrogramma)")
+        return senza_confronto("calcolo", "confronto audio non riuscito (decodifica o spettrogramma)", "⚠️")
 
     voti, comuni, offset = calcolo["voti"], calcolo["comuni"], calcolo["offset"]
     esito = esito_confronto_audio(voti)
@@ -5089,7 +5147,8 @@ def verifica_audio_riferimento(percorso, artista, titolo, status=None):
                      f"conferma {AUDIO_VOTI_CONFERMA}) — da controllare a orecchio")
     return {"esito": esito, "voti": voti, "comuni": comuni,
             "offset": round(offset, 3) if offset is not None else None,
-            "fonte": fonte[:200], "messaggio": messaggio, "confronto": True, "motivo": "ok"}
+            "fonte": fonte[:200], "messaggio": messaggio, "confronto": True,
+            "motivo": "ok", "motivo_testo": None}
 
 
 def campi_dal_risultato_audio(risultato, prefisso="audio_match_"):
@@ -5101,6 +5160,9 @@ def campi_dal_risultato_audio(risultato, prefisso="audio_match_"):
         prefisso + "comuni": risultato["comuni"],
         prefisso + "offset": risultato["offset"],
         prefisso + "fonte": risultato["fonte"],
+        # PERCHÉ non si è potuto confrontare (NULL quando il confronto è stato fatto:
+        # lì i numeri parlano da soli). È il testo che la pastiglia mostra nel tooltip.
+        prefisso + "motivo": risultato.get("motivo_testo"),
         prefisso + "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -5122,10 +5184,7 @@ def conferma_audio(song, status=None):
     if is_placeholder_artist(artista):
         artista = ""
     risultato = verifica_audio_riferimento(percorso, artista, song.get("title") or "", status)
-    messaggio = risultato["messaggio"]
-    if not risultato["confronto"] and risultato["motivo"] != "file":
-        messaggio += " (il match Genius resta solo testuale)"
-    return campi_dal_risultato_audio(risultato), messaggio
+    return campi_dal_risultato_audio(risultato), risultato["messaggio"]
 
 
 
