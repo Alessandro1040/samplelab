@@ -168,6 +168,12 @@ class BaseVideo(unittest.TestCase):
         def __exit__(self, *a):
             return False
 
+        def prepare_filename(self, info):
+            richieste = (info or {}).get("requested_downloads") or []
+            if richieste and isinstance(richieste[0], dict):
+                return richieste[0].get("filepath") or ""
+            return ""
+
         def extract_info(self, url, download=True):
             # La RICERCA YouTube (ytsearch) non ha `outtmpl`: si risponde con una
             # voce sola, come fa yt-dlp, così si prova anche la strada vera
@@ -399,6 +405,12 @@ class TestPlaylistConVideo(BaseVideo):
 
         def __exit__(self, *a):
             return False
+
+        def prepare_filename(self, info):
+            richieste = (info or {}).get("requested_downloads") or []
+            if richieste and isinstance(richieste[0], dict):
+                return richieste[0].get("filepath") or ""
+            return ""
 
         def extract_info(self, url, download=True):
             cartella = os.path.dirname(self.opts["outtmpl"])
