@@ -325,7 +325,18 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               ("audio_match_offset", "REAL"),
                               ("audio_match_comuni", "INTEGER"),
                               ("audio_match_fonte", "TEXT"),
-                              ("audio_match_at", "TEXT")):
+                              ("audio_match_at", "TEXT"),
+                              # stesso controllo, ma sul candidato WhoSampled (18/09/2026):
+                              # il link si salvava col solo confronto testuale e con
+                              # l'artista vuoto finiva su un altro brano (caso vero:
+                              # *End of the World* → pagina di Skeeter Davis)
+                              ("ws_match_score", "REAL"),
+                              ("ws_audio_esito", "TEXT"),
+                              ("ws_audio_voti", "INTEGER"),
+                              ("ws_audio_offset", "REAL"),
+                              ("ws_audio_comuni", "INTEGER"),
+                              ("ws_audio_fonte", "TEXT"),
+                              ("ws_audio_at", "TEXT")):
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
 
@@ -2051,8 +2062,6 @@ def search_whosampled(driver, query, searched_artist="", searched_title=""):
             })
     if not candidates:
         return None, []
-    if not searched_artist:
-        return candidates[0], candidates
     # Preferisce i candidati che NON sono varianti (remix/cover/live…) quando la
     # ricerca non chiede esplicitamente una variante. Es.: cercando "Hell on Earth"
     # deve vincere "Hell on Earth (Front Lines)" e non "Hell on Earth (Remix)".
@@ -2061,6 +2070,18 @@ def search_whosampled(driver, query, searched_artist="", searched_title=""):
         originals = [c for c in candidates if not _has_variant_marker(c["title"])]
         if originals:
             pool = originals
+    if not searched_artist:
+        # SENZA artista non si può confrontare l'artista: `match_score` dà 1.0 a un
+        # nome vuoto ("".lower() è contenuto in qualsiasi nome), quindi il punteggio
+        # non prova nulla. Fino al 18/09/2026 qui si restituiva `candidates[0]` a
+        # occhio: la Verifica di *End of the World* (artista "Brano locale") salvava
+        # così la pagina di **Skeeter Davis** — un altro brano. Ora si sceglie per
+        # TITOLO e si restituiscono TUTTI i candidati, perché il chiamante deve poter
+        # vedere se quel titolo è condiviso da più artisti e far decidere la conferma
+        # audio (`esito_whosampled`).
+        best = max(pool, key=lambda c: match_score("", searched_title, "", c["title"]),
+                   default=None)
+        return best, candidates
     best = max(pool, key=lambda c: match_score(searched_artist, searched_title, c["artist"], c["title"]), default=None)
     return best, candidates
 
@@ -3687,7 +3708,13 @@ def verify_song(song_id):
     except Exception:
         audio_richiesto = False
     score_eff = updates.get("genius_match_score", s.get("genius_match_score"))
-    if audio_richiesto or (score_eff is not None and score_eff < AUDIO_SCORE_SOSPETTO):
+    # Anche il match Genius va confermato con l'audio quando l'artista della riga è
+    # un segnaposto ("Brano locale"): lì il confronto testuale è strutturalmente
+    # debole, ed è il caso in cui un link sbagliato passa più facilmente.
+    artista_mancante_riga = (not (raw_artist or "").strip()) or is_placeholder_artist(raw_artist)
+    if (audio_richiesto
+            or (score_eff is not None and score_eff < AUDIO_SCORE_SOSPETTO)
+            or (genius and artista_mancante_riga)):
         _set_verify_status(song_id, 6, VERIFY_TOTALE, "🔊 Confronto con l'anteprima ufficiale…")
         try:
             audio_s = dict(s); audio_s.update(updates)   # titolo/artista/score appena trovati
@@ -3733,8 +3760,12 @@ def verify_song(song_id):
         except Exception as e:
             messages.append(f"⚠️ YouTube: errore ({str(e)[:50]})")
 
-        # 2) Browser SOLO se serve davvero (WhoSampled senza URL, o BPM/Key non già verificati)
-        need_browser = (not s.get("whosampled_url")) or (not bpmkey_done)
+        # 2) Browser SOLO se serve davvero (WhoSampled da cercare o da ricontrollare,
+        #    o BPM/Key non già verificati). Dal 18/09/2026 si ricontrolla anche un URL
+        #    già salvato che non ha ancora un verdetto audio: è così che si scopre un
+        #    link sbagliato (l'audio è l'unica prova non testuale).
+        ws_da_controllare = bool((not s.get("whosampled_url")) or (not s.get("ws_audio_esito")))
+        need_browser = ws_da_controllare or (not bpmkey_done)
         if need_browser:
             try:
                 ws_driver = _make_driver_safe(60)
@@ -3744,10 +3775,10 @@ def verify_song(song_id):
             messages.append("ℹ️ URL WhoSampled e BPM/Key già presenti: browser non avviato")
 
         # 3) URL WhoSampled → stessa ricerca dello scraper (artista + titolo)
-        if ws_driver and not s.get("whosampled_url"):
+        if ws_driver and ws_da_controllare:
             _set_verify_status(song_id, 4, VERIFY_TOTALE, "Ricerca WhoSampled…")
             try:
-                track, _ = search_whosampled(
+                track, candidati = search_whosampled(
                     ws_driver,
                     f"{search_artist} {search_title}",
                     searched_artist=search_artist,
@@ -3755,11 +3786,41 @@ def verify_song(song_id):
                 if track and track.get("url"):
                     ws_score = match_score(search_artist, search_title,
                                            track.get("artist", ""), track.get("title", ""))
-                    if ws_score >= 0.55:
+                    riga_candidato = f"{track.get('artist', '')} — {track.get('title', '')}"
+                    # Senza artista il punteggio NON prova nulla (`match_score` dà 1.0
+                    # all'artista vuoto): servono il titolo univoco/riconoscibile e,
+                    # soprattutto, la CONFERMA AUDIO del candidato.
+                    artisti_stesso_titolo = {normalize(c.get("artist", ""))
+                                             for c in (candidati or [])
+                                             if normalize(c.get("title", "")) == normalize(track.get("title", ""))}
+                    verdetto = verifica_audio_riferimento(
+                        os.path.join(DL_DIR, s.get("local_file") or "") if s.get("local_file") else "",
+                        track.get("artist", ""), track.get("title", ""),
+                        status=lambda testo: _set_verify_status(song_id, 4, VERIFY_TOTALE, testo))
+                    decisione = esito_whosampled(
+                        ws_score, verdetto["esito"],
+                        artista_mancante=not (search_artist or "").strip(),
+                        titolo_univoco=len(artisti_stesso_titolo) == 1,
+                        artista_identificabile=artista_identificabile_nel_titolo(
+                            track.get("artist", ""), search_title, get_db_artist_list()))
+                    if verdetto["confronto"]:
+                        messages.append(verdetto["messaggio"])
+                    if decisione["azione"] == "salva":
                         updates["whosampled_url"] = track["url"]
-                        messages.append(f"🔗 URL WhoSampled: {track['artist']} — {track['title']}")
+                        updates["ws_match_score"] = round(ws_score, 3)
+                        updates.update(campi_dal_risultato_audio(verdetto, "ws_audio_"))
+                        messages.append(f"🔗 URL WhoSampled: {riga_candidato} "
+                                        f"(score {ws_score:.2f} · {decisione['motivo']})")
                     else:
-                        messages.append(f"⚠️ WhoSampled: punteggio basso ({ws_score:.2f}), URL non salvato")
+                        messages.append(f"❌ WhoSampled scartato ({decisione['motivo']}): "
+                                        f"{riga_candidato}")
+                        # Il link già salvato si toglie SOLO con una prova contraria
+                        # (audio non confermato o ambiguo), mai per mancanza di dati.
+                        if decisione.get("rimuovi_url") and s.get("whosampled_url") == track["url"]:
+                            updates["whosampled_url"] = None
+                            updates["ws_match_score"] = None
+                            updates.update(campi_dal_risultato_audio(verdetto, "ws_audio_"))
+                            messages.append("🧹 Il link WhoSampled salvato era proprio questo: rimosso")
                 else:
                     messages.append("⚠️ WhoSampled: nessun risultato trovato")
             except Exception as e:
@@ -3861,35 +3922,59 @@ def verify_song(song_id):
 
 @app.route("/db/songs/<song_id>/audio_check", methods=["POST"])
 def audio_check_song(song_id):
-    """🔊 Solo il controllo audio di una canzone (senza rifare tutta la Verifica).
+    """🔊 Il controllo audio di una canzone (senza rifare tutta la Verifica).
 
-    È il passo che risponde alla domanda «la canzone trovata su Genius è davvero
-    questa?»: cerca l'anteprima UFFICIALE su iTunes e la confronta col file locale
-    con un'impronta acustica, poi scrive l'esito nei campi `audio_match_*`. Dura
-    5-10 s (ricerca + ~1 MB di anteprima + impronta). Lo usa il pulsante "🔊 Audio"
-    della tabella del database e i controlli mirati sulle righe sospette.
+    Confronta il file locale con l'anteprima UFFICIALE su iTunes di OGNI
+    riferimento salvato nella riga:
+    1. il match **Genius** (artista principale + titolo della riga) → `audio_match_*`;
+    2. il link **WhoSampled** già salvato, di cui artista e titolo si leggono
+       dall'URL (`/Artista/Titolo/`: niente browser) → `ws_audio_*`. Se l'audio
+       dimostra che quella pagina è di un ALTRO brano il link viene **rimosso**:
+       è il caso di *End of the World* → pagina di *Skeeter Davis* (18/09/2026,
+       8 hash allineati contro 2.525 del caso giusto).
+    Dura 5-15 s (ricerca + ~1 MB di anteprima + impronta per ogni riferimento).
     """
     with get_db() as conn:
         s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
     if not s:
         return jsonify({"error": "Non trovata"}), 404
 
-    _set_verify_status(song_id, 6, VERIFY_TOTALE, "🔊 Confronto con l'anteprima ufficiale…")
+    aggiornamenti, messaggi = {}, []
     try:
-        updates, messaggio = conferma_audio(
+        upd, msg = conferma_audio(
             s, status=lambda testo: _set_verify_status(song_id, 6, VERIFY_TOTALE, testo))
+        aggiornamenti.update(upd)
+        messaggi.append(msg)
+
+        riferimenti = artista_titolo_da_whosampled_url(s.get("whosampled_url") or "")
+        if riferimenti and s.get("local_file"):
+            _set_verify_status(song_id, 6, VERIFY_TOTALE, "🔊 Confronto il link WhoSampled…")
+            verdetto = verifica_audio_riferimento(
+                os.path.join(DL_DIR, s["local_file"]), riferimenti[0], riferimenti[1])
+            aggiornamenti.update(campi_dal_risultato_audio(verdetto, "ws_audio_"))
+            messaggi.append(f"🔗 WhoSampled ({riferimenti[0]} — {riferimenti[1]}): "
+                            f"{verdetto['messaggio']}")
+            decisione = esito_whosampled(
+                s.get("ws_match_score") if s.get("ws_match_score") is not None else 1.0,
+                verdetto["esito"], artista_mancante=is_placeholder_artist(s.get("artist")))
+            if decisione.get("rimuovi_url") and verdetto["confronto"]:
+                aggiornamenti["whosampled_url"] = None
+                aggiornamenti["ws_match_score"] = None
+                messaggi.append("🧹 Il link WhoSampled salvato è di un altro brano: rimosso")
     finally:
         verify_progress.pop(song_id, None)
 
-    if updates:
+    if aggiornamenti:
         with get_db() as conn:
-            for campo, valore in updates.items():
+            for campo, valore in aggiornamenti.items():
                 conn.execute(f"UPDATE songs SET {campo}=?, updated_at=datetime('now') WHERE id=?",
                              (valore, song_id))
     with get_db() as conn:
         s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
-    return jsonify({"song": s, "updated": updates, "messages": [messaggio],
-                    "esito": updates.get("audio_match_esito"), "success": bool(updates)})
+    return jsonify({"song": s, "updated": aggiornamenti, "messages": messaggi,
+                    "esito": aggiornamenti.get("audio_match_esito"),
+                    "esito_whosampled": aggiornamenti.get("ws_audio_esito"),
+                    "success": bool(aggiornamenti)})
 
 
 # ── DB: MASS RENAME ───────────────────────────────────────────────────────────
@@ -4428,6 +4513,13 @@ COLUMN_DOCS = {"songs": {
     "audio_match_offset": "dove sta l'anteprima ufficiale dentro il file locale (secondi)",
     "audio_match_fonte": "anteprima usata: 'iTunes <id> · artista — titolo (durata)'",
     "audio_match_at": "quando è stato fatto il confronto audio",
+    "ws_match_score": "somiglianza del match WhoSampled (0-1)",
+    "ws_audio_esito": "conferma AUDIO del link WhoSampled ('confermato'/'non confermato'/'ambiguo'/'non verificabile')",
+    "ws_audio_voti": "hash acustici allineati con l'anteprima ufficiale del candidato WhoSampled",
+    "ws_audio_comuni": "hash in comune col candidato WhoSampled (anche non allineati)",
+    "ws_audio_offset": "dove sta l'anteprima del candidato dentro il file locale (secondi)",
+    "ws_audio_fonte": "anteprima usata per il link WhoSampled: 'iTunes <id> · artista — titolo'",
+    "ws_audio_at": "quando è stato fatto il confronto audio del link WhoSampled",
     "created_at": "quando è stata aggiunta",
     "updated_at": "ultima modifica",
 }}
@@ -4864,12 +4956,92 @@ def confronto_audio_file(percorso_locale, percorso_anteprima):
     return {"voti": int(voti), "offset": offset, "comuni": int(comuni), "hash": len(hl)}
 
 
-def conferma_audio(song, status=None):
-    """Il passo 🔊 della Verifica: il file locale contiene l'anteprima ufficiale?
+def artista_identificabile_nel_titolo(artista, titolo, artisti_noti=None):
+    """Funzione PURA. L'artista del candidato è riconoscibile nel titolo della riga
+    (direttamente, o perché è un artista della libreria citato lì)?
 
-    Restituisce (aggiornamenti, messaggio): i campi `audio_match_*` da scrivere nel
-    database e la riga da mostrare in interfaccia. Non solleva MAI eccezioni: ogni
-    intoppo diventa un messaggio ⚪/⚠️, perché la Verifica deve poter continuare.
+    È la stessa regola che `fetch_genius` applica quando l'artista della riga è un
+    segnaposto: serve a non prendere un omonimo ("Cha-Ching!" di Unique Salonga per
+    il titolo *Cha-Ching*)."""
+    norm_titolo = normalize(titolo or "")
+    na = normalize(artista or "")
+    if not na or not norm_titolo:
+        return False
+    if na in norm_titolo:
+        return True
+    noto = normalize(known_artist_in_title(titolo or "", artisti_noti or []) or "")
+    return bool(noto) and (noto in na or na in noto)
+
+
+def esito_whosampled(score, audio_esito, artista_mancante=False, titolo_univoco=False,
+                     artista_identificabile=False, soglia=0.55):
+    """Funzione PURA. Il link WhoSampled trovato si salva? → dict
+    {"azione": 'salva'|'scarta', "rimuovi_url": bool, "motivo": testo}.
+
+    Il punteggio testuale da solo NON basta: con l'artista vuoto o segnaposto
+    `match_score` dà **1.0 all'artista** (`""` è contenuto in qualsiasi nome), e
+    *End of the World* di "Brano locale" accettava così *The End of the World* di
+    **Skeeter Davis** (un altro brano — l'audio lo dice: 8 hash contro 2.525 del
+    caso giusto). Qui decide l'**AUDIO** quando esiste un'anteprima ufficiale;
+    quando non esiste si salva solo se il match testuale è comunque informativo
+    (artista confrontato davvero, oppure titolo univoco, oppure artista
+    riconoscibile nel titolo). `rimuovi_url` dice se il link eventualmente già
+    salvato va tolto: si toglie solo quando c'è una PROVA contraria (audio non
+    confermato o ambiguo), mai per semplice mancanza di dati.
+    """
+    if score < soglia:
+        return {"azione": "scarta", "rimuovi_url": False,
+                "motivo": f"punteggio testuale basso ({score:.2f})"}
+    if audio_esito == "confermato":
+        return {"azione": "salva", "rimuovi_url": False, "motivo": "audio confermato"}
+    if audio_esito == "non confermato":
+        return {"azione": "scarta", "rimuovi_url": True,
+                "motivo": "l'audio del candidato NON è dentro il file locale: probabile falso positivo"}
+    if audio_esito == "ambiguo":
+        return {"azione": "scarta", "rimuovi_url": True,
+                "motivo": "audio ambiguo: da controllare a orecchio"}
+    if artista_mancante and not (titolo_univoco or artista_identificabile):
+        return {"azione": "scarta", "rimuovi_url": False,
+                "motivo": "artista non confrontabile (segnaposto) e titolo non identificabile"}
+    return {"azione": "salva", "rimuovi_url": False,
+            "motivo": "nessuna anteprima ufficiale: match solo testuale"}
+
+
+_SEGMENTI_NON_ARTISTA = {"search", "sample", "artist", "album", "track", "lists", "browse",
+                         "submit", "news", "forum", "blog", "charts", "genres", "label",
+                         "producer", "song", "video"}
+
+
+def artista_titolo_da_whosampled_url(url):
+    """Funzione PURA. Da 'https://www.whosampled.com/Skeeter-Davis/The-End-of-the-World/'
+    → ('Skeeter Davis', 'The End of the World'). None se l'URL non ha la forma
+    /Artista/Titolo/ (es. /search/, /sample/…). Serve a ricontrollare con l'audio
+    un link già salvato, senza riaprire il browser."""
+    m = re.match(r"^https?://(?:www\.)?whosampled\.com/([^/?#]+)/([^/?#]+)/?", url or "")
+    if not m:
+        return None
+    if m.group(1).lower() in _SEGMENTI_NON_ARTISTA:
+        return None
+
+    def umano(slug):
+        testo = urllib.parse.unquote(slug).replace("-", " ").replace("_", " ").strip()
+        return re.sub(r"\s+", " ", testo)
+
+    artista, titolo = umano(m.group(1)), umano(m.group(2))
+    if not artista or not titolo:
+        return None
+    return artista, titolo
+
+
+def verifica_audio_riferimento(percorso, artista, titolo, status=None):
+    """Conferma AUDIO di un riferimento QUALSIASI (il match Genius, il candidato
+    WhoSampled, un link già salvato…): cerca l'anteprima ufficiale di (artista,
+    titolo) su iTunes e la cerca dentro il file locale.
+
+    Restituisce {"esito", "voti", "offset", "comuni", "fonte", "messaggio",
+    "confronto", "motivo"}: `confronto` dice se il confronto è stato eseguito
+    davvero (False = nessuna anteprima ufficiale, file illeggibile…), perché un
+    dato mancante NON è un no. `motivo` ∈ {'ok','file','anteprima','download','calcolo'}.
     """
     def segnala(testo):
         if status:
@@ -4878,59 +5050,83 @@ def conferma_audio(song, status=None):
             except Exception:
                 pass
 
-    def non_verificabile(testo):
-        return ({"audio_match_esito": "non verificabile",
-                 "audio_match_voti": None, "audio_match_comuni": None,
-                 "audio_match_offset": None, "audio_match_fonte": None,
-                 "audio_match_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}, testo)
+    def senza_confronto(motivo, messaggio):
+        return {"esito": "non verificabile", "voti": None, "offset": None, "comuni": None,
+                "fonte": None, "messaggio": messaggio, "confronto": False, "motivo": motivo}
 
-    locale = song.get("local_file") or ""
-    percorso = os.path.join(DL_DIR, locale) if locale else ""
-    if not locale or not os.path.exists(percorso):
-        return non_verificabile("⚪ Audio non verificabile: manca il file locale in downloads/")
-
-    artista = (song.get("artist") or "").split(" / ")[0].strip()
-    titolo = song.get("title") or ""
+    if not percorso or not os.path.exists(percorso):
+        return senza_confronto("file", "⚪ Audio non verificabile: manca il file locale in downloads/")
 
     segnala("🔊 Cerco l'anteprima ufficiale…")
     info = cerca_anteprima_itunes(artista, titolo)
     if not info:
-        return non_verificabile(
-            f"⚪ Nessuna anteprima ufficiale per \"{titolo}\": audio non verificabile "
-            f"(il match Genius resta solo testuale)")
+        chi = f"{artista} — {titolo}".strip(" —") if (artista or "").strip() else (titolo or "")
+        return senza_confronto("anteprima", f"⚪ Nessuna anteprima ufficiale su iTunes per \"{chi}\"")
 
     segnala("🔊 Scarico l'anteprima ufficiale…")
     anteprima_path = scarica_anteprima(info)
     if not anteprima_path:
-        return non_verificabile("⚠️ Anteprima trovata ma non scaricabile: audio non verificabile")
+        return senza_confronto("download", "⚠️ Anteprima trovata ma non scaricabile")
 
     segnala("🔊 Confronto l'audio del file locale con l'anteprima…")
     calcolo = confronto_audio_file(percorso, anteprima_path)
     if not calcolo:
-        return non_verificabile("⚠️ Confronto audio non riuscito (decodifica/spettrogramma)")
+        return senza_confronto("calcolo", "⚠️ Confronto audio non riuscito (decodifica/spettrogramma)")
 
     voti, comuni, offset = calcolo["voti"], calcolo["comuni"], calcolo["offset"]
     esito = esito_confronto_audio(voti)
-    fonte = "iTunes %s · %s — %s (%.1f s)" % (info["id"], info["artist"], info["track"],
-                                              info["durata"] or 0)
-    aggiornamenti = {
-        "audio_match_esito": esito,
-        "audio_match_voti": voti,
-        "audio_match_comuni": comuni,
-        "audio_match_offset": round(offset, 3) if offset is not None else None,
-        "audio_match_fonte": fonte[:200],
-        "audio_match_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
     etichetta = f"{info['artist']} — {info['track']}"
+    fonte = "iTunes %s · %s (%.1f s)" % (info["id"], etichetta, info["durata"] or 0)
     if esito == "confermato":
-        return aggiornamenti, (f"✅ Audio confermato: {voti} hash allineati a {offset:.1f} s "
-                               f"(anteprima ufficiale: {etichetta})")
-    if esito == "non confermato":
-        return aggiornamenti, (f"❌ Audio NON confermato: solo {voti} hash allineati — "
-                               f"l'anteprima ufficiale \"{etichetta}\" NON è dentro il file "
-                               f"locale: possibile falso positivo (o versione diversa/remix)")
-    return aggiornamenti, (f"🟡 Audio ambiguo: {voti} hash allineati ({comuni} in comune, soglia "
-                           f"di conferma {AUDIO_VOTI_CONFERMA}) — da controllare a orecchio")
+        messaggio = (f"✅ Audio confermato: {voti} hash allineati a {offset:.1f} s "
+                     f"(anteprima ufficiale: {etichetta})")
+    elif esito == "non confermato":
+        messaggio = (f"❌ Audio NON confermato: solo {voti} hash allineati — l'anteprima "
+                     f"ufficiale \"{etichetta}\" NON è dentro il file locale: possibile "
+                     f"falso positivo (o versione diversa/remix)")
+    else:
+        messaggio = (f"🟡 Audio ambiguo: {voti} hash allineati ({comuni} in comune, soglia di "
+                     f"conferma {AUDIO_VOTI_CONFERMA}) — da controllare a orecchio")
+    return {"esito": esito, "voti": voti, "comuni": comuni,
+            "offset": round(offset, 3) if offset is not None else None,
+            "fonte": fonte[:200], "messaggio": messaggio, "confronto": True, "motivo": "ok"}
+
+
+def campi_dal_risultato_audio(risultato, prefisso="audio_match_"):
+    """Funzione PURA. Dai campi di `verifica_audio_riferimento` alle colonne del
+    database: con `prefisso="ws_"` si scrivono i campi del candidato WhoSampled."""
+    return {
+        prefisso + "esito": risultato["esito"],
+        prefisso + "voti": risultato["voti"],
+        prefisso + "comuni": risultato["comuni"],
+        prefisso + "offset": risultato["offset"],
+        prefisso + "fonte": risultato["fonte"],
+        prefisso + "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def conferma_audio(song, status=None):
+    """Il passo 🔊 della Verifica sul match GENIUS: il file locale contiene
+    l'anteprima ufficiale della canzone trovata su Genius?
+
+    Restituisce (aggiornamenti, messaggio): i campi `audio_match_*` da scrivere nel
+    database e la riga da mostrare in interfaccia. Non solleva MAI eccezioni: ogni
+    intoppo diventa un messaggio ⚪/⚠️, perché la Verifica deve poter continuare.
+    """
+    locale = song.get("local_file") or ""
+    percorso = os.path.join(DL_DIR, locale) if locale else ""
+    artista = (song.get("artist") or "").split(" / ")[0].strip()
+    # L'artista segnaposto ("Brano locale", "Artista sconosciuto") NON va nella
+    # ricerca: "Brano locale End of the World" non trova nulla di utile (era uno
+    # dei motivi per cui su queste righe la Verifica non trovava né album né data).
+    if is_placeholder_artist(artista):
+        artista = ""
+    risultato = verifica_audio_riferimento(percorso, artista, song.get("title") or "", status)
+    messaggio = risultato["messaggio"]
+    if not risultato["confronto"] and risultato["motivo"] != "file":
+        messaggio += " (il match Genius resta solo testuale)"
+    return campi_dal_risultato_audio(risultato), messaggio
+
 
 
 def run_cleanup(tolerance, progress=None):

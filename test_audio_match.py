@@ -453,6 +453,147 @@ class TestChipNellaPagina(unittest.TestCase):
         self.assertNotIn("<b>", html)
         self.assertIn("&lt;b&gt;", html)
 
+    def test_pastiglia_del_link_whosampled(self):
+        html = self._chip("[chipAudio({ws_audio_esito:'non confermato',ws_audio_voti:8,"
+                          "ws_audio_offset:40.8,"
+                          "ws_audio_fonte:'iTunes 2 · Skeeter Davis — The End of the World'},"
+                          "'whosampled')]")[0]
+        self.assertIn("🔊 ✗ non confermato", html)
+        self.assertIn("#ff4545", html)
+        self.assertIn("8 hash", html)
+        self.assertIn("offset 40.8 s", html)
+        self.assertIn("il link WhoSampled", html)          # l'anteprima dice di cosa parla
+        self.assertIn("Skeeter Davis", html)
+        self.assertNotIn("audio_match_", html)             # niente campi dell'altro verdetto
+
+    def test_le_due_pastiglie_non_si_confondono(self):
+        riga = ("{audio_match_esito:'confermato',audio_match_voti:1230,audio_match_offset:76.0,"
+                "ws_audio_esito:'non confermato',ws_audio_voti:8,ws_audio_offset:40.8}")
+        html = self._chip("[chipAudio(%s),chipAudio(%s,'whosampled')]" % (riga, riga))
+        self.assertIn("✓ confermato", html[0])
+        self.assertIn("1230 hash", html[0])
+        self.assertIn("76.0 s", html[0])
+        self.assertNotIn("non confermato", html[0])
+        self.assertIn("✗ non confermato", html[1])
+        self.assertIn("8 hash", html[1])
+        self.assertIn("40.8 s", html[1])
+        self.assertIn("il link WhoSampled", html[1])
+        self.assertIn("la canzone trovata su Genius", html[0])
+
+
+class TestEsitoWhosampled(unittest.TestCase):
+    """La decisione sul link WhoSampled: il punteggio testuale da solo NON basta
+    (con l'artista vuoto `match_score` dà 1.0 all'artista) — decide l'audio."""
+
+    def test_punteggio_basso(self):
+        d = APP.esito_whosampled(0.40, "confermato")
+        self.assertEqual((d["azione"], d["rimuovi_url"]), ("scarta", False))
+        self.assertIn("0.40", d["motivo"])
+
+    def test_audio_confermato_salva(self):
+        d = APP.esito_whosampled(0.976, "confermato")
+        self.assertEqual((d["azione"], d["rimuovi_url"]), ("salva", False))
+
+    def test_audio_non_confermato_scarta_e_rimuove_il_link(self):
+        # il caso vero: *End of the World* → pagina di Skeeter Davis
+        # (8 hash allineati contro 2.525 del brano giusto)
+        d = APP.esito_whosampled(0.976, "non confermato")
+        self.assertEqual((d["azione"], d["rimuovi_url"]), ("scarta", True))
+        self.assertIn("falso positivo", d["motivo"])
+
+    def test_audio_ambiguo_scarta_e_rimuove(self):
+        self.assertEqual(APP.esito_whosampled(0.976, "ambiguo")["rimuovi_url"], True)
+
+    def test_senza_anteprima_e_artista_mancante_scarta_senza_rimuovere(self):
+        d = APP.esito_whosampled(0.976, "non verificabile", artista_mancante=True)
+        self.assertEqual((d["azione"], d["rimuovi_url"]), ("scarta", False))
+        # manca la prova, quindi non si rimuove nulla: si rimuove solo con una prova contraria
+
+    def test_senza_anteprima_ma_candidato_identificabile(self):
+        for extra in ({"titolo_univoco": True}, {"artista_identificabile": True}):
+            d = APP.esito_whosampled(0.976, "non verificabile", artista_mancante=True, **extra)
+            self.assertEqual(d["azione"], "salva")
+
+    def test_senza_anteprima_con_artista_confrontabile(self):
+        self.assertEqual(APP.esito_whosampled(0.976, "non verificabile",
+                                              artista_mancante=False)["azione"], "salva")
+
+    def test_soglia_personalizzabile(self):
+        self.assertEqual(APP.esito_whosampled(0.70, "non verificabile")["azione"], "salva")
+        self.assertEqual(APP.esito_whosampled(0.70, "non verificabile",
+                                              soglia=0.80)["azione"], "scarta")
+
+
+class TestUrlWhoSampled(unittest.TestCase):
+    """Dall'URL salvato si rileggono artista e titolo: così si ricontrolla con
+    l'audio un link già in libreria, senza riaprire il browser."""
+
+    def test_url_vera(self):
+        self.assertEqual(APP.artista_titolo_da_whosampled_url(
+            "https://www.whosampled.com/Skeeter-Davis/The-End-of-the-World/"),
+            ("Skeeter Davis", "The End of the World"))
+
+    def test_senza_www_e_senza_slash_finale(self):
+        self.assertEqual(APP.artista_titolo_da_whosampled_url(
+            "https://whosampled.com/50-Cent/21-Questions/"), ("50 Cent", "21 Questions"))
+
+    def test_percorsi_che_non_sono_una_canzone(self):
+        for url in ("https://www.whosampled.com/search/?q=test",
+                    "https://www.whosampled.com/sample/123456/Skeeter-Davis-The-End/",
+                    "https://www.whosampled.com/artist/Skeeter-Davis/",
+                    "https://esempio.com/Skeeter-Davis/The-End-of-the-World/",
+                    "", None):
+            self.assertIsNone(APP.artista_titolo_da_whosampled_url(url), url)
+
+    def test_slug_con_caratteri_speciali(self):
+        self.assertEqual(APP.artista_titolo_da_whosampled_url(
+            "https://www.whosampled.com/Bad-Meets-Evil/Fast-Lane-(Remix)/"),
+            ("Bad Meets Evil", "Fast Lane (Remix)"))
+
+
+class TestArtistaIdentificabile(unittest.TestCase):
+    """Quando l'anteprima ufficiale non esiste si accetta solo un candidato
+    riconoscibile (o un titolo univoco): la stessa regola dei segnaposto di Genius."""
+
+    def test_artista_gia_nel_titolo(self):
+        self.assertTrue(APP.artista_identificabile_nel_titolo("Eminem", "Eminem Freestyle"))
+        self.assertTrue(APP.artista_identificabile_nel_titolo("Eminem", "Freestyle di Eminem"))
+
+    def test_artista_della_libreria_citato_nel_titolo(self):
+        self.assertTrue(APP.artista_identificabile_nel_titolo(
+            "Hopsin", "Simon says hopsin freestyle", ["Hopsin", "Eminem"]))
+        self.assertFalse(APP.artista_identificabile_nel_titolo(
+            "Skeeter Davis", "End of the World", ["Hopsin", "Eminem"]))
+
+    def test_casi_vuoti(self):
+        self.assertFalse(APP.artista_identificabile_nel_titolo("", "Titolo"))
+        self.assertFalse(APP.artista_identificabile_nel_titolo("Artista", ""))
+        self.assertFalse(APP.artista_identificabile_nel_titolo(None, None))
+
+
+class TestCampiDalRisultatoAudio(unittest.TestCase):
+    """Dai campi del verdetto alle colonne del database (due prefissi diversi)."""
+
+    def test_prefisso_genius(self):
+        campi = APP.campi_dal_risultato_audio(
+            {"esito": "confermato", "voti": 12, "comuni": 30, "offset": 1.5,
+             "fonte": "iTunes 1 · X — Y"}, "audio_match_")
+        self.assertEqual(set(campi), {"audio_match_esito", "audio_match_voti",
+                                      "audio_match_comuni", "audio_match_offset",
+                                      "audio_match_fonte", "audio_match_at"})
+        self.assertEqual(campi["audio_match_esito"], "confermato")
+        self.assertEqual(campi["audio_match_voti"], 12)
+        self.assertTrue(campi["audio_match_at"])
+
+    def test_prefisso_whosampled(self):
+        campi = APP.campi_dal_risultato_audio(
+            {"esito": "non confermato", "voti": 8, "comuni": 2517, "offset": 40.8,
+             "fonte": "iTunes 2 · Skeeter Davis — The End of the World"}, "ws_audio_")
+        self.assertIn("ws_audio_esito", campi)
+        self.assertEqual(campi["ws_audio_voti"], 8)
+        self.assertEqual(campi["ws_audio_offset"], 40.8)
+        self.assertNotIn("audio_match_esito", campi)
+
 
 def estrai_funzione_py(src, nome):
     """Il testo della funzione `nome` del backend (def a indentazione 0)."""
@@ -520,6 +661,43 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("chipAudio(s)", riga)
         self.assertIn("db-audio-btn", riga)
 
+    def test_whosampled_confermato_dall_audio(self):
+        corpo = estrai_funzione_py(self.app_src, "verify_song")
+        self.assertIn("esito_whosampled(", corpo)
+        self.assertIn("verifica_audio_riferimento(", corpo)
+        self.assertIn("ws_da_controllare", corpo)
+        self.assertIn('updates["ws_match_score"] = round(ws_score, 3)', corpo)
+        self.assertIn('campi_dal_risultato_audio(verdetto, "ws_audio_")', corpo)
+        # il link sbagliato si RIMUOVE (solo con una prova contraria: rimuovi_url)
+        self.assertIn('decisione.get("rimuovi_url")', corpo)
+        self.assertIn('updates["whosampled_url"] = None', corpo)
+
+    def test_ricerca_whosampled_non_piu_a_occhio(self):
+        # senza artista si sceglie per TITOLO, non `candidates[0]` (era il motivo per
+        # cui *End of the World* finiva sulla pagina di Skeeter Davis)
+        corpo = estrai_funzione_py(self.app_src, "search_whosampled")
+        self.assertNotIn("return candidates[0], candidates", corpo)
+        self.assertIn('match_score("", searched_title, "", c["title"])', corpo)
+
+    def test_endpoint_controlla_anche_il_link_salvato(self):
+        corpo = estrai_funzione_py(self.app_src, "audio_check_song")
+        self.assertIn("artista_titolo_da_whosampled_url(", corpo)
+        self.assertIn("esito_whosampled(", corpo)
+        self.assertIn('"esito_whosampled"', corpo)
+
+    def test_colonne_whosampled(self):
+        for colonna, tipo in (("ws_match_score", "REAL"), ("ws_audio_esito", "TEXT"),
+                              ("ws_audio_voti", "INTEGER"), ("ws_audio_offset", "REAL"),
+                              ("ws_audio_comuni", "INTEGER"), ("ws_audio_fonte", "TEXT"),
+                              ("ws_audio_at", "TEXT")):
+            self.assertIn('("%s", "%s")' % (colonna, tipo), self.app_src)
+            self.assertIn('"%s":' % colonna, self.app_src)
+
+    def test_pastiglia_del_link_in_pagina(self):
+        riga = estrai_funzione(self.index_src, "renderDbTable")
+        self.assertIn("chipAudio(s,'whosampled')", riga)
+        self.assertIn("function chipAudio(s, quale)", self.index_src)
+
 
 @unittest.skipUnless(app_is_up(SAMPLELAB_URL), "app non attiva su " + SAMPLELAB_URL)
 class TestAppViva(unittest.TestCase):
@@ -546,7 +724,7 @@ class TestAppViva(unittest.TestCase):
     def test_pagina_servita(self):
         with urllib.request.urlopen(SAMPLELAB_URL + "/", timeout=30) as r:
             html = r.read().decode("utf-8", "replace")
-        self.assertIn("function chipAudio(s)", html)
+        self.assertIn("function chipAudio(s, quale)", html)
         self.assertIn("db-audio-btn", html)
         self.assertIn("/audio_check", html)
 
@@ -571,6 +749,8 @@ class TestAppViva(unittest.TestCase):
         self.assertIn(res.get("esito"),
                       ("confermato", "non confermato", "ambiguo", "non verificabile"))
         self.assertTrue(res.get("messages"))
+        # il controllo copre anche il link WhoSampled salvato (None se la riga non ne ha)
+        self.assertIn("esito_whosampled", res)
         song = res.get("song") or {}
         self.assertEqual(song.get("audio_match_esito"), res.get("esito"))
         self.assertTrue(song.get("audio_match_at"))

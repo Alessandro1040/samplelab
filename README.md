@@ -80,12 +80,14 @@ con `(2)` nella cartella locale:
   sull'app viva: `python3 -m unittest -v test_verify_cover`
 - `test_audio_match.py` — test della **conferma audio** 🔊 della Verifica (l'unico
   controllo che NON è testuale: Genius non ha audio, quindi si cerca l'**anteprima
-  ufficiale iTunes** dentro il file locale con un'impronta acustica stile Shazam):
-  funzioni pure `picchi_spettrali`, `hash_da_picchi`, `istogramma_offset`,
-  `esito_confronto_audio`, `artista_compatibile` in esecuzione reale, una prova
-  completa su audio fabbricato (WAV + MP3, brano giusto contro brano sbagliato),
-  la pastiglia `chipAudio` in JavaScriptCore e le prove sull'app viva:
-  `python3 -m unittest -v test_audio_match`
+  ufficiale iTunes** dentro il file locale con un'impronta acustica stile Shazam),
+  **anche del link WhoSampled**: funzioni pure `picchi_spettrali`, `hash_da_picchi`,
+  `istogramma_offset`, `esito_confronto_audio`, `artista_compatibile`,
+  `esito_whosampled`, `artista_identificabile_nel_titolo`,
+  `artista_titolo_da_whosampled_url`, `campi_dal_risultato_audio` in esecuzione
+  reale, una prova completa su audio fabbricato (WAV + MP3, brano giusto contro
+  brano sbagliato), le pastiglie `chipAudio` (Genius e WhoSampled) in
+  JavaScriptCore e le prove sull'app viva: `python3 -m unittest -v test_audio_match`
 - `test_move_field.py` — test della **legenda 📖** e dello strumento **➡️ Sposta**
   del pannello SQL/script (funzione pura `move_field_value`: artista dal titolo
   agli artisti, anno dal titolo al campo anno, parola intera, parentesi rimaste
@@ -334,10 +336,17 @@ Da tenere presente nelle sessioni di lavoro successive:
   verificabile' quando l'anteprima ufficiale non esiste; con `audio_match_voti`,
   `audio_match_comuni`, `audio_match_offset`, `audio_match_fonte`, `audio_match_at`.
   Gira dentro la Verifica **solo quando il match è debole** (`genius_match_score`
-  < 0,95) o su richiesta (`{"audio": true}` nel corpo), e dall'endpoint
-  `POST /db/songs/<id>/audio_check` (pulsante **🔊 Audio** nella tabella del
-  database): 3-8 s per brano. Le anteprime stanno in `anteprime/` (**non
-  versionata**, come `covers/`). ⚠️ Limite noto: freestyle, mixtape e brani fuori
+  < 0,95), quando l'artista della riga è un segnaposto, o su richiesta
+  (`{"audio": true}` nel corpo), e dall'endpoint `POST /db/songs/<id>/audio_check`
+  (pulsante **🔊 Audio** nella tabella del database): 3-8 s per brano. Le anteprime
+  stanno in `anteprime/` (**non versionata**, come `covers/`).
+  **Dal 18/09/2026 il controllo copre anche il link WhoSampled** (`ws_match_score`
+  + `ws_audio_*`, colonne nuove): si confronta con l'audio il **candidato trovato**
+  prima di salvarlo e, per un link già in libreria senza verdetto, artista e titolo
+  si rileggono dall'URL (`/Artista/Titolo/`, niente browser). Un link si **rimuove**
+  solo con una prova contraria (audio non confermato/ambiguo: caso vero *End of the
+  World* → pagina di Skeeter Davis, 9 hash contro 289-2410 dei link giusti), mai per
+  semplice mancanza di dati. ⚠️ Limite noto: freestyle, mixtape e brani fuori
   catalogo non hanno anteprima ufficiale → "non verificabile", cioè nessun verdetto
   invece di un sì.
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
@@ -1580,4 +1589,54 @@ Da tenere presente nelle sessioni di lavoro successive:
   (50 / 20 hash) sono tarate su queste misure e vanno riviste se si cambia la
   matematica dell'impronta (`AUDIO_BIN_HASH`, `AUDIO_RAGGIO_FREQ`,
   `AUDIO_RAGGIO_TEMPO`, `AUDIO_DT_MAX`, `AUDIO_COPPIE`).
+
+- **«HO CLICCATO VERIFICA E MI HA TROVATO UNA PAGINA SBAGLIATA» — IL CONTROLLO
+  AUDIO ORA COPRE ANCHE IL LINK WHOSAMPLED (18/09/2026, sera).** Segnalazione di
+  Alessandro: «ho cliccato verifica nel player su *End of the World* e mi ha trovato
+  ed: https://www.whosampled.com/Skeeter-Davis/The-End-of-the-World/ ma è sbagliata,
+  quindi qui non ha fatto la verifica che chiedevo». La riga era del tutto
+  plausibile per il testo — titolo *End of the World*, artista **"Brano locale"**
+  (segnaposto), file locale di 127,45 s senza tag — e il link era finito lì per
+  **tre** motivi distinti, tutti corretti adesso:
+  1. `search_whosampled`, **quando l'artista cercato è vuoto, restituiva
+     `candidates[0]` a occhio** (nessun punteggio): ora sceglie per TITOLO;
+  2. il passo WhoSampled accettava con `match_score ≥ 0,55`, e con l'artista vuoto
+     quel punteggio è **gonfiato** (`""` è contenuto in qualsiasi nome → l'artista
+     vale **1,0**): "End of the World" contro "The End of the World" faceva **0,976**;
+  3. il passo 🔊 della Verifica non era applicato a quel link e, in quella riga,
+     **non partiva nemmeno** (si attivava solo con `genius_match_score < 0,95` o su
+     richiesta, e lì il match Genius non c'era affatto → `audio_match_esito` era
+     `NULL`).
+  Ora: la conferma audio è una funzione **generica su un riferimento qualsiasi**
+  (`verifica_audio_riferimento`), il **candidato WhoSampled** viene confrontato con
+  l'audio **prima di salvare l'URL**, e la decisione è una funzione pura
+  (`esito_whosampled`) che rifiuta anche il caso "punta tutto sull'artista vuoto"
+  (senza anteprima ufficiale si salva solo se il titolo è univoco o l'artista è
+  riconoscibile nel titolo — la stessa regola dei segnaposto di Genius). Un link
+  già in libreria **senza verdetto** viene ricontrollato (artista e titolo riletti
+  dall'URL `/Artista/Titolo/`, niente browser) e si **rimuove solo con una prova
+  contraria** (audio "non confermato" o "ambiguo"), mai per mancanza di dati.
+  Colonne nuove: `ws_match_score`, `ws_audio_esito`, `ws_audio_voti`,
+  `ws_audio_offset`, `ws_audio_comuni`, `ws_audio_fonte`, `ws_audio_at`; in pagina
+  una **seconda pastiglia** accanto al link (`chipAudio(s,'whosampled')`, resta
+  visibile anche se il link viene rimosso). L'endpoint non cerca più con l'artista
+  segnaposto ("Brano locale End of the World" non trova nulla).
+  Verifiche del 18/09/2026: sul caso vero `POST /db/songs/song_dcc1ce3dac94/audio_check`
+  → «❌ Audio NON confermato: solo **9** hash allineati» contro l'anteprima ufficiale
+  *Skeeter Davis — The End of the World* (iTunes 258619200, 157,6 s) e **🧹 link
+  rimosso** (`whosampled_url` ora NULL, verdetto salvato: 9 hash, offset 40,9 s);
+  su **4 link giusti** presi in libreria l'audio conferma e **li lascia intatti** —
+  *Back in Black* 289 hash, *Get Up* (50 Cent) 2.410, *Love Game* (Eminem) 1.988,
+  *(Rap) Superstar* (Cypress Hill) 603; in **Chrome vero** la riga mostra le due
+  pastiglie distinte (`🔊 – non verificabile` per Genius in grigio, `🔊 ✗ non
+  confermato` per il link in **rosso** con la fonte nell'anteprima al passaggio del
+  mouse) e il link non c'è più; **76 test** in `test_audio_match.py` (erano 52) e
+  **358 test di suite** (erano 334, `OK`); pagine `/` `/browse` `/onyx` `/scheda` →
+  200 dopo il riavvio (colonne `ws_*` migrate da sole al primo avvio); backup del
+  database in `/tmp/samplelab_backup_18set2026_pre_ws.db` prima di rimuovere il link.
+  ⚠️ Da sapere: per un remix/live/sped-up legittimo l'audio può non combaciare
+  ("non confermato" = allarme da leggere, non condanna) e con l'anteprima ufficiale
+  assente il verdetto resta "non verificabile" — la rimozione del link, però, scatta
+  solo quando c'è una prova contraria.
+
 

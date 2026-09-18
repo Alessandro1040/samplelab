@@ -4792,27 +4792,31 @@ function coverThumb(f, size){
 }
 
 // ─── CONFERMA AUDIO (🔊) ─────────────────────────────────────────────────────
-// La Verifica abbina la canzone su Genius con un confronto TESTUALE: può essere
-// un falso positivo. Il passo 🔊 confronta il file locale con l'ANTEPRIMA
-// UFFICIALE di iTunes e scrive l'esito in `songs.audio_match_*`; qui l'esito
-// diventa una pastiglia nella riga. Funzione PURA: la esegue JavaScriptCore
-// (test_audio_match.py), quindi non tocca il DOM e non fa rete.
+// La Verifica aggancia due riferimenti con un confronto TESTUALE (e il testo può
+// sbagliare: *End of the World* finiva sulla pagina di *Skeeter Davis*): il passo
+// 🔊 confronta il file locale con l'ANTEPRIMA UFFICIALE di iTunes di ciò che è
+// stato salvato e ne scrive l'esito — `audio_match_*` per la canzone trovata su
+// Genius, `ws_audio_*` per il link WhoSampled. Qui l'esito diventa una pastiglia
+// nella riga. Funzione PURA: la esegue JavaScriptCore (test_audio_match.py),
+// quindi non tocca il DOM e non fa rete.
 const AUDIO_CHIP = {
   'confermato':      ['#4ade80', '✓ confermato'],
   'non confermato':  ['#ff4545', '✗ non confermato'],
   'ambiguo':         ['#fbbf24', '? ambiguo'],
   'non verificabile':['var(--muted)', '– non verificabile'],
 };
-function chipAudio(s){
-  const esito=(s&&s.audio_match_esito)||'';
+function chipAudio(s, quale){
+  const prefisso = (quale === 'whosampled') ? 'ws_audio_' : 'audio_match_';
+  const esito = (s && s[prefisso + 'esito']) || '';
   if(!esito) return '';
-  const stile=AUDIO_CHIP[esito]||['var(--muted)',esito];
-  const voti=(s.audio_match_voti==null)?'':` · ${s.audio_match_voti} hash`;
-  const off=(s.audio_match_offset==null)?'':` · offset ${Number(s.audio_match_offset).toFixed(1)} s`;
-  const fonte=s.audio_match_fonte?` · ${esc(s.audio_match_fonte)}`:'';
-  const quando=s.audio_match_at?` · ${esc(s.audio_match_at)}`:'';
+  const stile = AUDIO_CHIP[esito] || ['var(--muted)', esito];
+  const voti = (s[prefisso + 'voti'] == null) ? '' : ` · ${s[prefisso + 'voti']} hash`;
+  const off = (s[prefisso + 'offset'] == null) ? '' : ` · offset ${Number(s[prefisso + 'offset']).toFixed(1)} s`;
+  const fonte = s[prefisso + 'fonte'] ? ` · ${esc(s[prefisso + 'fonte'])}` : '';
+  const quando = s[prefisso + 'at'] ? ` · ${esc(s[prefisso + 'at'])}` : '';
+  const oggetto = (quale === 'whosampled') ? 'il link WhoSampled' : 'la canzone trovata su Genius';
   return `<span class="db-rel-badge" style="color:${stile[0]};cursor:help" `+
-         `title="Confronto AUDIO con l'anteprima ufficiale (Genius non ha audio)${fonte}${voti}${off}${quando}">🔊 ${stile[1]}</span>`;
+         `title="Conferma AUDIO (${oggetto}) con l'anteprima ufficiale iTunes${fonte}${voti}${off}${quando}">🔊 ${stile[1]}</span>`;
 }
 
 function renderDbTable(songs){
@@ -4868,7 +4872,7 @@ function renderDbTable(songs){
           ${s.local_file?`<button class="db-verify-btn db-audio-btn" onclick="audioCheckSong('${s.id}')" title="Confronta l'audio del file locale con l'anteprima UFFICIALE su iTunes: dice se la canzone trovata su Genius è davvero questa (5-10 s)">🔊 Audio</button>${chipAudio(s)}`:''}
           ${s.genius_url?`<a href="${esc(s.genius_url)}" target="_blank" style="font-size:9px;color:var(--muted);font-family:'Space Mono',monospace">Genius ↗</a>`:''}
           ${s.tunebat_url?`<a href="${esc(s.tunebat_url)}" target="_blank" style="font-size:9px;color:var(--accent2);font-family:'Space Mono',monospace">Tunebat ↗</a>`:''}
-          ${s.whosampled_url?`<a href="${esc(s.whosampled_url)}" target="_blank" style="font-size:9px;color:var(--muted);font-family:'Space Mono',monospace">WhoSampled ↗</a>`:''}
+          ${s.whosampled_url?`<a href="${esc(s.whosampled_url)}" target="_blank" style="font-size:9px;color:var(--muted);font-family:'Space Mono',monospace">WhoSampled ↗</a>`:''}${chipAudio(s,'whosampled')}
         </div>
       </td>
       <td><button class="db-del-btn" onclick="deleteSong('${s.id}')">✕</button></td>
@@ -5072,19 +5076,24 @@ async function audioCheckSong(id) {
         const q = (document.getElementById('db-search')?.value || '').toLowerCase();
         return !q || (s.title || '').toLowerCase().includes(q) || (s.artist || '').toLowerCase().includes(q);
       }));
-      const msg = (res.messages && res.messages[0]) || '';
+      const messaggi = res.messages || [];
       const nuovoBtn = document.querySelector(`tr[data-id="${id}"] .db-audio-btn`);
       const cella = nuovoBtn?.closest('.db-cell-stack');
-      if (cella && msg) {
+      if (cella && messaggi.length) {
         const box = document.createElement('div');
         box.className = 'verify-messages';
         box.style.cssText = 'margin-top:4px;font-size:9px;line-height:1.4;';
-        const colore = msg.includes('✅') ? '#4ade80' : (msg.includes('❌') ? '#ff4545' : (msg.includes('🟡') ? '#fbbf24' : '#aaa'));
-        box.innerHTML = `<div style="color:${colore}">${esc(msg)}</div>`;
+        box.innerHTML = messaggi.map(msg => {
+          const colore = msg.includes('✅') ? '#4ade80' : (msg.includes('❌') ? '#ff4545' : (msg.includes('🟡') ? '#fbbf24' : '#aaa'));
+          return `<div style="color:${colore}">${esc(msg)}</div>`;
+        }).join('');
         cella.appendChild(box);
       }
+      // Il verdetto mostrato nel toast: quello della canzone trovata su Genius e,
+      // se c'è, quello del link WhoSampled (sono due riferimenti diversi).
       const esito = res.esito || 'non verificabile';
-      toast(`🔊 Audio: ${esito}`, esito === 'confermato' ? 'ok' : (esito === 'non confermato' ? 'err' : 'info'));
+      const ws = res.esito_whosampled ? ` · WhoSampled: ${res.esito_whosampled}` : '';
+      toast(`🔊 Audio: ${esito}${ws}`, esito === 'confermato' ? 'ok' : (esito === 'non confermato' ? 'err' : 'info'));
     }
   } catch (e) {
     toast('❌ Controllo audio fallito: ' + e.message, 'err');
