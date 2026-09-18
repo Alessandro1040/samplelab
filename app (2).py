@@ -28,6 +28,9 @@ def _no_cache_html(resp):
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 DL_DIR     = os.path.join(BASE_DIR, "downloads");  os.makedirs(DL_DIR, exist_ok=True)
 STEMS_DIR  = os.path.join(BASE_DIR, "stems");      os.makedirs(STEMS_DIR, exist_ok=True)
+# Copertine delle canzoni (una per brano, servita da /cover/<file>): le immagini
+# non vanno in repo, come downloads/ e stems/ (vedi .gitignore).
+COVERS_DIR = os.path.join(BASE_DIR, "covers");     os.makedirs(COVERS_DIR, exist_ok=True)
 DB_PATH    = os.path.join(BASE_DIR, "samplelab (2).db")
 # Legacy dataset.json kept for compatibility
 DATASET_PATH = os.path.join(BASE_DIR, "dataset.json")
@@ -726,6 +729,181 @@ def _album_segnaposto(v):
     """True se il campo album è vuoto o è un segnaposto (non un album vero)."""
     return str(v or "").strip().lower() in _ALBUM_SEGNAPOSTO
 
+# ── COPERTINE (cover art) ────────────────────────────────────────────────────
+# La colonna `cover_art_path` restava VUOTA per tutte le canzoni: la Verifica
+# riempiva titolo, album, BPM, tonalità e testo ma nessuna immagine. La cover si
+# prende da Genius — la search API dà `header_image_thumbnail_url` (piccola),
+# l'API della singola canzone `song_art_image_url` (quadrata, ~1000 px) — e viene
+# salvata come FILE in `covers/`: nel database resta il NOME del file
+# (`<id>.<ext>`, es. 'song_7553a924d202.jpg'), non l'URL, che sulle CDN di Genius
+# cambia e scade. Le immagini non sono versionate (`covers/` è in .gitignore).
+_MIME_ESTENSIONI = {
+    "image/jpeg": "jpg", "image/jpg": "jpg", "image/pjpeg": "jpg",
+    "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+}
+_ESTENSIONI_IMMAGINE = {"jpg", "jpeg", "png", "webp", "gif"}
+
+def _cover_ext_from_url(url):
+    """Estensione del file di copertina dall'URL ('…/x.jpg?v=1' → 'jpg').
+    Se l'URL non dichiara un formato d'immagine si ripiega su 'jpg' (è il
+    formato con cui Genius serve quasi tutte le cover)."""
+    percorso = urllib.parse.urlparse(str(url or "")).path
+    ext = percorso.rsplit(".", 1)[-1].lower() if "." in percorso else ""
+    if ext == "jpeg":
+        return "jpg"
+    return ext if ext in _ESTENSIONI_IMMAGINE else "jpg"
+
+def _cover_filename(song_id, url):
+    """Nome del file di copertina di una canzone: `<id>.<ext>`.
+    L'id viene ripulito (lettere, numeri, underscore) perché finisce in un
+    percorso. Gli id del database sono già del tipo 'song_7553a924d202', quindi
+    il file è 'song_7553a924d202.jpg' — stesso nome dell'id, si trova subito."""
+    sid = re.sub(r'[^A-Za-z0-9_]', '', str(song_id or "")) or "cover"
+    return f"{sid}.{_cover_ext_from_url(url)}"
+
+def _cover_local_path(filename):
+    """Percorso su disco di una copertina ('' se il nome è vuoto o non è un
+    semplice nome di file: si serve solo dentro covers/, niente percorsi)."""
+    nome = os.path.basename(str(filename or ""))
+    return os.path.join(COVERS_DIR, nome) if nome else ""
+
+def _cover_mime(filename):
+    """Content-type da mandare al browser per una copertina salvata."""
+    ext = str(filename or "").rsplit(".", 1)[-1].lower()
+    return {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+            "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
+
+def _cover_mancante(cover_art_path):
+    """True se la copertina va (ri)trovata: campo vuoto o file non più su disco.
+    Serve perché `covers/` non è versionata: su un altro Mac (o dopo una pulizia)
+    il nome nel database c'è ma l'immagine no."""
+    percorso = _cover_local_path(cover_art_path)
+    return (not percorso) or (not os.path.exists(percorso))
+
+def _looks_like_image(data):
+    """True se i primi byte sono la firma di un'immagine vera. Genius a volte
+    risponde con una pagina HTML (blocco/errore): senza questo controllo
+    salveremmo un '.jpg' che immagine non è."""
+    if not data or len(data) < 12:
+        return False
+    if data[:3] == b"\xff\xd8\xff":                        # JPEG
+        return True
+    if data[:8] == b"\x89PNG\r\n\x1a\n":                   # PNG
+        return True
+    if data[:6] in (b"GIF87a", b"GIF89a"):                 # GIF
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":      # WEBP
+        return True
+    return data[:2] == b"BM"                               # BMP
+
+def _genius_cover_url(search_res, song_data=None):
+    """URL della copertina da Genius, dalla migliore alla peggiore: l'immagine
+    quadrata della singola canzone (~1000 px), la sua versione grande, poi la
+    miniatura della ricerca."""
+    for valore in (
+        (song_data or {}).get("song_art_image_url"),
+        (song_data or {}).get("header_image_url"),
+        (song_data or {}).get("song_art_image_thumbnail_url"),
+        (search_res or {}).get("song_art_image_url"),
+        (search_res or {}).get("header_image_thumbnail_url"),
+        (search_res or {}).get("header_image_url"),
+    ):
+        if valore and str(valore).startswith("http"):
+            return str(valore)
+    return ""
+
+_COVER_MAX_BYTES = 8 * 1024 * 1024
+
+def _scarica_immagine(url, timeout=20):
+    """Scarica i byte di un'immagine (b'' se la risposta non è un'immagine o se è
+    troppo grande: le cover più pesanti di Genius stanno sotto 1 MB)."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+        "Accept": "image/avif,image/webp,image/*,*/*;q=0.8",
+        "Referer": "https://genius.com/",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = r.read(_COVER_MAX_BYTES + 1)
+    if len(data) > _COVER_MAX_BYTES:
+        print(f"[cover] immagine troppo grande ({len(data)} byte), scartata")
+        return b""
+    if not _looks_like_image(data):
+        print("[cover] la risposta non è un'immagine (probabile pagina di errore)")
+        return b""
+    return data
+
+def _cover_da_tag_audio(path):
+    """Copertina incorporata nel file audio: MP3 (APIC), M4A/MP4 (covr), FLAC
+    (pictures). Ritorna (byte, estensione) oppure (b'', ''): è il ripiego per i
+    brani che Genius non conosce (file locali)."""
+    if not path or not os.path.exists(path) or not HAS_MUTAGEN:
+        return b"", ""
+    try:
+        from mutagen import File as MutagenFile
+        f = MutagenFile(path)
+        if not f:
+            return b"", ""
+        candidati = []
+        tag = f.tags
+        if isinstance(tag, dict):
+            for voce in (tag.get("covr") or []):                 # MP4 / M4A
+                candidati.append((getattr(voce, "data", None) or bytes(voce),
+                                  getattr(voce, "mime", "") or ""))
+        try:                                                     # MP3 (ID3)
+            for apic in (tag.getall("APIC") if hasattr(tag, "getall") else []):
+                candidati.append((getattr(apic, "data", b""), getattr(apic, "mime", "") or ""))
+        except Exception:
+            pass
+        for pic in (getattr(f, "pictures", []) or []):           # FLAC
+            candidati.append((getattr(pic, "data", b""), getattr(pic, "mime", "") or ""))
+        for data, mime in candidati:
+            data = bytes(data or b"")
+            if _looks_like_image(data):
+                ext = _MIME_ESTENSIONI.get(str(mime).lower().split(";")[0].strip())
+                if not ext:
+                    ext = "png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "jpg"
+                return data, ext
+    except Exception as e:
+        print(f"[cover] tag audio: {e}")
+    return b"", ""
+
+def _salva_copertina(song_id, cover_url="", local_file=""):
+    """Salva la copertina della canzone in `covers/`. Ritorna (nome_file|None, msg).
+
+    Fonte 1: l'immagine di Genius (`cover_url`, già grande e quadrata).
+    Fonte 2 (ripiego): la copertina incorporata nel file audio locale, così
+    anche i brani che Genius non conosce possono avere la loro immagine.
+    """
+    dati, nome, origine = b"", "", ""
+    if cover_url:
+        try:
+            dati = _scarica_immagine(cover_url)
+            if dati:
+                nome, origine = _cover_filename(song_id, cover_url), "Genius"
+        except Exception as e:
+            print(f"[cover] download da Genius fallito: {e}")
+    if not dati and local_file:
+        dati, ext = _cover_da_tag_audio(os.path.join(DL_DIR, local_file))
+        if dati:
+            nome, origine = _cover_filename(song_id, "." + ext), "tag del file audio"
+    if not dati or not nome:
+        return None, "⚠️ Copertina non trovata (né su Genius né nel file audio)"
+    try:
+        with open(_cover_local_path(nome), "wb") as fh:
+            fh.write(dati)
+    except OSError as e:
+        return None, f"⚠️ Copertina non salvata ({str(e)[:60]})"
+    # Una sola immagine per canzone: se il formato è cambiato (jpg → png) il file
+    # vecchio va rimosso, altrimenti resterebbe orfano nella cartella.
+    prefisso = f"{re.sub(r'[^A-Za-z0-9_]', '', str(song_id or ''))}."
+    for altro in os.listdir(COVERS_DIR):
+        if altro != nome and altro.startswith(prefisso):
+            try: os.remove(os.path.join(COVERS_DIR, altro))
+            except OSError: pass
+    return nome, f"🖼 Copertina salvata ({origine}): {nome} · {max(1, len(dati) // 1024)} KB"
+
 def fetch_genius(artist, title):
     """Fetch da Genius: URL, titolo, artista, produttori, compositori (writers),
     album, artista album, data e cover.
@@ -843,7 +1021,9 @@ def fetch_genius(artist, title):
             "album_artist": "",
             "release_date": res.get("release_date_for_display", ""),
             "album": (res.get("album") or {}).get("name", ""),
-            "cover_art": res.get("header_image_thumbnail_url", ""),
+            # Copertina: miniatura della ricerca come base, poi l'API della
+            # singola canzone la sostituisce con l'immagine quadrata grande.
+            "cover_art": _genius_cover_url(res),
         }
         # API della singola canzone: compositori (writer), produttori, album
         # artist, feat. ufficiali. Questa chiamata è l'unica fonte dei produttori:
@@ -878,6 +1058,11 @@ def fetch_genius(artist, title):
                     song["album_artist"] = alb["artist"]["name"]
                 if sdata.get("release_date_for_display"):
                     song["release_date"] = sdata["release_date_for_display"]
+                # Copertina grande (~1000 px) dalla singola canzone: la miniatura
+                # che arriva dalla ricerca è 200 px e sgrana nella scheda.
+                cover_big = _genius_cover_url(res, sdata)
+                if cover_big:
+                    song["cover_art"] = cover_big
                 if writers or prods:
                     break
                 print(f"[genius song api] risposta senza crediti (tentativo {attempt}/2)")
@@ -2374,6 +2559,17 @@ def stream_stem(folder, filename):
     mime = MIME_MAP.get(ext, "audio/mpeg")
     return send_file(path, mimetype=mime)
 
+# ── COPERTINE ────────────────────────────────────────────────────────────────
+# `songs.cover_art_path` contiene il NOME del file (es. 'song_7553a924d202.jpg'),
+# salvato in `covers/` dalla Verifica: qui lo si serve alla pagina, che lo usa
+# come miniatura nella tabella del database e come immagine della scheda.
+@app.route("/cover/<path:filename>")
+def cover_file(filename):
+    path = _cover_local_path(filename)
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "Copertina non trovata"}), 404
+    return send_file(path, mimetype=_cover_mime(filename))
+
 @app.route("/download-file/<path:filename>")
 def download_file(filename):
     """Scarica un file locale con i metadati del database scritti nei tag.
@@ -3237,6 +3433,9 @@ def verify_song(song_id):
             base_title = re.sub(r'\s+', ' ', t_noartist).strip(' -–—:·|') or raw_title.strip()
 
     # ─── GENIUS ──────────────────────────────────────────────
+    # `genius` è inizializzato QUI (non solo dentro il try): il passo della
+    # copertina lo legge anche se la ricerca Genius esplode a metà.
+    genius = None
     try:
         # Candidati (artista, titolo) da provare per Genius, in ordine:
         #  1) artista/titolo estratti dal nome del file locale (se coerente col DB)
@@ -3427,6 +3626,21 @@ def verify_song(song_id):
             messages.append("⚠️ Genius: nessun risultato trovato")
     except Exception as e:
         messages.append(f"⚠️ Genius: errore ({str(e)[:50]})")
+
+    # ─── COPERTINA ───────────────────────────────────────────
+    # Fino al 18/09/2026 `cover_art_path` restava vuoto per TUTTE le 890 canzoni:
+    # la Verifica trovava titolo, album, BPM, tonalità e testo, ma nessuna
+    # immagine. Qui si scarica la cover di Genius e la si salva in `covers/`; se
+    # Genius non ha l'immagine si prova con quella incorporata nel file audio
+    # (MP3/M4A/FLAC). Nel database va il NOME del file, non l'URL: gli URL delle
+    # CDN di Genius cambiano, il nome no. Se il file esiste già non si rifà nulla.
+    if _cover_mancante(s.get("cover_art_path")):
+        _set_verify_status(song_id, 2, 6, "Recupero copertina da Genius…")
+        nome_cover, msg_cover = _salva_copertina(
+            song_id, (genius or {}).get("cover_art", ""), s.get("local_file", "") or "")
+        if nome_cover:
+            updates["cover_art_path"] = nome_cover
+        messages.append(msg_cover)
 
     # Titolo/artista "effettivi" da usare nelle ricerche successive (YouTube,
     # WhoSampled, Tunebat): il campo `artist` può elencare TUTTI i crediti

@@ -250,6 +250,9 @@ input[type=range].vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width
 .db-table tr:last-child td{border-bottom:none}
 .db-table tr:hover td{background:rgba(255,255,255,.02)}
 .db-cell-flex{display:flex;align-items:center;gap:6px}
+/* miniatura della copertina trovata dalla Verifica (apre l'immagine grande) */
+.db-cover{width:26px;height:26px;border-radius:4px;object-fit:cover;border:1px solid var(--border);flex-shrink:0;display:block;cursor:zoom-in}
+.db-cover:hover{border-color:var(--accent)}
 .db-browse-link{color:var(--accent);text-decoration:none;font-size:13px;opacity:.65;transition:opacity .15s;flex-shrink:0;line-height:1}
 .db-browse-link:hover{opacity:1;text-decoration:underline}
 .db-artist-chips{display:flex;flex-wrap:wrap;gap:3px}
@@ -4772,6 +4775,19 @@ function filterDb(q){
   renderDbTable(filtered);
 }
 
+// ─── COPERTINE (cover art) ───────────────────────────────────────────────────
+// La Verifica salva la copertina in covers/ e nel database scrive il NOME del
+// file (es. 'song_7553a924d202.jpg'): la pagina la chiede a /cover/<file>.
+// Se il file non c'è (la cartella covers/ non è versionata) la miniatura sparisce
+// da sola invece di lasciare l'icona di immagine rotta.
+function coverUrl(f){ return f ? '/cover/' + encodeURIComponent(f) : ''; }
+function coverThumb(f, size){
+  if(!f) return '';
+  const px = size || 26;
+  return `<a href="${coverUrl(f)}" target="_blank" title="Apri la copertina (covers/${esc(f)})">`+
+         `<img class="db-cover" style="width:${px}px;height:${px}px" src="${coverUrl(f)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></a>`;
+}
+
 function renderDbTable(songs){
   const tbody=document.getElementById('db-tbody');
   if(!songs.length){tbody.innerHTML=`<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--muted);font-family:'Space Mono',monospace;font-size:12px">Nessuna canzone nel database<br>Usa il pannello "➕ Aggiungi canzone" oppure aggiungi brani dal player 🎧</td></tr>`;updateVerifyAllBtnState();return}
@@ -4793,6 +4809,7 @@ function renderDbTable(songs){
       </td>
       <td><div class="db-cell-stack">
         <div class="db-cell-flex">
+          ${coverThumb(s.cover_art_path, 26)}
           <input class="db-cell-edit ${v('title',s.title)}" value="${esc(s.title||s.local_file||'')}" onchange="updateSongField('${s.id}','title',this.value)" title="Clicca per modificare">
           ${s.album?`<a class="db-browse-link" href="/browse?album=${encodeURIComponent(s.album)}" title="Vai all'album di questa canzone">💿</a>`:''}
         </div>
@@ -4936,6 +4953,12 @@ async function verifySong(id) {
       let feedbackHtml = '';
       if (res.messages && res.messages.length) {
         feedbackHtml = res.messages.map(m => `<div style="font-size:9px;color:${m.includes('✅')?'#4ade80':m.includes('⚠️')?'#fbbf24':'#aaa'}">${m}</div>`).join('');
+        // Copertina appena trovata: si vede subito accanto ai messaggi, senza
+        // dover scorrere fino alla miniatura della riga.
+        if (song.cover_art_path) {
+          feedbackHtml += `<div style="margin-top:6px;display:flex;gap:8px;align-items:center">${coverThumb(song.cover_art_path, 54)}`+
+            `<span style="font-size:9px;color:#aaa;font-family:'Space Mono',monospace">covers/${esc(song.cover_art_path)}</span></div>`;
+        }
         // Mostra subito il testo trovato su Genius (già filtrato dal server),
         // in un box scrollabile, così "compaiono" davvero i lyrics.
         if (song.lyrics && song.lyrics.trim()) {
@@ -5811,7 +5834,7 @@ function dbEditFormHTML(s){
     ${inp('release_date','Data rilascio')}${inp('track_number','N° traccia')}${inp('disc_number','N° disco')}${sel('compilation','Compilation',[[0,'No'],[1,'Sì']])}
     ${inp('rating','Rating','number')}${inp('bpm','BPM','number')}${inp('musical_key','Chiave')}${inp('play_count','Play count','number')}
     ${inp('duration','Durata (s)','number')}${sel('analyzed_status','Stato analisi',[['none','none'],['analyzing','analyzing'],['done','done'],['error','error']])}
-    ${inp('youtube_url','URL YouTube')}${inp('genius_url','URL Genius')}${inp('whosampled_url','URL WhoSampled')}${inp('tunebat_url','URL Tunebat')}${inp('cover_art_path','Cover path')}
+    ${inp('youtube_url','URL YouTube')}${inp('genius_url','URL Genius')}${inp('whosampled_url','URL WhoSampled')}${inp('tunebat_url','URL Tunebat')}${inp('cover_art_path','Cover path')}${v('cover_art_path')?`<label class="dbe-field"><span>Copertina</span>${coverThumb(v('cover_art_path'),72)}</label>`:''}
     ${inp('local_file','File locale')}
     ${ta('comment','Commento')}${ta('lyrics','Testo')}
   </div>

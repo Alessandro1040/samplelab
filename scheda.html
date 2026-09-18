@@ -311,6 +311,13 @@ function renderHero(){
   const s=(scheda&&scheda.song)||{};
   const c=(scheda&&scheda.counts)||{};
   const lettera=(String(s.title||'♪').trim().charAt(0)||'♪').toUpperCase();
+  // Copertina trovata dalla Verifica (covers/ nel database): riempie il
+  // riquadro dell'hero al posto della lettera. Se il file non c'è più
+  // (covers/ non è versionata) si torna alla lettera, senza immagine rotta.
+  const arte = s.cover_art_path ? '/cover/' + encodeURIComponent(s.cover_art_path) : '';
+  const artoHTML = arte
+    ? `<img src="${arte}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentNode.innerHTML='${esc(lettera)}'">`
+    : esc(lettera);
   document.getElementById('bc-value').textContent=s.title||'—';
   document.title='SampleLab (2) — '+(s.title||'Scheda canzone');
   const chips=[];
@@ -341,7 +348,7 @@ function renderHero(){
 
   document.getElementById('hero').innerHTML=`
     <div class="hero-top">
-      <div class="hero-art" style="background:linear-gradient(135deg,var(--accent),var(--accent3))">${esc(lettera)}</div>
+      <div class="hero-art" style="background:linear-gradient(135deg,var(--accent),var(--accent3))">${artoHTML}</div>
       <div class="hero-main">
         <div class="hero-eyebrow">Scheda canzone</div>
         <div class="hero-title">${esc(s.title||s.local_file||'Senza titolo')}</div>

@@ -73,6 +73,11 @@ con `(2)` nella cartella locale:
   dal job, mai l'audio di un altro sample): `python3 -m unittest -v test_download_fallback`
 - `test_verify_genius.py` — test del recupero crediti da Genius (tutti gli
   artisti, produttori, compositori): `python3 -m unittest -v test_verify_genius`
+- `test_verify_cover.py` — test delle **copertine** trovate dalla Verifica (la
+  **cover** che finisce in `covers/` e in `songs.cover_art_path`): funzioni pure
+  (nome del file, firma del formato, scelta dell'URL su Genius, copertina scritta
+  nei tag di un mp3), la rotta `/cover/<file>` col client di Flask e le prove
+  sull'app viva: `python3 -m unittest -v test_verify_cover`
 - `test_move_field.py` — test della **legenda 📖** e dello strumento **➡️ Sposta**
   del pannello SQL/script (funzione pura `move_field_value`: artista dal titolo
   agli artisti, anno dal titolo al campo anno, parola intera, parentesi rimaste
@@ -116,6 +121,8 @@ con `(2)` nella cartella locale:
 
 - `downloads/` — audio scaricati (centinaia di GB)
 - `stems/` — tracce separate generate
+- `covers/` — copertine delle canzoni (una per brano, ~1000 px, servite da
+  `/cover/<file>`; il database ne tiene il **nome**, non l'URL)
 - `.trash/`, `.snapshots/`, `__pycache__/` — file temporanei
 
 ## Requisiti di sistema
@@ -302,6 +309,11 @@ Da tenere presente nelle sessioni di lavoro successive:
   committare mai il file completo.
 - **`samplelab (2).db` è binario** e cambia a ogni uso: committarlo solo quando
   la modifica dei dati è voluta.
+- **Copertine.** La Verifica (18/09/2026) salva la cover di ogni canzone in
+  `covers/` e scrive il **nome del file** in `songs.cover_art_path`; si serve da
+  `/cover/<file>`. La cartella **non è versionata** (come `downloads/`: centinaia
+  di immagini pesano troppo) — su un altro Mac i nomi nel database ci sono ma i
+  file no, e la prima Verifica di quel brano li riscarica da sé.
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
   `do_download_playlist`): con yt-dlp recenti provocava "Video unavailable"/403.
 - **FORTISSIMO COMPARE (11/09/2026).** Aggiunti `fortissimo_compare_v3.py`, la
@@ -1320,4 +1332,61 @@ Da tenere presente nelle sessioni di lavoro successive:
   La barra c'è nel sampler del modale (e negli editor incorporati delle card, che
   montano lo stesso documento); il player *inline* delle card ha lo stesso
   scorrimento col touchpad ma non la barra (è la versione compatta).
+
+- **COPERTINE DALLA VERIFICA (18/09/2026).** Richiesta di Alessandro: «quando
+  clicchi su verifica dovrebbe trovare anche l'immagine (cover) di ogni canzone,
+  non so come puoi prenderla ma ti consiglierei di prendere la cover di genius».
+  La colonna `songs.cover_art_path` esisteva dallo schema iniziale ma era **vuota
+  su tutte le 890 canzoni**: `fetch_genius` leggeva già l'immagine di Genius
+  (`header_image_thumbnail_url`, la miniatura della ricerca, ~200 px) e poi la
+  buttava via — `verify_song` salvava titolo, artisti, produttori, compositori,
+  data, anno, album, testo, BPM, tonalità e URL, e nessuna immagine. Ora
+  `fetch_genius` preferisce **`song_art_image_url`** (l'immagine quadrata ~1000 px
+  dell'API della singola canzone), la Verifica la scarica e la salva in
+  **`covers/`**, e nel database va il **NOME del file** (`<id>.<ext>`, es.
+  `song_0770e7f756d0.png`), non l'URL: gli URL delle CDN di Genius cambiano, il
+  nome no. Le immagini **non sono versionate** (`covers/` in `.gitignore`, come
+  `downloads/` e `stems/`: una copertina a 1000 px per 890 brani sono centinaia di
+  MB). Prima di salvare si controlla la **firma del formato** (JPEG/PNG/GIF/WEBP/
+  BMP): Genius a volte risponde con una pagina HTML e senza il controllo si
+  salverebbe un `.jpg` che immagine non è. Se Genius non ha l'immagine si prova con
+  la **copertina incorporata nel file audio** (MP3 `APIC`, M4A `covr`, FLAC
+  `pictures`, via mutagen): è il caso dei brani locali che Genius non conosce. Il
+  passo è **idempotente** — se `cover_art_path` c'è e il file esiste non si
+  riscarica niente, se il file manca (cartella non versionata, altro Mac) si
+  riscarica da sé — e lascia **un solo file per canzone** (se il formato cambia, la
+  vecchia immagine viene rimossa). La rotta nuova **`/cover/<path:filename>`** serve
+  l'immagine riducendo il nome al `basename` (`/cover/../../app (2).py` → 404) e
+  manda il content-type dall'estensione. Nella pagina la miniatura **26×26** sta
+  accanto al **titolo** di ogni riga del database (e apre la cover grande in una
+  scheda), **54×54** compare **nel feedback della Verifica** (si vede subito cosa
+  ha trovato), **72×72** è l'**anteprima nell'editor ✏️**, e in `/scheda` la
+  copertina riempie il riquadro dell'hero al posto della lettera; con
+  `loading="lazy"` e `onerror` le miniature delle righe fuori schermo non si
+  scaricano e quelle mancanti spariscono invece di lasciare l'icona di immagine
+  rotta. Verifiche del 18/09/2026: **35 test nuovi** (`test_verify_cover.py` — 25
+  puri: nome del file ed estensioni, firma dei formati, scelta dell'URL su Genius,
+  copertina `APIC` scritta su una **copia** di un mp3 vero, un solo file per
+  canzone, rotta provata col client di Flask su una cartella temporanea; 3 di rete
+  su Genius; 4 sull'app viva) e **263 test di suite** (erano 228, `OK`); prova di
+  rete vera: la copertina di *In My Baggie* (Chris Webby) scaricata da Genius e
+  salvata come `covers/song_0770e7f756d0.png` (**230.709 byte**),
+  `/cover/song_0770e7f756d0.png` → **200 `image/png` 230.709 byte** (`file`: `PNG
+  image data, 1000 x 1000`), `/cover/questa-non-esiste-mai.jpg` → **404**, e la riga
+  del database con `cover_art_path='song_0770e7f756d0.png'`; in **Chrome vero**
+  (ricetta browser dell'app, `make_driver()`) la tabella del database contiene
+  l'elemento `#db-tbody img.db-cover` — **890 righe, 1 miniatura**, di 26×26 px e
+  visibile, con `src="/cover/song_0770e7f756d0.png"` sulla riga di *In My Baggie*
+  (i byte della miniatura li ha verificati `curl` sulla stessa URL: con
+  `loading="lazy"` il browser la scarica quando la riga entra in vista, e a metà
+  sessione Chrome 153 + `undetected_chromedriver` 3.5.5 ha smesso di avviarsi —
+  finestra chiusa subito, problema d'ambiente, non della pagina); app riavviata
+  (nuovo PID, porta **5070**) e pagine `/` `/browse` `/onyx` `/scheda`
+  `/fortissimo` `/db/stats` → **200**. Mappa del codice (dal file vero):
+  `_cover_mancante` 776, `_genius_cover_url` 799, `_scarica_immagine` 817,
+  `_cover_da_tag_audio` 837, `_salva_copertina` 872, `fetch_genius` 907, rotta
+  `cover_file` 2567, `verify_song` 3397 in `app (2).py`; `coverUrl` 4783,
+  `coverThumb` 4784, `renderDbTable` 4791 in `index (2).html`; `renderHero` 310
+  in `scheda.html`. Come per gli altri giri di dati, il
+  database resta da committare a parte (è binario).
 
