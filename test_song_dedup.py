@@ -145,19 +145,49 @@ class TestConfrontoTitoli(unittest.TestCase):
                 self.assertTrue(APP.canzoni_equivalenti(titolo, "Eminem",
                                                         "Till I Collapse", "Eminem"))
 
-    def test_crediti_senza_parentesi_nel_titolo_non_si_tagliano(self):
-        # Scelta voluta: «… feat. X» SCIOLTO (senza parentesi) nel titolo non si
-        # toglie, perché la libreria vera ha titoli come «Kim ft. 2Pac, Miley
-        # Cyrus - 2021 - Mashup…», che diventerebbe «Kim» (un altro brano).
-        # Il caso normale delle collaborazioni lo copre il campo ARTISTA
-        # (`artisti_compatibili` divide su feat./ft./with/&...).
-        self.assertFalse(APP.canzoni_equivalenti("Brano feat. Tizio", "Artista",
-                                                 "Brano", "Artista"))
+    def test_crediti_senza_parentesi_e_featuring(self):
+        # 18/09/2026 — CASO VERO segnalato da Alessandro: la riga del 13/08 si
+        # chiama «Baby By Me (Featuring Ne-Yo)» e salvando il campione di «Baby by
+        # Me» (titolo senza crediti) nasceva un DOPPIONE. «Featuring» scritto per
+        # esteso non era fra i marcatori (c'era solo `feat\.?`) e i crediti
+        # SCIOLTI (senza parentesi) non si toglievano affatto.
+        self.assertTrue(APP.canzoni_equivalenti("Baby by Me", "50 Cent",
+                                                "Baby By Me (Featuring Ne-Yo)",
+                                                "50 Cent / Ne-Yo"))
+        for scritto in ("Baby By Me (feat. Ne-Yo)", "Baby By Me (Featuring Ne-Yo)",
+                        "Baby By Me [Feat. Ne-Yo]", "Baby By Me feat. Ne-Yo",
+                        "Baby By Me ft Ne-Yo", "Baby By Me featuring Ne-Yo"):
+            with self.subTest(scritto=scritto):
+                self.assertTrue(APP.canzoni_equivalenti(scritto, "50 Cent",
+                                                        "Baby by Me", "50 Cent"))
+        # Il credito si taglia SOLO fino a un « - » o a una parentesi: quello che
+        # viene dopo è ancora parte del titolo — è la ragione per cui il 19/09/2026
+        # si era scelto di NON toccare i crediti sciolti (il caso «Kim ft. … -
+        # 2021 - Mashup - {NodaMixMusic}» non deve diventare «Kim», un altro brano)
+        self.assertFalse(APP.canzoni_equivalenti(
+            "Kim", "Eminem", "Kim ft. 2Pac, Miley Cyrus - 2021 - Mashup - {NodaMixMusic}", "Eminem"))
+        self.assertFalse(APP.canzoni_equivalenti("Till I Collapse", "Eminem",
+                                                 "Till I Collapse ft. X (Live)", "Eminem"))
+        # e «with»/«con» sciolti NON si toccano: farebbero sparire mezzo titolo
+        self.assertFalse(APP.canzoni_equivalenti("Dance", "Artista",
+                                                 "Dance with the Devil", "Artista"))
         self.assertTrue(APP.artisti_compatibili("Artista feat. Tizio", "Artista"))
         self.assertTrue(APP.canzoni_equivalenti("GHIGLIOTTINA - feat. Noyz Narcos",
                                                 "Salmo / Noyz Narcos",
-                                                "GHIGLIOTTINA - feat. Noyz Narcos",
-                                                "Salmo"))
+                                                "GHIGLIOTTINA - feat. Noyz Narcos", "Salmo"))
+
+    def test_trova_la_riga_col_credito_scritto_diverso(self):
+        # La regressione del caso segnalato, sul motore che decide: con in libreria
+        # «Baby By Me (Featuring Ne-Yo)», salvando «Baby by Me» NON si crea una
+        # riga nuova — si riusa quella (ed è la prova che compare in /save_pair).
+        con = sqlite3.connect(":memory:")
+        con.row_factory = sqlite3.Row
+        con.executescript(
+            "CREATE TABLE songs(id TEXT PRIMARY KEY, title TEXT, artist TEXT);"
+            "INSERT INTO songs VALUES('a','Baby By Me (Featuring Ne-Yo)','50 Cent / Ne-Yo');")
+        sid, come = APP.find_existing_song(con, "Baby by Me", "50 Cent")
+        self.assertEqual(sid, "a")
+        self.assertIn("compatibile", come)
 
 
     def test_remix_strumentale_live_e_cover_restano_altri_brani(self):

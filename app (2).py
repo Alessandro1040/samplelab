@@ -494,8 +494,20 @@ def keys_equivalent(k1, k2):
 # «Cover», «Instrumental»: quelli sono brani diversi, e in `sample_relations`
 # hanno una categoria propria.
 _MARCA_SERVIZIO = re.compile(
-    r"\s*[\(\[]\s*(?:feat\.?|ft\.?|with|con|official|explicit|video|audio|lyric"
+    r"\s*[\(\[]\s*(?:feat(?:uring)?\.?|ft\.?|with|con|official|explicit|video|audio|lyric"
     r"|hd|hq|prod\.?(?:\s+by)?|visualizer|clip)\b[^\)\]]*[\)\]]", re.I)
+# Crediti scritti SENZA parentesi («Baby by Me feat. Ne-Yo», «… ft Ne-Yo», «…
+# featuring Ne-Yo»): è la stessa canzone, quindi nel confronto si tolgono. La riga
+# del 13/08 di «Baby By Me (Featuring Ne-Yo)» è il caso vero (18/09/2026): con
+# solo `feat\.?` il confronto non riconosceva «Featuring» e salvando il campione
+# di «Baby by Me» nasceva un doppione.
+# NON si tolgono «with»/«con» FUORI parentesi: farebbero sparire mezzo titolo
+# («Dance with the Devil» → «dance»). E si taglia SOLO la frase del credito,
+# fermandosi a un « - » o a una parentesi: in
+# «Kim ft. 2Pac, Miley Cyrus - 2021 - Mashup» il marcatore «Mashup» (cioè che il
+# brano è un altro lavoro) deve restare.
+_MARCA_CREDITI_LIBERA = re.compile(
+    r"\s+(?:feat(?:uring)?|ft)\b\.?\s+[^\n]*?(?=\s[-–—]\s|[\(\[]|$)", re.I)
 _SEPARA_ARTISTI = re.compile(
     r"\s*(?:/|,|;|\||\+|&|\bfeat\.?\b|\bft\.?\b|\bwith\b|\bcon\b|\bx\b)\s*", re.I)
 
@@ -506,8 +518,17 @@ def titolo_confronto(s):
     «samuelssong»), ma **NON** tocca «Remix», «Live», «Cover», «Instrumental»:
     quelli sono brani diversi. (La `titolo_base()` più sotto, riga ~3657, fa il
     contrario di proposito: serve a TROVARE le varianti nella scheda, non a
-    decidere se due righe sono la stessa canzone.)"""
-    return normalize_key(_MARCA_SERVIZIO.sub(" ", str(s or "")))
+    decidere se due righe sono la stessa canzone.)
+
+    I crediti si tolgono in tutte le forme scritte in libreria: fra parentesi
+    («(feat. X)», «(Featuring X)», «[ft. X]») e **senza** parentesi
+    («Baby by Me feat. Ne-Yo»), perché la canzone è la stessa. È il caso vero
+    del 18/09/2026: «Baby by Me» (salvato da Trova Campioni) e
+    «Baby By Me (Featuring Ne-Yo)» (riga del 13/08) erano la stessa canzone.
+    """
+    testo = _MARCA_SERVIZIO.sub(" ", str(s or ""))
+    testo = _MARCA_CREDITI_LIBERA.sub("", testo)
+    return normalize_key(testo)
 
 
 def artista_principale(s):

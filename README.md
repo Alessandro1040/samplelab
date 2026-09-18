@@ -448,8 +448,13 @@ Da tenere presente nelle sessioni di lavoro successive:
   «Eminem» e «Eminem / Nate Dogg» sono la stessa canzone, ma **remix, strumentale,
   live e cover NO** — per il dedup **non** si usa la `titolo_base()` della scheda
   canzone, che quei marcatori li toglie di proposito (ombreggiare quel nome è stato il
-  bug di questa sessione). Una riga che entra nel database senza file locale **se lo
-  scarica da sé** (`avvia_download_canzone`: il file si aggancia a QUELLA riga, mai a
+  bug di questa sessione). **18/09/2026:** fra i crediti che si tolgono ci sono anche
+  «(Featuring X)» scritto per esteso e i `feat./ft.` **senza** parentesi («Baby by Me
+  feat. Ne-Yo») — la frase del credito si taglia però solo fino a un « - » o a una
+  parentesi, così i marcatori di versione restano («Kim ft. … - 2021 - Mashup» NON
+  diventa «Kim», e «Dance with the Devil» resta intero). Una riga che entra nel
+  database senza file locale **se lo scarica da sé** (`avvia_download_canzone`: il
+  file si aggancia a QUELLA riga, mai a
   una nuova) e per i doppioni storici c'è `POST /db/songs/merge`. `/save_pair` risponde
   con `derivative.created` / `source.created` e `downloads`, così si vede subito se ha
   riusato una riga esistente invece di crearne una. ⚠️ `normalize_key()` è NULL-safe:
@@ -2504,6 +2509,57 @@ Da tenere presente nelle sessioni di lavoro successive:
     Questions* ri-controllato) e lo stato del player sono stati **ripristinati** con
     `git checkout -- "samplelab (2).db"` prima del commit — quindi in questo commit
     non c'è nessun cambio di dati.
+
+- **DOPPIONE DI «BABY BY ME» — «(Featuring X)» NON ERA UN CREDITO, E I CREDITI
+  SCIOLTI NON SI TOCCAVANO (18/09/2026).** Segnalazione di Alessandro: «continua a
+  creare duplicati, ho cercato i sample di Baby by Me e mi ha aperto la schermata
+  corretta però quando sono andato a salvare mi ha creato un clone nel database
+  inutilmente, ora ci sono due Baby by Me».
+  - **Causa** (riprodotta con le funzioni vere sul DB vero): la riga del 13/08 si
+    chiama **«Baby By Me (Featuring Ne-Yo)»**, il titolo salvato da Trova Campioni è
+    «Baby by Me», e `titolo_confronto` toglieva solo i crediti scritti `feat.`/`ft.`
+    (oltre a `with`, `prod. by`, `official`…): **«Featuring» per esteso non era
+    nell'elenco** → `babybymefeaturingneyo` ≠ `babybyme` → nessun candidato → riga
+    nuova con un altro file scaricato. In più i crediti **senza parentesi** (125
+    titoli in libreria, es. «MadMan - NLS ft. Gemitaiz, Luchè») non si toglievano
+    affatto.
+  - **Fix in `app (2).py`:** `_MARCA_SERVIZIO` accetta `feat(?:uring)?\.?` e c'è una
+    regola nuova, `_MARCA_CREDITI_LIBERA`, per i crediti sciolti — che però si ferma
+    al primo « - » (con gli spazi) o a una parentesi: quello che viene dopo resta
+    parte del titolo. È la differenza che tiene in piedi la scelta del 19/09/2026:
+    «Kim ft. 2Pac, Miley Cyrus - 2021 - Mashup - {NodaMixMusic}» NON diventa «Kim»
+    (chiave `kim2021mashupnodamixmusic`) e «Till I Collapse ft. X (Live)» non
+    diventa «Till I Collapse». «with»/«con» **sciolti** restano intatti («Dance with
+    the Devil» ≠ «Dance»), e «Remix/Live/Instrumental/Cover» continuano a essere
+    altri brani. Sul libro vero cambiano chiave **6 titoli su 893**, tutti crediti
+    veri (elencati nel log della verifica), nessuno con marcatori di versione.
+  - **Test:** il vecchio `test_crediti_senza_parentesi_nel_titolo_non_si_tagliano`
+    (che difendeva la scelta opposta) è stato **riscritto** in
+    `test_crediti_senza_parentesi_e_featuring` col perché e con i due casi che
+    devono continuare a NON unirsi; nuovo
+    `test_trova_la_riga_col_credito_scritto_diverso`, che è la regressione esatta
+    del caso segnalato sul motore che decide (`find_existing_song` con in libreria
+    «Baby By Me (Featuring Ne-Yo)» e in arrivo «Baby by Me» → riusa la riga).
+  - **Verifiche del 18/09/2026:** `titolo_confronto` dà `babybyme` per entrambe le
+    scritture e `canzoni_equivalenti(...)` → `True`; scansione dell'intera libreria
+    (893 titoli) per vedere ogni chiave che cambia; `test_song_dedup` **38 test
+    `OK`**, suite completa **494 test `OK`**; sull'**app viva** `POST /db/songs` con
+    «Baby by Me»/«50 Cent» → **`song_3b2e38cdf45e`** (la riga del 13/08) e conteggio
+    fermo a **892**: nessuna riga nuova.
+  - **Dati** (backup in `/tmp/sl_backup_pre_fix_dedup.db` prima di scrivere, e stato
+    post-unione in `/tmp/sl_dopo_merge.db`): il doppione è stato **unito** con
+    `POST /db/songs/merge` (`keep: song_3b2e38cdf45e`, `drop: song_2c61ba7ac59f`):
+    la relazione `rel_18628d75a70e` è passata sulla riga che resta, che ha guadagnato
+    `youtube_url` (`…v=IX7UWaSoVv0`) e `duration` 235,24 s; **893 → 892 canzoni**, il
+    campionamento «Baby By Me ← Deeper and Deeper» è intatto. Il file scaricato per
+    la riga cancellata (`50 Cent - Baby By Me (Ne-Yo Version) (Explicit) (feat.
+    Ne-Yo) [IX7UWaSoVv0].mp3`/`.m4a`) resta in `downloads/` senza nessuna riga che
+    lo citi.
+  - In questo commit c'è **anche il database** coi dati della sessione: la riga
+    unita, la canzone **«Deeper and Deeper» (Coco Bryce)** trovata dalla ricerca di
+    «Baby by Me» e il campionamento salvato. I verdetti che la suite scrive sul DB
+    vero sono stati scartati rimettendo a posto il backup post-unione prima del
+    commit.
 
 
 
