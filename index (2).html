@@ -3689,6 +3689,20 @@ const SCISSORS=`<svg viewBox="0 0 24 24"><path d="M9.64 7.64c.23-.5.36-1.05.36-1
 function fmtTime(sec){if(sec==null||isNaN(sec))return"—";const s=Math.floor(sec),m=Math.floor(s/60);return`${m}:${String(s%60).padStart(2,"0")}`}
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function escA(s){return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;")}
+// Per i testi che finiscono DENTRO un onclick (titoli, artisti, URL): il browser
+// scioglie le entità dell'attributo PRIMA di compilare il gestore, quindi qui si
+// fa prima l'escape HTML e poi quello del letterale JS. Serve perché `esc()` non
+// protegge l'apostrofo: con un titolo come «Samuel's Song» il gestore diventava
+// `savePair(this,'Samuel's Song',…)` → errore di sintassi → il pulsante «Salva nel
+// dataset» NON faceva nulla (nessun messaggio e niente nel database). Corretto il
+// 18/09/2026 (prova: test_save_pair.py, compilazione del gestore in JavaScriptCore).
+function perHandler(s){
+  return String(s==null?"":s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+    .replace(/\\/g,"\\\\").replace(/'/g,"\\'")
+    .replace(/\r/g,"\\r").replace(/\n/g,"\\n")
+    .replace(/\u2028/g,"\\u2028").replace(/\u2029/g,"\\u2029");
+}
 // ── MULTI-ARTIST ─────────────────────────────────────────────
 // Divide una stringa artista nei singoli artisti. Separatori: / , ; | + & feat. ft. with.
 // Lo slash "/" vale come separatore SOLO se ha spazi attorno (es. "Eminem / D12"):
@@ -3914,12 +3928,15 @@ function renderPairCard(item,i,section,mainTitle,mainArtist,mainYtUrl){
   const groupId=`pair-group-${p}-${i}`;
   const yiKey=`${p}-yi-${i}`, xKey=`${p}-x-${i}`;
   const savedBadge=item.already_saved?'<span class="saved-badge">✓ Dataset</span>':"";
-  const sxTitle=section==="contains"?esc(mainTitle):esc(item.title);
-  const sxArtist=section==="contains"?esc(mainArtist):esc(item.artist);
-  const sxYt=section==="contains"?escA(mainYtUrl||""):escA(item.yt_url||"");
-  const syTitle=section==="contains"?esc(item.title):esc(mainTitle);
-  const syArtist=section==="contains"?esc(item.artist):esc(mainArtist);
-  const syYt=section==="contains"?escA(item.yt_url||""):escA(mainYtUrl||"");
+  // Valori GREZZI: l'escape si fa quando si scrivono nell'onclick, con perHandler()
+  // (apostrofi, virgolette, & e ritorni a capo compresi). Prima qui c'era esc(),
+  // che con un apostrofo spezzava il gestore del pulsante «Salva nel dataset».
+  const sxTitle=section==="contains"?mainTitle:item.title;
+  const sxArtist=section==="contains"?mainArtist:item.artist;
+  const sxYt=section==="contains"?(mainYtUrl||""):(item.yt_url||"");
+  const syTitle=section==="contains"?item.title:mainTitle;
+  const syArtist=section==="contains"?item.artist:mainArtist;
+  const syYt=section==="contains"?(item.yt_url||""):(mainYtUrl||"");
   return`
   <div id="${groupId}">
   <div class="pair-card">
@@ -3968,7 +3985,7 @@ function renderPairCard(item,i,section,mainTitle,mainArtist,mainYtUrl){
         <input type="text" class="notes-input" placeholder="Note (opzionale)">
       </div>
       <div class="save-row">
-        <button class="btn-save" onclick="savePair(this,'${sxTitle}','${sxArtist}','${sxYt}','${syTitle}','${syArtist}','${syYt}',${item.timestamp_x||0},${item.timestamp_yi||0},'${xKey}','${yiKey}','${section}')">Salva nel dataset</button>
+        <button class="btn-save" onclick="savePair(this,'${perHandler(sxTitle)}','${perHandler(sxArtist)}','${perHandler(sxYt)}','${perHandler(syTitle)}','${perHandler(syArtist)}','${perHandler(syYt)}',${item.timestamp_x||0},${item.timestamp_yi||0},'${perHandler(xKey)}','${perHandler(yiKey)}','${perHandler(section)}')">Salva nel dataset</button>
         <span class="save-status"></span>
       </div>
     </div>
@@ -4677,9 +4694,10 @@ function confirmAddSample(section){
         <input type="text" class="notes-input" placeholder="Note (opzionale)">
       </div>
       <div class="save-row">
-        <button class="btn-save" onclick="savePair(this,'${escA(mainTitleX)}','${escA(mainArtistX)}','${escA(mainYtUrlX||'')}','${escA(yiTitle)}','${escA(yiArtist)}','${escA(ytUrl||'')}',0,0,'${xKey}','${yiKey}','${section}')">Salva nel dataset</button>
+        <button class="btn-save" onclick="savePair(this,'${perHandler(mainTitleX)}','${perHandler(mainArtistX)}','${perHandler(mainYtUrlX||'')}','${perHandler(yiTitle)}','${perHandler(yiArtist)}','${perHandler(ytUrl||'')}',0,0,'${perHandler(xKey)}','${perHandler(yiKey)}','${perHandler(section)}')">Salva nel dataset</button>
         <span class="save-status"></span>
       </div>
+      <div class="manual-notice" style="margin-top:6px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)"></div>
     </div>
     <button class="btn-remove-clone" onclick="removeManual('${groupId}','${yiKey}','${xKey}')">✕ Rimuovi</button>
   </div>`;
@@ -4687,9 +4705,40 @@ function confirmAddSample(section){
   if(sectionEl)sectionEl.appendChild(card);
   if(ytUrl) loadSampleXEditor(xedYiId, ytUrl||query, 0, label, artist);
   if(mainYtUrlX) loadSampleXEditor(xedXId, mainYtUrlX, 0, mainTitleX, mainArtistX);
-  if(statusEl)statusEl.textContent="";
+  // Il messaggio NON si cancella più (prima spariva subito e sembrava che
+  // l'aggiunta non fosse riuscita) e la riga si SCRIVE subito nel database: in
+  // Trova Campioni «aggiungere un sample» deve arrivare in 🗄️ Database.
+  if(statusEl){statusEl.textContent="✓ Riga aggiunta all'elenco — salvataggio nel database…";statusEl.style.color="#4ade80"}
+  const songX=section==='contains'?{title:mainTitleX,artist:mainArtistX,youtube_url:mainYtUrlX||''}:{title:yiTitle,artist:yiArtist,youtube_url:ytUrl||''};
+  const songYi=section==='contains'?{title:yiTitle,artist:yiArtist,youtube_url:ytUrl||''}:{title:mainTitleX,artist:mainArtistX,youtube_url:mainYtUrlX||''};
+  salvaCampioneManuale(card,section,songX,songYi);
   ["artist","title","yt"].forEach(f=>{const inp=document.getElementById(`add-${section}-${f}`);if(inp)inp.value=""});
   toggleAddForm(`add-form-${section}`);
+}
+
+// Scrive SUBITO nel database il campione aggiunto a mano (18/09/2026): prima
+// l'aggiunta restava una BOZZA a video e nel tab Database non arrivava mai
+// niente. La categoria la decide il gruppo di risultati («Cover» per la sezione
+// delle cover, altrimenti «Sample»); rifinire categoria, trasformazione e trim
+// con «Salva nel dataset» AGGIORNA la stessa riga, non ne crea una seconda.
+async function salvaCampioneManuale(card, section, songX, songYi){
+  const notice=card.querySelector('.manual-notice');
+  const categoria=section==='covered'?'VOCAL_COVER':'SAMPLE';
+  const nome=categoria==='VOCAL_COVER'?'Cover':'Sample';
+  const scrivi=(testo,colore)=>{if(notice){notice.innerHTML=testo;notice.style.color=colore||'var(--muted)'}};
+  scrivi('⏳ Salvataggio nel database…');
+  try{
+    const res=await fetch('/save_pair',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({song_x:songX,song_yi:songYi,
+                           trim_x:{start:0,end:30},trim_yi:{start:0,end:30},
+                           category:categoria,transformation:null,notes:'Aggiunto a mano'})}).then(r=>r.json());
+    if(res.error||res.db_error){scrivi('❌ Non salvato nel database: '+esc(res.error||res.db_error),'var(--red)');toast('❌ '+(res.error||res.db_error),'err');return}
+    const fatto=res.relation_updated?'aggiornato':'salvato';
+    scrivi(`✅ <b>${nome} ${fatto} nel database</b> — con <b>Salva nel dataset</b> puoi aggiungere categoria, trasformazione e trim; `
+         +`<button class="db-stem-btn" onclick="mostraCampionamenti()" title="Apri 🗄️ Database → 🔗 Campionamenti">🔗 Vedi nel database</button>`,'#4ade80');
+    toast(`✅ ${nome} ${fatto} nel database`,'ok');
+    loadDb();
+  }catch(e){scrivi('❌ Errore di rete: '+esc(e.message),'var(--red)');toast('❌ '+e.message,'err')}
 }
 function removeManual(groupId,yiKey,xKey){[yiKey,xKey].forEach(k=>{const p=players[k];if(p){p.audio.pause();delete players[k]}});const el=document.getElementById(groupId);if(el)el.remove()}
 
@@ -4699,9 +4748,18 @@ function updateDatasetCounter(total){const el=document.getElementById('dataset-c
 function onCategoryChange(select){const wrap=select.closest('.save-form').querySelector('.trans-select-wrap');if(select.value==='SAMPLE'||select.value==='STEM_REUSE'){wrap.style.display='flex'}else{wrap.style.display='none'}}
 function savePair(btn,xTitle,xArtist,xYtUrl,yiTitle,yiArtist,yiYtUrl,defaultTsX,defaultTsYi,keyX,keyYi,section){
   const card=btn.closest('.pair-card,.pair-card-clone'),catSelect=card.querySelector('.cat-select'),transSelect=card.querySelector('.trans-select'),notesInput=card.querySelector('.notes-input'),statusEl=card.querySelector('.save-status');
-  const category=catSelect.value;if(!category){statusEl.textContent="Scegli categoria";statusEl.style.color="var(--red)";return}
+  // Avviso che si VEDE (18/09/2026): prima «Scegli categoria» restava in un
+  // micro-testo grigio e sembrava che il salvataggio fosse semplicemente fallito.
+  const avviso=messaggio=>{
+    if(statusEl){statusEl.textContent="⚠ "+messaggio;statusEl.style.color="var(--red)"}
+    if(catSelect){catSelect.style.borderColor="var(--red)";catSelect.focus();
+                  setTimeout(()=>{catSelect.style.borderColor=""},2500)}
+    toast("⚠ "+messaggio,"err");
+  };
+  const category=catSelect.value;
+  if(!category){avviso("Scegli la categoria: senza categoria il campione NON viene salvato");return}
   let transformation=null;
-  if(category==='SAMPLE'||category==='STEM_REUSE'){transformation=transSelect?transSelect.value:null;if(!transformation){statusEl.textContent="Scegli trasformazione";statusEl.style.color="var(--red)";return}}
+  if(category==='SAMPLE'||category==='STEM_REUSE'){transformation=transSelect?transSelect.value:null;if(!transformation){avviso("Scegli la trasformazione: senza, il campione NON viene salvato");return}}
   const pX=players[keyX],pYi=players[keyYi];
   const trim_x=pX?{start:pX.trimStart,end:pX.trimEnd}:{start:defaultTsX||0,end:(defaultTsX||0)+30};
   const trim_yi=pYi?{start:pYi.trimStart,end:pYi.trimEnd}:{start:defaultTsYi||0,end:(defaultTsYi||0)+30};
@@ -4711,8 +4769,27 @@ function savePair(btn,xTitle,xArtist,xYtUrl,yiTitle,yiArtist,yiYtUrl,defaultTsX,
   const payload={song_x,song_yi,trim_x,trim_yi,category,transformation,notes:notesInput?notesInput.value:""};
   statusEl.textContent="Salvataggio...";statusEl.style.color="var(--muted)";btn.disabled=true;
   fetch("/save_pair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-  .then(r=>r.json()).then(res=>{btn.disabled=false;if(res.duplicate){statusEl.textContent="⚠ Già salvato";statusEl.style.color="#fbbf24"}else if(res.saved){statusEl.textContent="✓ Salvato";statusEl.style.color="#4ade80";updateDatasetCounter(res.total);loadDb()}else{statusEl.textContent="✕ "+(res.error||"Errore");statusEl.style.color="var(--red)"}})
-  .catch(e=>{btn.disabled=false;statusEl.textContent="✕ Errore rete";statusEl.style.color="var(--red)"});
+  .then(r=>r.json()).then(res=>{
+    btn.disabled=false;
+    if(res.error||res.db_error){   // il backend ora dice l'errore vero (prima era muto)
+      statusEl.textContent="✕ "+(res.error||res.db_error);statusEl.style.color="var(--red)";
+      toast("✕ "+(res.error||res.db_error),"err");return;
+    }
+    const nelDb=res.relation_updated?"aggiornato":"salvato";
+    const d=(res.derivative&&res.derivative.title)||xTitle, s=(res.source&&res.source.title)||yiTitle;
+    const vedi=`<button class="db-stem-btn" style="margin-left:6px" onclick="mostraCampionamenti()" title="Apri 🗄️ Database → 🔗 Campionamenti">🔗 Vedi nel database</button>`;
+    if(res.duplicate){
+      statusEl.innerHTML=`⚠ Già nel dataset · campione ${nelDb} nel database ${vedi}`;statusEl.style.color="#fbbf24";
+      toast(`⚠ Coppia già nel dataset: campionamento ${nelDb} nel database`,"err");
+    }else{
+      statusEl.innerHTML=`✓ Salvato nel database ${vedi}`;statusEl.style.color="#4ade80";
+      toast(`✅ Salvato nel database: «${d}» ← «${s}»`,"ok");
+      updateDatasetCounter(res.total);
+    }
+    if(res.dataset_error) toast("⚠ Dataset non aggiornato: "+res.dataset_error,"err");
+    loadDb();
+  })
+  .catch(e=>{btn.disabled=false;statusEl.textContent="✕ Errore rete: "+e.message;statusEl.style.color="var(--red)";toast("✕ Errore rete: "+e.message,"err")});
 }
 
 // ── METADATA: la stima automatica del BPM («🔎 BPM & Key») è stata TOLTA il
@@ -4740,6 +4817,29 @@ async function loadDb(){
   allDbSongs=songs||[]; allDbRels=rels||[];
   renderDbTable(allDbSongs); renderRelations(allDbRels);
   pushDbToPlayer();
+}
+
+// Porta l'utente dove il campione si VEDE: tab 🗄️ Database con il pannello
+// 🔗 Campionamenti aperto. È il pulsante «🔗 Vedi nel database» che compare
+// nella conferma di «Salva nel dataset» (18/09/2026).
+async function mostraCampionamenti(){
+  switchTab('database');
+  const p=document.getElementById('db-relations-panel');
+  if(p) p.style.display='block';
+  await loadDb();
+  const lista=document.getElementById('db-relations-list');
+  if(lista) lista.scrollIntoView({block:'center',behavior:'smooth'});
+}
+
+// Fa lampeggiare di verde la riga appena aggiunta nel tab Database, così si vede
+// CHE c'è (una canzone nuova può passare inosservata in una tabella lunga).
+function evidenziaRigaDb(id){
+  const tr=document.querySelector('#db-tbody tr[data-id="'+id+'"]');
+  if(!tr) return;
+  tr.scrollIntoView({block:'center',behavior:'smooth'});
+  tr.style.transition='background .25s';
+  tr.style.background='rgba(74,222,128,.18)';
+  setTimeout(()=>{tr.style.background=''},2500);
 }
 
 // ── AGGIORNAMENTO AUTOMATICO E COSTANTE DEL DATABASE ────────────
@@ -5712,11 +5812,21 @@ async function dbAddManual(){
   try{
     const res=await fetch('/db/songs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
     if(res.id){
-      status.innerHTML=`✅ <b>"${esc(res.title)}"</b> aggiunto al database`;
-      loadDb();
+      const eraGia=allDbSongs.some(s=>s.id===res.id);
+      // Il filtro di ricerca del tab Database NASCONDE le righe che non
+      // corrispondono: se era attivo, la canzone appena aggiunta non si vedeva
+      // (e spariva di nuovo al successivo aggiornamento automatico). Si azzera.
+      const filtro=document.getElementById('db-search');
+      const filtrato=!!(filtro&&filtro.value.trim());
+      if(filtrato) filtro.value='';
+      status.innerHTML=`✅ <b>"${esc(res.title)}"</b> ${eraGia?'aggiornato':'aggiunto al database'}`
+        +(filtrato?' <span style="color:var(--muted)">(filtro di ricerca azzerato per mostrarlo)</span>':'');
+      toast(`✅ "${res.title}" ${eraGia?'aggiornato':'aggiunto al database'}`,'ok');
+      await loadDb();
+      evidenziaRigaDb(res.id);
       ['db-add-title','db-add-artist','db-add-album','db-add-bpm','db-add-key','db-add-yt','db-add-lyrics'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
-    } else status.textContent='❌ Errore: '+JSON.stringify(res);
-  }catch(e){ status.textContent='❌ Errore: '+e.message; }
+    } else {status.textContent='❌ Errore: '+JSON.stringify(res);toast('❌ Errore: '+JSON.stringify(res),'err')}
+  }catch(e){ status.textContent='❌ Errore: '+e.message; toast('❌ '+e.message,'err'); }
 }
 
 async function dbAddSong(){

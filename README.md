@@ -363,6 +363,12 @@ Da tenere presente nelle sessioni di lavoro successive:
   committare mai il file completo.
 - **`samplelab (2).db` è binario** e cambia a ogni uso: committarlo solo quando
   la modifica dei dati è voluta.
+- **⚠️ La suite completa, con l'app attiva, scrive sul database VERO.** Il 18/09/2026
+  `python3 -m unittest discover -p 'test_*.py'` ha dato **436 test `OK`** ma ha anche
+  aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`
+  (*21 Questions*): è `test_audio_match.py`, che chiama `/db/songs/<id>/audio_check`
+  sull'app viva. Se quel cambio di dati non è voluto, dopo la suite si ripristina il
+  database (`git checkout -- "samplelab (2).db"`).
 - **Copertine.** La Verifica (18/09/2026) salva la cover di ogni canzone in
   `covers/` e scrive il **nome del file** in `songs.cover_art_path`; si serve da
   `/cover/<file>`. La cartella **non è versionata** (come `downloads/`: centinaia
@@ -445,6 +451,12 @@ Da tenere presente nelle sessioni di lavoro successive:
   *21 Questions*; in libreria 68 righe hanno i Produttori in JSON e 6 un doppio apice
   negli artisti). Ora `esc()` scappa `"` e `'`, e i Produttori si mostrano come lista
   leggibile e si riscrivono in JSON come nell'✏️ Edit di `index (2).html`.
+- **Mai mettere testo dell'utente dentro un `onclick` passando da `esc()`** (18/09/2026).
+  `esc()` non protegge l'apostrofo: un titolo come *Samuel's Song* rendeva il gestore di
+  **«Salva nel dataset»** non compilabile e il pulsante non faceva nulla (nessun messaggio,
+  niente nel database). In `index (2).html` gli argomenti degli handler si scrivono con
+  `perHandler()` (escape HTML + escape del letterale JS), tenendo i valori **grezzi** fino
+  a quel momento. Vedi l'entry dedicata in fondo e `test_save_pair.py`.
 - **Progresso TOTALE della verifica (0-100%, 18/09/2026).** La pagina `/verifica` non
   mostra più solo «Passo x/7»: c'è una **percentuale grande** (con la rotella che gira)
   su tutto il lavoro, perché i passi hanno un **peso in secondi** (`VERIFY_PESI`: la
@@ -2119,6 +2131,61 @@ Da tenere presente nelle sessioni di lavoro successive:
     segmenti) → 67 → 69 → 74 → 78 → 79 → **100%** con «Verifica conclusa» e rotella ferma.
     Nei messaggi **non compare** nessun «✏️ Metadati aggiornati» spurio: è anche la prova
     che il fix di `esc()` sui Produttori tiene.
+
+- **🗄️ «SALVA NEL DATASET» NON FACEVA NULLA CON UN APOSTROFO NEL TITOLO (18/09/2026).**
+  Segnalazione di Alessandro: «quando cerco una canzone in trovacampioni e clicco aggiungi
+  al database non dà nessuna conferma che la canzone è stata aggiunta e poi, quando vado su
+  database a vedere i sample di tale canzone, non compare quell'aggiunta». Il pulsante era
+  **«Salva nel dataset»**, nelle card dei risultati: la causa era nel **gestore del
+  pulsante**, non nel backend.
+  - `renderPairCard` scriveva i titoli dentro l'`onclick` con `esc()`, che protegge `& < > "`
+    ma **non l'apostrofo**: con un titolo come *Samuel's Song* l'attributo diventava
+    `onclick="savePair(this,'Samuel's Song','Tyler, The Creator',…)"` — **JavaScript non
+    compilabile**, quindi il click non faceva *nulla* (nessun messaggio, nessuna chiamata al
+    backend, niente nel database). Provato con JavaScriptCore sulla funzione vera della
+    pagina: `SyntaxError: Unexpected identifier 's'. Expected ')' to end an argument list.`
+    I risultati di quella ricerca contenevano proprio *Sam's Song* / *Samuel's Song*.
+  - nuovo **`perHandler()`** in `index (2).html` (escape HTML **e** escape del letterale JS:
+    apostrofo, barra rovesciata, ritorni a capo, `&`, `<`, `>`), usato per tutti gli
+    argomenti che finiscono in un `onclick` (card dei risultati e card «MANUALE»); i valori
+    restano **grezzi** fino a quel momento, così il testo che arriva al database è quello
+    vero (prima si passavano valori già `esc()`ati).
+  - `/save_pair` (backend) non ha più il `try/except: pass` attorno all'INSERT: l'errore vero
+    diventa una risposta `500` con `error: "Database: …"`. E una coppia già presente nel
+    dataset **non salta più l'INSERT** (il vecchio `return` anticipato = campione mai
+    registrato): la relazione si scrive comunque e la risposta dice cosa è successo
+    (`relation_created` / `relation_updated`, `relation_id`, i titoli).
+  - nuovo **`upsert_sample_relation()`**: una sola riga per (chi campiona, cosa è campionato,
+    categoria). Salvare due volte la stessa card **aggiorna** la riga (categoria,
+    trasformazione, trim, note) invece di duplicarla.
+  - conferme che si vedono: senza categoria `savePair` mette il bordo rosso sul menù, lo
+    porta in focus e mostra il messaggio **anche** come toast; dopo il salvataggio la card
+    scrive «✓ Salvato nel database» con il pulsante **🔗 Vedi nel database** (apre 🗄️
+    Database → 🔗 Campionamenti: `mostraCampionamenti()`).
+  - l'aggiunta manuale («⊕ Aggiungi sample» → «Aggiungi») **si scrive subito** nel database
+    con la categoria del gruppo (*Sample*, o *Cover* per la sezione delle cover) e lo dice in
+    modo **persistente** nella card (`salvaCampioneManuale`): prima il messaggio veniva
+    **cancellato** (`statusEl.textContent=""`) e l'aggiunta restava una bozza a video.
+    Rifinire categoria/trim con «Salva nel dataset» aggiorna la stessa riga.
+  - nel tab Database `dbAddManual` ora **azzera il filtro di ricerca** (il filtro `filterDb`
+    nascondeva la riga appena aggiunta, che poi spariva di nuovo col refresh automatico), fa
+    lampeggiare di verde la riga nuova (`evidenziaRigaDb`) e conferma con un toast
+    («aggiunto»/«aggiornato»).
+  - bonus della sessione: il log di avvio si vede **subito** — `sys.stdout.reconfigure(
+    line_buffering=True)` in `__main__` (mancava anche `import sys`): con `nohup … >
+    /tmp/samplelab.log` il banner con la **porta scelta (5070 o 5075)** restava nel buffer di
+    Python e non si leggeva.
+  - Verifiche del 18/09/2026: **21 test** nuovi in `test_save_pair.py` (`OK`), fra cui la
+    compilazione dei gestori in JavaScriptCore con titoli difficili (*Samuel's Song*,
+    `"virgolette"`, `Back\slash`, `&`, ritorno a capo) e il controllo che **con `esc()` da
+    solo il gestore è rotto**; i **3 blocchi `<script>`** di `index (2).html` compilano senza
+    errori; sull'**app viva** un `POST /save_pair` con *Samuel's Song (prova)* → `200`
+    `{"relation_created":true,"relation_id":"rel_9390d674e80e",…}`, `GET /db/relations` la
+    mostra coi titoli interi, `GET /db/songs` dà **Sample 1** sulle due righe, il **secondo**
+    POST identico dà `duplicate:true` + `relation_updated:true` **con lo stesso
+    `relation_id`** e `sample_relations` resta a **1 riga**; riga e brani di prova poi
+    cancellati, `dataset.json` rimosso e database **identico al backup** (890 canzoni, 0
+    relazioni) — nessuna riga vera della libreria toccata.
 
 
 

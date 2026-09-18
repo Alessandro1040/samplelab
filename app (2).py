@@ -6,7 +6,7 @@ Fonde: YT Downloader (index-5), WhoSampled Scraper (scraper_app), Mass Renamer, 
 
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
-import yt_dlp, os, threading, uuid, ssl, socket, json, time, re
+import yt_dlp, os, sys, threading, uuid, ssl, socket, json, time, re
 import urllib.parse, subprocess, hashlib, sqlite3, struct, math, select
 from datetime import datetime, timezone
 from contextlib import contextmanager
@@ -2961,8 +2961,57 @@ def start_scrape():
     return jsonify({"job_id": jid})
 
 # ── SAVE PAIR (compatibile con scraper_index.html) ────────────────────────────
+def upsert_sample_relation(conn, derivative_id, source_id, category, transformation,
+                           trim_deriv, trim_source, notes, yt_deriv, yt_source):
+    """Scrive il campionamento in `sample_relations` senza mai duplicarlo.
+
+    Regola del 18/09/2026: per la stessa coppia (chi campiona, cosa è campionato)
+    e la stessa categoria esiste UNA sola riga. Se la riga c'è già si AGGIORNA
+    (così salvare due volte la stessa card, o rifinire categoria e timestamp, non
+    crea doppioni), se non c'è si CREA. Ritorna `(id, creata)`.
+    """
+    riga = conn.execute(
+        "SELECT id FROM sample_relations "
+        "WHERE derivative_song_id=? AND source_song_id=? AND category=?",
+        (derivative_id, source_id, category)).fetchone()
+    if riga:
+        conn.execute(
+            """UPDATE sample_relations SET
+                   transformation=?, yt_url_derivative=?, yt_url_source=?,
+                   timestamp_derivative_start=?, timestamp_derivative_end=?,
+                   timestamp_source_start=?, timestamp_source_end=?,
+                   notes=?, verified_by_user=1
+               WHERE id=?""",
+            (transformation, yt_deriv, yt_source,
+             trim_deriv.get("start"), trim_deriv.get("end"),
+             trim_source.get("start"), trim_source.get("end"),
+             notes, riga["id"]))
+        return riga["id"], False
+    rid = "rel_" + uuid.uuid4().hex[:12]
+    conn.execute(
+        """INSERT INTO sample_relations(
+               id, derivative_song_id, source_song_id,
+               category, transformation, yt_url_derivative, yt_url_source,
+               timestamp_derivative_start, timestamp_derivative_end,
+               timestamp_source_start, timestamp_source_end, notes, verified_by_user
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+        (rid, derivative_id, source_id, category, transformation,
+         yt_deriv, yt_source,
+         trim_deriv.get("start"), trim_deriv.get("end"),
+         trim_source.get("start"), trim_source.get("end"), notes))
+    return rid, True
+
+
 @app.route("/save_pair", methods=["POST"])
 def save_pair():
+    """Salva una coppia: dataset JSON legacy + tabella `sample_relations`.
+
+    Fino al 18/09/2026 questo salvataggio poteva non lasciare traccia di sé: se la
+    coppia era già nel dataset la funzione usciva PRIMA dell'INSERT (quindi nel
+    tab Database il campione non compariva) e qualunque errore di SQLite finiva in
+    un `except: pass` muto. La risposta ora dice esattamente cosa è stato scritto
+    (`relation_id`, creata/aggiornata) e riporta l'errore vero.
+    """
     data = request.json or {}
     song_x = data.get("song_x") or {}
     song_yi = data.get("song_yi") or {}
@@ -2973,48 +3022,58 @@ def save_pair():
     notes = data.get("notes", "")
     if not song_x.get("title") or not song_yi.get("title") or not song_x.get("artist") or not song_yi.get("artist"):
         return jsonify({"error": "Campi obbligatori mancanti"}), 400
-    dataset = load_dataset()
-    sid_x = get_or_create_song_dataset(dataset, song_x["title"], song_x["artist"], song_x.get("youtube_url", ""))
-    sid_y = get_or_create_song_dataset(dataset, song_yi["title"], song_yi["artist"], song_yi.get("youtube_url", ""))
-    new_pair = {
-        "song_x": sid_x,
-        "song_yi": sid_y,
-        "trim_x": trim_x,
-        "trim_yi": trim_yi,
-        "category": category,
-        "transformation": transformation,
-        "notes": notes,
-        "created_at": datetime.utcnow().isoformat() + "Z",
-    }
-    if is_duplicate(dataset, new_pair):
-        return jsonify({"duplicate": True, "total": dataset["meta"]["count"]})
-    dataset["pairs"].append(new_pair)
-    save_dataset(dataset)
-    # Also save in SQLite
+    # 1) dataset JSON legacy (compatibilità con scraper_index.html). Un errore
+    #    qui NON deve più impedire la scrittura nel database.
+    dataset, duplicato, dataset_error = None, False, None
+    try:
+        dataset = load_dataset()
+        sid_x = get_or_create_song_dataset(dataset, song_x["title"], song_x["artist"], song_x.get("youtube_url", ""))
+        sid_y = get_or_create_song_dataset(dataset, song_yi["title"], song_yi["artist"], song_yi.get("youtube_url", ""))
+        new_pair = {
+            "song_x": sid_x,
+            "song_yi": sid_y,
+            "trim_x": trim_x,
+            "trim_yi": trim_yi,
+            "category": category,
+            "transformation": transformation,
+            "notes": notes,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
+        duplicato = is_duplicate(dataset, new_pair)
+        if not duplicato:
+            dataset["pairs"].append(new_pair)
+            save_dataset(dataset)
+    except Exception as e:
+        dataset_error = str(e)
+    # 2) il database: è la scrittura che conta. La coppia già presente nel dataset
+    #    NON impedisce più di registrare il campionamento.
     try:
         with get_db() as conn:
             did = get_or_create_song_db(conn, song_x["title"], song_x["artist"], song_x.get("youtube_url", ""))
             sid2 = get_or_create_song_db(conn, song_yi["title"], song_yi["artist"], song_yi.get("youtube_url", ""))
-            rid = "rel_" + uuid.uuid4().hex[:12]
-            conn.execute(
-                """INSERT OR IGNORE INTO sample_relations(
-                    id, derivative_song_id, source_song_id,
-                    category, transformation, yt_url_derivative, yt_url_source,
-                    timestamp_derivative_start, timestamp_derivative_end,
-                    timestamp_source_start, timestamp_source_end, notes, verified_by_user
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)""",
-                (
-                    rid, did, sid2,
-                    category, transformation,
-                    song_x.get("youtube_url"), song_yi.get("youtube_url"),
-                    trim_x.get("start"), trim_x.get("end"),
-                    trim_yi.get("start"), trim_yi.get("end"),
-                    notes,
-                )
-            )
-    except:
-        pass
-    return jsonify({"saved": True, "total": dataset["meta"]["count"]})
+            rel_id, creata = upsert_sample_relation(
+                conn, did, sid2, category, transformation,
+                trim_x, trim_yi, notes,
+                song_x.get("youtube_url"), song_yi.get("youtube_url"))
+    except Exception as e:
+        # prima l'errore finiva in un `except: pass`: il salvataggio sembrava
+        # riuscito e la riga non c'era. Ora si dice cosa non ha funzionato.
+        return jsonify({"error": "Database: " + str(e), "saved": False,
+                        "duplicate": duplicato}), 500
+
+    risposta = {
+        "saved": not duplicato,
+        "duplicate": duplicato,
+        "total": (dataset or {}).get("meta", {}).get("count", 0),
+        "relation_id": rel_id,
+        "relation_created": creata,
+        "relation_updated": not creata,
+        "derivative": {"id": did, "title": song_x["title"], "artist": song_x["artist"]},
+        "source": {"id": sid2, "title": song_yi["title"], "artist": song_yi["artist"]},
+    }
+    if dataset_error:
+        risposta["dataset_error"] = dataset_error
+    return jsonify(risposta)
 
 # ── DATASET STATS (compatibile con scraper_index.html) ───────────────────────
 @app.route("/dataset/stats", methods=["GET"])
@@ -6428,6 +6487,15 @@ def fortissimo_compare():
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
 if __name__ == "__main__":
+    # Il log di avvio serve davvero: l'app può passare alla 5075 se la 5070 è
+    # occupata, e con l'output rediretto su file (`nohup ... > /tmp/samplelab.log`)
+    # Python tiene stdout in BUFFER: il banner e la porta scelta non si vedevano
+    # fino al riempimento del buffer (18/09/2026). Così ogni riga è scritta subito.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
     init_db()
     port = 5070
     try:
