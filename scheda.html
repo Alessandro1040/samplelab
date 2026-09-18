@@ -77,6 +77,18 @@ input[type=range]{width:82px;accent-color:var(--accent)}
 .status{font-family:'Space Mono',monospace;font-size:11px;color:var(--accent3);margin-top:10px;line-height:1.6}
 .hint{font-size:12px;color:var(--muted);margin-top:18px;line-height:1.7}
 .hint b{color:var(--accent3);font-weight:600}
+/* ── 📂 caricamento a mano di una cartella di stem ───────────────────── */
+.stem-drop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px dashed var(--border2);border-radius:10px;padding:12px 14px;margin-bottom:14px;transition:border-color .15s,background .15s}
+.stem-drop.over{border-color:var(--accent);background:rgba(200,240,0,.06)}
+.stem-drop span{font-size:11px;color:var(--muted);max-width:660px;line-height:1.6}
+.stem-drop button{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 12px;cursor:pointer;white-space:nowrap}
+.stem-drop button:hover{border-color:var(--accent);color:var(--accent)}
+.stem-label{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:7px 10px;width:170px}
+.stem-label:focus{outline:none;border-color:var(--accent)}
+.stem-label:disabled{opacity:.45}
+.stem-tools{display:flex;gap:8px;flex-wrap:wrap}
+.stem-tools button{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 12px;cursor:pointer}
+.stem-tools button:hover{border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body>
@@ -91,7 +103,13 @@ input[type=range]{width:82px;accent-color:var(--accent)}
 
   <section class="card" id="card-stem">
     <div class="card-title">✂️ Tracce di cui è composta<span class="count" id="n-stem"></span></div>
-    <div class="card-sub">Gli stem separati con Demucs (voce, batteria, basso, altro) registrati nel database per questa canzone, più quelli eventualmente già su disco. Con <b>▶ Suona tutti insieme</b> partono sincronizzati, per sentire il brano ricomposto.</div>
+    <div class="card-sub">Gli stem registrati nel database per questa canzone, più quelli eventualmente già su disco. Si creano con <b>Demucs</b> (voce, batteria, basso, altro) oppure si <b>caricano a mano</b> da una cartella di tracce già separate — «canzone - Violino.mp3» entra nel database come <b>violino</b>. Con <b>▶ Suona tutti insieme</b> partono sincronizzati, per sentire il brano ricomposto.</div>
+    <div class="stem-drop" id="stem-drop" ondragover="stemDragOver(event)" ondragleave="stemDragLeave(event)" ondrop="stemDrop(event)">
+      <button onclick="apriSceltaStem()">📂 Carica cartella di stem</button>
+      <input type="file" id="stem-input" multiple webkitdirectory directory style="display:none" onchange="stemScelti(this.files)">
+      <span>…oppure trascina qui i file. L'etichetta la riconosce dal nome (tutto quel che sta dopo l'ultimo « - », es. <b>Violino</b>) e puoi correggerla prima di salvare; dopo, le etichette si sistemano in blocco con <b>✏️ Rinomina in massa</b> nel tab Database.</span>
+    </div>
+    <div id="stem-anteprima"></div>
     <div id="stem-body"></div>
   </section>
 
@@ -165,6 +183,18 @@ function etichettaStem(tipo){
 function ordineStem(tipo){
   const t=String(tipo??'').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(ORDINE_STEM,t)?ORDINE_STEM[t]:9;
+}
+// Da dove arriva una riga di stem: separata con Demucs (il modello è in
+// `stem_sessions.model_name`) oppure caricata a mano da una cartella di tracce
+// già separate (`model_name` = 'manuale', vedi /db/songs/<id>/stems/import).
+function origineStem(riga){
+  const r=riga||{};
+  if(r.origine==='disco') return 'cartella di Demucs';
+  const m=String(r.modello||'').trim().toLowerCase();
+  if(m==='manuale') return 'caricata a mano';
+  if(m==='htdemucs') return 'separata con Demucs';
+  if(m) return 'dal database · '+m;
+  return 'dal database';
 }
 function formattaByte(n){
   const v=Number(n);
@@ -380,7 +410,7 @@ function renderStem(){
     <div class="row">
       <div class="row-main">
         <div class="row-title">${r.etichetta}${r.esiste?'':' <span class="tag warn">file mancante</span>'}${r.registrato?'':' <span class="tag">solo su disco</span>'}</div>
-        <div class="row-sub">${esc(r.filename)} · ${formattaByte(r.byte)}${r.origine==='disco'?' · cartella di Demucs':' · dal database'}</div>
+        <div class="row-sub">${esc(r.filename)} · ${formattaByte(r.byte)} · ${origineStem(r)}</div>
       </div>
       <div class="row-tools">
         ${r.esiste?`
@@ -575,6 +605,116 @@ function mixerStop(){
   aggiornaBottoniStem();
 }
 // ═══════════════════════════════════════════════════════════════════════
+// 📂 STEM CARICATI A MANO (una cartella di tracce già separate)
+// Le tracce di Demucs si chiamano vocals/drums/bass/other; quelle che arrivano
+// da fuori si chiamano «canzone - Violino.mp3»: l'etichetta si ricava dal nome
+// con la STESSA regola della funzione Python `strumento_da_nomefile`
+// (test_stem_upload.py le confronta caso per caso) e resta correggibile qui
+// sotto prima di salvare — oppure in blocco, dopo, con ✏️ Rinomina in massa.
+// ═══════════════════════════════════════════════════════════════════════
+const STEM_EXT=['mp3','wav','flac','m4a','aac','ogg','opus','aif','aiff'];
+let stemFileScelti=[];        // i File scelti (o trascinati) e non ancora salvati
+
+// Funzione PURA (provata da test_stem_upload.py in JavaScriptCore): stessa
+// regola di `strumento_da_nomefile` in app (2).py.
+function etichettaStemDaNome(nome){
+  let base=String(nome??'').split('/').pop().split('\\').pop().trim();
+  if(!base) return '';
+  const punto=base.lastIndexOf('.');
+  if(punto>0&&STEM_EXT.indexOf(base.slice(punto+1).toLowerCase())>=0) base=base.slice(0,punto);
+  base=base.replace(/[\u2010-\u2015]/g,'-').replace(/_\s*-\s*_/g,' - ').replace(/[\s_]+/g,' ').trim();
+  if(base.indexOf(' - ')>=0){
+    const pezzo=base.split(' - ').pop().trim();
+    if(pezzo) base=pezzo;
+  }
+  return base.replace(/\s*[\(\[]\s*\d+\s*[\)\]]\s*$/,'').replace(/\s{2,}/g,' ')
+             .replace(/^[\s\-_.]+|[\s\-_.]+$/g,'').toLowerCase();
+}
+function eFileAudioStem(nome){
+  const t=String(nome||''); const i=t.lastIndexOf('.');
+  return i>0&&STEM_EXT.indexOf(t.slice(i+1).toLowerCase())>=0;
+}
+function apriSceltaStem(){
+  const inp=document.getElementById('stem-input');
+  if(inp) inp.click();
+}
+function stemScelti(lista){
+  stemFileScelti=Array.from(lista||[]);
+  disegnaAnteprimaStem();
+}
+function svuotaAnteprimaStem(){
+  stemFileScelti=[];
+  const inp=document.getElementById('stem-input'); if(inp) inp.value='';
+  disegnaAnteprimaStem();
+}
+// L'anteprima mostra, per ogni file scelto, l'etichetta riconosciuta — in una
+// casella che si può correggere: quello che si legge lì è quello che finisce in
+// `stem_tracks.stem_type`.
+function disegnaAnteprimaStem(){
+  const box=document.getElementById('stem-anteprima');
+  if(!box) return;
+  if(!stemFileScelti.length){ box.innerHTML=''; return; }
+  const audio=stemFileScelti.filter(f=>eFileAudioStem(f.name)).length;
+  box.innerHTML=`<div class="status">📂 ${stemFileScelti.length} file scelti · ${audio} tracce audio: controlla le etichette e salva.</div>`+
+    stemFileScelti.map((f,i)=>{
+      const nome=f.name||'';
+      const ok=eFileAudioStem(nome);
+      return `<div class="row">
+        <div class="row-main">
+          <div class="row-title">${esc(nome)}</div>
+          <div class="row-sub">${ok?'etichetta riconosciuta dal nome':'⚠ non è un file audio: sarà saltato'}</div>
+        </div>
+        <div class="row-tools">
+          <input class="stem-label" id="stem-label-${i}" value="${esc(etichettaStemDaNome(nome))}"${ok?'':' disabled'} title="Etichetta della traccia: puoi correggerla prima di salvare">
+        </div>
+      </div>`;
+    }).join('')+
+    `<div class="stem-tools" style="margin-top:10px">
+       <button onclick="salvaStemManuali()">💾 Salva nel database</button>
+       <button onclick="svuotaAnteprimaStem()">✕ Annulla</button>
+     </div>`;
+}
+async function salvaStemManuali(){
+  if(!stemFileScelti.length) return;
+  const box=document.getElementById('stem-anteprima');
+  const fd=new FormData();
+  const etichette=[];
+  stemFileScelti.forEach((f,i)=>{
+    fd.append('files',f,f.name);
+    const inp=document.getElementById('stem-label-'+i);
+    etichette.push(inp?inp.value:etichettaStemDaNome(f.name));
+  });
+  fd.append('etichette',JSON.stringify(etichette));
+  box.innerHTML='<div class="status">⏳ Salvo le tracce nel database…</div>';
+  let res=null;
+  try{
+    res=await fetch('/db/songs/'+encodeURIComponent(songId)+'/stems/import',{method:'POST',body:fd}).then(r=>r.json());
+  }catch(e){
+    box.innerHTML=`<div class="status">❌ Import non riuscito: ${esc(e.message)}</div>`; return;
+  }
+  if(!res||res.error){
+    box.innerHTML=`<div class="status">❌ ${esc((res&&res.error)||'import non riuscito')}</div>`; return;
+  }
+  const righe=(res.importati||[]).map(t=>`${esc(t.file)} → <b>${esc(t.stem_type)}</b> (${esc(t.azione)})`).join('<br>');
+  const saltati=(res.skipped||[]).map(t=>`${esc(t.file)} — ${esc(t.motivo)}`).join('<br>');
+  svuotaAnteprimaStem();
+  await caricaScheda();
+  box.innerHTML=`<div class="status">✓ ${res.count} tracce in <b>stem_tracks</b> · sessione ${esc(res.session_id)}`+
+    (righe?`<br>${righe}`:'')+(saltati?`<br>⚠ saltati:<br>${saltati}`:'')+`</div>`;
+}
+// Trascinare i file sulla sezione ✂️ fa la stessa cosa del selettore di cartella
+// (per una CARTELLA intera serve il pulsante: il browser non la manda nel drop).
+function stemDragOver(ev){ if(ev) ev.preventDefault(); const z=document.getElementById('stem-drop'); if(z) z.classList.add('over'); }
+function stemDragLeave(ev){ if(ev) ev.preventDefault(); const z=document.getElementById('stem-drop'); if(z) z.classList.remove('over'); }
+function stemDrop(ev){
+  if(!ev) return;
+  ev.preventDefault();
+  const z=document.getElementById('stem-drop'); if(z) z.classList.remove('over');
+  const files=Array.from((ev.dataTransfer&&ev.dataTransfer.files)||[]);
+  if(files.length) stemScelti(files);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // SEPARAZIONE DEGLI STEM (dal pulsante della sezione vuota)
 // ═══════════════════════════════════════════════════════════════════════
 async function avviaSeparazione(){
@@ -660,7 +800,9 @@ async function autoAggiorna(){
 // dentro questa funzione anonima non sarebbero raggiungibili dalla pagina (è lo
 // stesso motivo per cui in browse.html il pulsante ↑/↓ Crescente non risponde).
 Object.assign(window,{mixerToggle,mixerStop,stemPlay,stemMuto,stemVolume,
-                      avviaSeparazione,ricaricaScheda});
+                      avviaSeparazione,ricaricaScheda,
+                      apriSceltaStem,stemScelti,svuotaAnteprimaStem,salvaStemManuali,
+                      stemDragOver,stemDragLeave,stemDrop});
 
 caricaScheda();
 setInterval(autoAggiorna,4000);

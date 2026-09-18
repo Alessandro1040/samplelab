@@ -114,11 +114,19 @@ con `(2)` nella cartella locale:
   bloccato): `python3 -m unittest -v test_sql_guard`
 - `scheda.html` — **scheda di una canzone** (pagina `/scheda`, pulsante **📄 Scheda**
   nella tabella del database): stem, remix e cover, campionamenti WhoSampled e
-  analisi audio di quel brano (vedi la sezione *Scheda canzone* qui sotto)
+  analisi audio di quel brano (vedi la sezione *Scheda canzone* qui sotto). Le
+  tracce separate si fanno con ✂️ Stem (Demucs) **oppure** si caricano a mano con
+  **📂 Carica cartella di stem** («canzone - Violino.mp3» → etichetta *violino*)
 - `test_scheda_canzone.py` — test della **scheda canzone**: classificazione di
   sample/remix/cover, funzioni pure della pagina in JavaScriptCore, mixer degli
   stem con un DOM finto, endpoint vero su un database di prova:
   `python3 -m unittest -v test_scheda_canzone`
+- `test_stem_upload.py` — test del **📂 caricamento a mano di una cartella di stem**
+  (`/db/songs/<id>/stems/import`): la regola del nome file («canzone - Violino.mp3»
+  → etichetta *violino*), il confronto fra la funzione Python e quella della pagina
+  in JavaScriptCore, il giro completo sull'app viva (import, ricarica senza
+  doppioni, ✏️ Rinomina in massa sulle etichette + ↩️ Undo, 🗑 cancellazione della
+  sessione) e le rotte: `python3 -m unittest -v test_stem_upload`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -447,6 +455,20 @@ Da tenere presente nelle sessioni di lavoro successive:
   riusato una riga esistente invece di crearne una. ⚠️ `normalize_key()` è NULL-safe:
   le righe con `title` a NULL (import dal player Onyx) facevano fallire `/db/songs`
   con 500 se il confronto non reggeva i NULL.
+- **📂 Stem caricati a mano (18/09/2026).** Oltre a ✂️ Stem (Demucs), la pagina
+  `/scheda` accetta una **cartella di tracce già separate** («canzone - Violino.mp3»,
+  «canzone - Pianoforte.mp3» …). I file vanno in `stems/htdemucs/<base del file
+  locale>/` (la stessa cartella di Demucs), una riga per traccia entra in
+  `stem_tracks` dentro UNA sessione `model_name='manuale'`, e l'**etichetta**
+  (`stem_type`) si ricava dal nome del file con `strumento_da_nomefile` («canzone -
+  Violino.mp3» → «violino»: si prende il pezzo dopo l'ULTIMO « - »; le tracce di
+  Demucs, che il separatore non ce l'hanno, restano vocals/drums/bass/other). La
+  stessa regola è scritta in JavaScript (`etichettaStemDaNome` in `scheda.html`) e
+  `test_stem_upload.py` le confronta caso per caso in JavaScriptCore. Ricaricare la
+  stessa cartella non crea doppioni (aggiorna le tracce di quella sessione) e le
+  etichette si correggono in blocco **con lo stesso pannello** «✏️ Rinomina in
+  massa» del tab Database (voce **🏷 Etichetta stem**), quindi con lo stesso ↩️
+  Undo. `DELETE /db/stems/<id>` toglie una sessione e manda i file in `.trash/`.
 - **📄 Scheda = confronto campione (19/09/2026).** Nella tabella del database il
   pulsante apre il modale a due canzoni col trim giallo dell'intervallo salvato in
   `sample_relations`; la pagina `/scheda` (stem, remix, analisi) si raggiunge da
@@ -2334,6 +2356,81 @@ Da tenere presente nelle sessioni di lavoro successive:
     una delle due potrebbe essere il beat. I veri strumentali (*Just Don't Give a Fuck
     - Instrumental*, *Guilty Conscience - Instrumental*, *My Name Is - Instrumental*)
     **non** vengono uniti.
+
+- **📂 CARICA UNA CARTELLA DI STEM A MANO — L'ETICHETTA VIENE DAL NOME, E IL MASS
+  RENAMER È QUELLO DI SEMPRE (18/09/2026).** Richiesta di Alessandro: «se clicchi
+  su una canzone nel database puoi separare gli stem e salvarli automaticamente,
+  però io vorrei aggiungere la possibilità di caricarli proprio manualmente, di
+  caricare una cartella proprio di stem e fare in modo che vengano salvati nel
+  database direttamente lì … cioè se gli stem si chiamano "canzone - Violino",
+  "canzone - Pianoforte", ecc. allora nell'app dovranno comparire solo come
+  pianoforte, ecc. … e ci dovrà essere il mass renamer che c'è già da un'altra
+  parte, deve essere lo stesso identico renamer».
+  - **`POST /db/songs/<song_id>/stems/import`** (`app (2).py`, accanto alla scheda
+    della canzone): multipart coi file della cartella (`files`) e, se l'utente le
+    ha corrette nell'anteprima, le `etichette` (JSON, nello stesso ordine dei
+    file). I file si copiano in `stems/htdemucs/<base del file locale>/` — la
+    **stessa** cartella di Demucs, così `_scheda_stem()` li ritrova — e finiscono in
+    UNA sola sessione per canzone (`stem_sessions.model_name='manuale'`,
+    `status='done'`, `progress_percent=100`). Ricaricare la stessa cartella
+    **aggiorna** le tracce già presenti (stesso `file_path`) invece di duplicarle; i
+    file non audio si saltano e la risposta li elenca in `skipped` (con `count`,
+    `count_skipped` e `importati[].azione`: *aggiunta* / *aggiornata*).
+  - **`strumento_da_nomefile()`** (funzione PURA) è la regola del nome:
+    «canzone - Violino.mp3» → `violino`, «50 Cent - In da Club - Pianoforte.wav» →
+    `pianoforte` (conta il pezzo dopo l'**ULTIMO** « - »), «canzone_-_Batteria.flac»
+    → `batteria`, «canzone – Violino (2).mp3» → `violino` (trattini tipografici e
+    marcatore di duplicato via), «vocals.mp3» → `vocals` (senza separatore resta
+    tutto il nome: le tracce di Demucs non cambiano). L'etichetta esce in minuscolo
+    come i tipi di Demucs; la maiuscola la mette la pagina (`etichettaStem` →
+    «🎵 Violino»).
+  - **La pagina `/scheda`** (card ✂️) ha il blocco **📂 Carica cartella di stem**
+    (`<input webkitdirectory>` + trascinamento dei file) con l'**anteprima** delle
+    etichette riconosciute — ogni riga è una casella che si può correggere prima di
+    «💾 Salva nel database» — e la riga della traccia dice da dove arriva
+    (`origineStem`: *caricata a mano* / *separata con Demucs* / *cartella di
+    Demucs*). Dalla tabella del database ogni riga ha il link **📂 Stem**.
+  - **Il renamer è QUEL pannello**: «✏️ Rinomina in massa» del tab Database ha ora
+    la voce **🏷 Etichetta stem (violino, pianoforte…)** → `POST /db/mass_rename`
+    con `field: "stem_type"` lavora sulle etichette di `stem_tracks` con le STESSE
+    regole dei campi di `songs` (sostituzione letterale, solo le righe che
+    contengono il testo) e lo **stesso ↩️ Undo**
+    (`_mass_rename_etichette_stem`); la risposta dice quali file sono cambiati
+    (`updated[].file`) e la pagina mostra i primi casi. `/db/schema` espone
+    `stem_label_field: "stem_type"`.
+  - **`DELETE /db/stems/<id>`**: toglie una sessione e le sue tracce dal database e
+    manda i FILE in `.trash/` (recuperabili), per tornare indietro su un import
+    sbagliato. In `scheda.html` la regola dell'etichetta è scritta due volte di
+    proposito (Python e JavaScript), e il test le confronta.
+  - Verifiche del 18/09/2026: **19 test** nuovi in `test_stem_upload.py` (`OK`), fra
+    cui la regola Python e quella della pagina (`etichettaStemDaNome`) confrontate
+    **caso per caso** in JavaScriptCore su 16 nomi; sull'**app viva** un giro
+    completo su una canzone di prova usa-e-getta (poi cancellata — il test
+    controlla che il database torni ai numeri di partenza): import di «canzone -
+    Violino.mp3» + «canzone - Pianoforte.wav» con l'etichetta corretta a mano
+    (*grancassa*) e un `note.txt` saltato → `count: 2`, `count_skipped: 1`; la
+    scheda mostra le due tracce con `exists: true`; la ricarica non crea doppioni
+    (`azione: "aggiornata"`, stessi `track_id`); ✏️ Rinomina in massa `grancassa` →
+    `pianoforte` su 1 traccia e ↩️ Undo che la rimette com'era; 🗑 `DELETE
+    /db/stems/<id>` che svuota le righe e porta i file in `.trash`. **Su una canzone
+    vera** della libreria (`song_931db8dc8ccf`) una traccia di prova «Prova SampleLab
+    - Violino.mp3» è entrata come `violino` nella cartella Demucs di quella canzone
+    (`onyx_t_…_lzyhq`), è stata rinominata in massa e poi cancellata: conteggi
+    finali **891 canzoni, 3 sessioni, 12 tracce** come prima. In **Chrome vero**
+    (headless, `--dump-dom` di `/scheda?song=…`) la card ✂️ rende il blocco 📂 e le
+    tracce con «· separata con Demucs». Suite completa: **487 test `OK`** (erano
+    468); pagine `/`, `/browse`, `/onyx`, `/verifica`, `/scheda` → **200** e
+    `/db/schema` con `stem_label_field: "stem_type"`.
+  - Nel commit è finito anche il database, con **solo** queste differenze: la
+    relazione `rel_be6bf63e1d3a` modificata a mano (URL YouTube
+    `IUUfu3824QI` → `Pi3_Zs-oRUo`, note «Ritmo Batteria» → «Rhythm (Drums) Reuse»),
+    i verdetti di *21 Questions* rifatti dalla suite (`test_audio_match`, il caso
+    noto: `audio_match_at`/`ws_audio_at` a 18:09) e lo stato del player.
+  - ⚠️ Da sapere: si prende il pezzo dopo l'**ultimo** « - », quindi uno strumento
+    che contiene a sua volta un « - » (es. «Piano - Rhodes») va corretto
+    nell'anteprima o col pannello 🏷; e le tracce caricate a mano stanno nella
+    stessa cartella di quelle di Demucs — se hanno **lo stesso nome file**, l'ultima
+    caricata vince (la riga aggiornata è la stessa).
 
 
 

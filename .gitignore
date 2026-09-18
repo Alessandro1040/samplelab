@@ -36,3 +36,8 @@ midi_studio/logs/
 
 # ── Output di nohup (creato quando un comando in background non redirige) ──
 nohup.out
+
+# ── Legacy: `dataset.json` è rigenerato dall'app ─────────────────────────
+# Lo riscrive `save_dataset()` a ogni campione salvato (compatibilità con lo
+# scraper storico) ed è ridondante col database: non va versionato.
+dataset.json

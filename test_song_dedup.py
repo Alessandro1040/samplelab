@@ -458,8 +458,17 @@ class TestCablaggioDellaPagina(unittest.TestCase):
         inizio = self.pagina.index("function renderDbTable")
         corpo = self.pagina[inizio:inizio + 8000]
         self.assertIn("apriConfrontoCampione('${s.id}')", corpo)
-        self.assertNotIn('<a class="db-stem-btn" href="/scheda?song=', corpo,
+        # Il 📄 Scheda è un PULSANTE che apre il confronto a due canzoni, non un
+        # link diretto a /scheda (era il bug: si apriva una pagina senza il
+        # confronto). 18/09/2026: nella riga è arrivato anche il link 📂 Stem
+        # caricato a mano, che a /scheda ci porta DAVVERO (l'import si fa lì),
+        # quindi si controlla il pulsante preciso invece della presenza
+        # generica di un link.
+        self.assertRegex(corpo, r'<button class="db-stem-btn" onclick="apriConfrontoCampione\(\'\$\{s\.id\}\'\)"')
+        self.assertNotIn('">📄 Scheda</a>', corpo,
                          "il pulsante 📄 Scheda non deve più essere un link diretto")
+        self.assertIn('href="/scheda?song=${encodeURIComponent(s.id)}#card-stem"', corpo,
+                      "il link 📂 Stem (caricamento a mano) deve puntare alla scheda")
         # e c'è il pulsante per la riga senza file
         self.assertIn("scaricaInDownload('${s.id}',this)", corpo)
 

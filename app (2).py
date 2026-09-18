@@ -2160,6 +2160,85 @@ def do_stems(job_id, filename, song_id=None):
     except Exception as e:
         jobs[job_id]["status"]="error"; jobs[job_id]["error"]=str(e)
 
+# ── STEM CARICATI A MANO (una cartella di tracce già separate) ────────────────
+# Demucs produce sempre le stesse quattro tracce (vocals/drums/bass/other).
+# Quando invece le tracce arrivano da fuori — una cartella con dentro
+# "canzone - Violino.mp3", "canzone - Pianoforte.mp3", … — i nomi sono liberi,
+# quindi l'ETICHETTA della traccia (`stem_tracks.stem_type`, quella che si legge
+# in /scheda) si ricava dal NOME DEL FILE. È la stessa etichetta che ✏️ Rinomina
+# in massa può correggere in blocco dopo l'import (stesso pannello del tab
+# Database, stesse regole, annullabile con ↩️ Undo).
+STEM_EXT = {"mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "aif", "aiff"}
+# Prefisso del modello salvato in `stem_sessions.model_name` per gli import a mano
+# (Demucs scrive 'htdemucs'): serve a riusare UNA sola sessione per canzone.
+STEM_MODELLO_MANUALE = "manuale"
+
+
+def strumento_da_nomefile(nome):
+    """Funzione PURA: dal nome di un file di stem all'etichetta della traccia.
+
+    "canzone - Violino.mp3"                  → "violino"
+    "50 Cent - In da Club - Pianoforte.wav"  → "pianoforte"
+    "canzone_-_Batteria.flac"                → "batteria"
+    "canzone – Violino (2).mp3"              → "violino"
+    "vocals.mp3"  (Demucs, senza " - ")      → "vocals"
+
+    Si prende il pezzo DOPO l'ULTIMO separatore « - » (tutto quel che sta prima è
+    il nome della canzone) e si tolgono estensione audio, trattini tipografici,
+    doppi spazi e il marcatore di duplicato finale («(2)», «[2]»). Senza
+    separatore si usa il nome intero, così le tracce di Demucs restano
+    vocals/drums/bass/other. L'etichetta esce in minuscolo (come 'vocals'): a
+    scriverla con la maiuscola è la pagina /scheda.
+    """
+    base = os.path.basename(str(nome or "").strip())
+    if not base:
+        return ""
+    radice, ext = os.path.splitext(base)
+    if ext.lower().lstrip(".") in STEM_EXT:
+        base = radice
+    base = re.sub(r"[\u2010-\u2015]", "-", base)      # trattini tipografici → "-"
+    base = re.sub(r"_\s*-\s*_", " - ", base)          # "canzone_-_Violino"
+    base = re.sub(r"[\s_]+", " ", base).strip()
+    if " - " in base:                                  # il pezzo dopo l'ULTIMO " - "
+        pezzo = base.rsplit(" - ", 1)[1].strip()
+        if pezzo:
+            base = pezzo
+    base = re.sub(r"\s*[\(\[]\s*\d+\s*[\)\]]\s*$", "", base)   # "(2)" di duplicato
+    base = re.sub(r"\s{2,}", " ", base).strip(" -_.")
+    return base.lower()
+
+
+def etichette_stem_da_nomi(nomi):
+    """Funzione PURA: le etichette di una lista di nomi, nello stesso ordine."""
+    return [strumento_da_nomefile(n) for n in (nomi or [])]
+
+
+def _nome_file_sicuro(nome):
+    """Il nome di un file caricato, ripulito: niente percorsi né caratteri strani.
+
+    Il selettore di cartella manda solo il nome del file, ma il nome arriva dal
+    browser: si toglie ogni pezzo di percorso (`../`, `C:\\…`), i caratteri di
+    controllo e i punti iniziali (niente file nascosti). Funzione PURA.
+    """
+    base = os.path.basename(str(nome or "").replace("\\", "/")).strip()
+    base = re.sub(r"[\x00-\x1f\x7f]", "", base)
+    return base.lstrip(".").strip()
+
+
+def _cartella_stem(song):
+    """La cartella (dentro `stems/htdemucs`) dei file di UNA canzone.
+
+    È la stessa che sceglie Demucs — il nome del file locale senza estensione —
+    così `_scheda_stem()` ritrova su disco anche le tracce caricate a mano. Se la
+    canzone non ha file locale si usa un nome suo (`caricati_<id>`), così le
+    tracce restano comunque ordinabili.
+    """
+    base = os.path.splitext(os.path.basename(str(song.get("local_file") or "")))[0].strip()
+    if not base:
+        base = "caricati_%s" % (str(song.get("id") or "").replace("song_", "") or "senza_id")
+    return re.sub(r"[\\/]+", "_", base).strip() or "stems"
+
+
 # ── TRIM ─────────────────────────────────────────────────────────────────────
 def do_trim(job_id, filename, start, end, fmt):
     jobs[job_id]["status"]="trimming"
@@ -3875,6 +3954,133 @@ def db_song_scheda(song_id):
         },
     })
 
+# ── DB: STEM CARICATI A MANO (📂 una cartella di tracce già separate) ─────────
+# Il pulsante ✂️ Stem fa separare le tracce a Demucs; qui invece le tracce
+# arrivano già separate da fuori (violino, pianoforte, archi…): la pagina /scheda
+# manda la cartella scelta dall'utente, il backend copia i file nella cartella di
+# quella canzone e scrive una riga per traccia in `stem_tracks`.
+@app.route("/db/songs/<song_id>/stems/import", methods=["POST"])
+def import_stems(song_id):
+    """📂 Salva nel database una cartella di stem caricata a mano.
+
+    I file arrivano in multipart (`files`, uno per traccia) come li manda il
+    selettore di cartella di /scheda. L'etichetta di ogni traccia
+    (`stem_tracks.stem_type`) è quella riconosciuta nel nome del file
+    (`strumento_da_nomefile`: «canzone - Violino.mp3» → «violino») oppure quella
+    corretta a mano nella pagina, che manda `etichette` (JSON, nello stesso
+    ordine dei file).
+
+    I file si copiano in `stems/htdemucs/<base del file locale>/` — la stessa
+    cartella di Demucs — e le tracce di UNA canzone stanno in UNA sola sessione
+    (`model_name='manuale'`): ricaricare la stessa cartella non crea doppioni,
+    aggiorna le tracce già presenti (stesso nome file). I file non audio si
+    saltano e vengono elencati in `skipped`.
+    """
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "Nessun file: scegli la cartella delle tracce"}), 400
+    try:
+        etichette = json.loads(request.form.get("etichette") or "[]")
+    except (TypeError, ValueError):
+        etichette = []
+    if not isinstance(etichette, list):
+        etichette = []
+
+    with get_db() as conn:
+        song = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not song:
+        return jsonify({"error": "Canzone non trovata"}), 404
+
+    cartella = _cartella_stem(song)
+    destinazione = os.path.join(STEMS_DIR, "htdemucs", cartella)
+    os.makedirs(destinazione, exist_ok=True)
+
+    with get_db() as conn:
+        sess = row2dict(conn.execute(
+            "SELECT * FROM stem_sessions WHERE song_id=? AND model_name=? "
+            "ORDER BY created_at DESC LIMIT 1", (song_id, STEM_MODELLO_MANUALE)).fetchone())
+        if sess:
+            session_id = sess["id"]
+            conn.execute("UPDATE stem_sessions SET status='done', progress_percent=100, "
+                         "output_folder=?, completed_at=datetime('now') WHERE id=?",
+                         (destinazione, session_id))
+        else:
+            session_id = "sess_" + uuid.uuid4().hex[:10]
+            conn.execute("INSERT INTO stem_sessions(id,song_id,job_id,model_name,output_folder,status,"
+                         "progress_percent,completed_at) VALUES(?,?,NULL,?,?, 'done',100,datetime('now'))",
+                         (session_id, song_id, STEM_MODELLO_MANUALE, destinazione))
+
+    importati, saltati = [], []
+    for i, f in enumerate(files):
+        nome = _nome_file_sicuro(f.filename)
+        ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+        if not nome:
+            saltati.append({"file": str(f.filename or ""), "motivo": "nome non valido"})
+            continue
+        if ext not in STEM_EXT:
+            saltati.append({"file": nome, "motivo": "non è un file audio"})
+            continue
+        percorso = os.path.join(destinazione, nome)
+        f.save(percorso)
+        etichetta = str(etichette[i]).strip().lower() if i < len(etichette) and etichette[i] else ""
+        if not etichetta:
+            etichetta = strumento_da_nomefile(nome)
+        etichetta = re.sub(r"\s{2,}", " ", etichetta)[:120] or os.path.splitext(nome)[0].lower()
+        try:
+            peso = os.path.getsize(percorso)
+        except OSError:
+            peso = None
+        with get_db() as conn:
+            esistente = conn.execute("SELECT id FROM stem_tracks WHERE session_id=? AND file_path=?",
+                                     (session_id, percorso)).fetchone()
+            if esistente:
+                track_id, azione = esistente["id"], "aggiornata"
+                conn.execute("UPDATE stem_tracks SET stem_type=?, file_size_bytes=? WHERE id=?",
+                             (etichetta, peso, track_id))
+            else:
+                track_id, azione = "stm_" + uuid.uuid4().hex[:10], "aggiunta"
+                conn.execute("INSERT INTO stem_tracks(id,session_id,stem_type,file_path,file_size_bytes) "
+                             "VALUES(?,?,?,?,?)", (track_id, session_id, etichetta, percorso, peso))
+        importati.append({"file": nome, "stem_type": etichetta, "track_id": track_id,
+                          "azione": azione, "byte": peso})
+
+    with get_db() as conn:
+        song = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+        stems = _scheda_stem(conn, song)
+    return jsonify({"ok": True, "song_id": song_id, "session_id": session_id,
+                    "folder": cartella, "importati": importati, "skipped": saltati,
+                    "count": len(importati), "count_skipped": len(saltati),
+                    "stems": stems})
+
+
+@app.route("/db/stems/<session_id>", methods=["DELETE"])
+def delete_stem_session(session_id):
+    """🗑 Toglie dal database una sessione di stem con le sue tracce.
+
+    I file non si cancellano: finiscono in `.trash/` (recuperabili), come fa la
+    pulizia del database. Serve a tornare indietro quando una cartella è stata
+    caricata per sbaglio, o a rifare l'import pulito.
+    """
+    with get_db() as conn:
+        sess = row2dict(conn.execute("SELECT * FROM stem_sessions WHERE id=?", (session_id,)).fetchone())
+        if not sess:
+            return jsonify({"error": "Sessione non trovata"}), 404
+        tracce = rows2list(conn.execute("SELECT * FROM stem_tracks WHERE session_id=?", (session_id,)))
+        conn.execute("DELETE FROM stem_tracks WHERE session_id=?", (session_id,))
+        conn.execute("DELETE FROM stem_sessions WHERE id=?", (session_id,))
+    spostati = []
+    for t in tracce:
+        percorso = str(t.get("file_path") or "")
+        if percorso and os.path.exists(percorso):
+            try:
+                spostati.append(os.path.basename(move_to_trash(percorso)))
+            except OSError:
+                pass
+    return jsonify({"ok": True, "session_id": session_id, "song_id": sess.get("song_id"),
+                    "model_name": sess.get("model_name"), "tracks": len(tracce),
+                    "trash": spostati})
+
+
 # ── DB: STATS ─────────────────────────────────────────────────────────────────
 @app.route("/db/stats", methods=["GET"])
 def db_stats():
@@ -4802,6 +5008,12 @@ BULK_FIELDS = [
 ]
 # Campi numerici: da un titolo si sposta solo una cifra (es. l'anno 1999)
 NUMERIC_FIELDS = {"year"}
+# Etichetta delle tracce separate (`stem_tracks.stem_type`): non è un campo di
+# `songs`, ma il pannello «✏️ Rinomina in massa» sa lavorare anche su questa, con
+# le STESSE regole (sostituzione letterale, solo le righe che contengono il testo,
+# annullabile con ↩️ Undo). Serve dopo un import a mano, quando le tracce arrivano
+# con l'etichetta sbagliata (es. «canzone - Violino» → «Violino»).
+STEM_LABEL_FIELD = "stem_type"
 # Separatore con cui la libreria tiene più valori nello stesso campo
 # (es. artist = "Bad Meets Evil / Eminem").
 VALUE_SEPARATOR = " / "
@@ -4879,6 +5091,42 @@ def move_field_value(old_from, old_to, text, mode="append", whole_word=True,
     return nuovo_src, nuovo_dst
 
 
+def _mass_rename_etichette_stem(find, replace):
+    """✏️ Rinomina in massa le ETICHETTE delle tracce (`stem_tracks.stem_type`).
+
+    Stesso pannello e stesse regole di `mass_rename` sui campi di `songs`
+    (sostituzione letterale, solo le righe che contengono il testo) e stesso ↩️
+    Undo, perché lo snapshot è quello dell'intero database. Esempio: dopo un
+    import a mano le tracce si chiamano «canzone - violino» e si riportano a
+    «violino» con find «canzone - » e replace vuoto.
+    """
+    before = db_snapshot()
+    updated = []
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, session_id, stem_type, file_path FROM stem_tracks WHERE stem_type LIKE ?",
+                (f"%{find}%",)).fetchall()
+            for r in rows:
+                old = r["stem_type"] or ""
+                new = old.replace(find, replace)
+                if new != old:
+                    conn.execute("UPDATE stem_tracks SET stem_type=? WHERE id=?", (new, r["id"]))
+                    updated.append({"id": r["id"], "old": old, "new": new,
+                                    "file": os.path.basename(str(r["file_path"] or "")),
+                                    "session_id": r["session_id"]})
+    except Exception as e:
+        _drop_snapshot(before)
+        return jsonify({"error": str(e)}), 500
+    if updated:
+        push_undo(before, db_snapshot(),
+                  f"Rinomina in massa «{find}» → «{replace}» ({len(updated)} tracce, {STEM_LABEL_FIELD})")
+    else:
+        _drop_snapshot(before)
+    return jsonify({"updated": updated, "count": len(updated), "field": STEM_LABEL_FIELD,
+                    **_history()})
+
+
 @app.route("/db/mass_rename", methods=["POST"])
 def mass_rename():
     """Apply find/replace on a specific field across all songs
@@ -4886,15 +5134,21 @@ def mass_rename():
     Salva uno snapshot prima/dopo: l'operazione è annullabile con ↩️ Undo
     (prima non lo era: una sostituzione sbagliata — es. "50 Cent" → "51 Cent"
     su 35 righe, 17/09/2026 — restava scritta nel database).
+
+    Con `field: "stem_type"` lavora sulle ETICHETTE delle tracce separate
+    (`stem_tracks`, vedi `_mass_rename_etichette_stem`): è il modo per correggere
+    in blocco i nomi arrivati da una cartella di stem caricata a mano.
     """
     data = request.json or {}
     field = data.get("field", "title")
     find = data.get("find", "")
     replace = data.get("replace", "")
-    if field not in BULK_FIELDS:
-        return jsonify({"error": "Campi consentiti: " + ", ".join(BULK_FIELDS)}), 400
+    if field != STEM_LABEL_FIELD and field not in BULK_FIELDS:
+        return jsonify({"error": "Campi consentiti: " + ", ".join(BULK_FIELDS + [STEM_LABEL_FIELD])}), 400
     if not find:
         return jsonify({"error": "find richiesto"}), 400
+    if field == STEM_LABEL_FIELD:
+        return _mass_rename_etichette_stem(find, replace)
     before = db_snapshot()
     updated = []
     try:
@@ -5288,7 +5542,7 @@ TABLE_DOCS = {
     "songs": "La libreria: una riga per canzone (titolo, artisti, album, BPM, tonalità, crediti, testo, file locale…).",
     "sample_relations": "Campionamenti (WhoSampled): chi campiona chi — `derivative_song_id` = chi usa il sample, `source_song_id` = il brano campionato.",
     "stem_sessions": "Una sessione di separazione degli stem (Demucs) di un brano.",
-    "stem_tracks": "Le singole tracce separate di una sessione (voce, batteria, basso, altro).",
+    "stem_tracks": "Le singole tracce separate di una sessione: `stem_type` è l'etichetta (voce, batteria, basso, altro con Demucs; violino, pianoforte… per le cartelle di stem caricate a mano).",
     "audio_analyses": "Analisi audio salvate (MIDI + one-shot) usate dal confronto FORTISSIMO.",
     "playback_state": "Stato del player: UNA sola riga (id = 1) con brano, posizione, volume.",
 }
@@ -5385,6 +5639,9 @@ def db_schema():
     return jsonify({
         "tables": tables,
         "bulk_fields": BULK_FIELDS,
+        # Campo fuori da `songs` su cui sa lavorare lo stesso pannello ✏️ Rinomina
+        # in massa: l'etichetta delle tracce separate (vedi mass_rename).
+        "stem_label_field": STEM_LABEL_FIELD,
         "numeric_fields": sorted(NUMERIC_FIELDS),
         "sql": {"allowed": SQL_ALLOWED, "forbidden": SQL_FORBIDDEN},
         "script": {"globals": SCRIPT_GLOBALS, "builtins": SCRIPT_BUILTINS,
