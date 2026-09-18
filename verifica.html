@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verifica · SampleLab</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+:root{
+  --bg:#080808;--surface:#111111;--surface2:#1a1a1a;--surface3:#222222;--border:#252525;--border2:#333333;
+  --text:#e8e8e8;--text2:#c9c9c9;--muted:#666666;--dim:#444444;
+  --accent:#c8f000;--accent2:#7b5ea7;--accent3:#2dd4bf;--red:#ff4545;--amber:#fbbf24;--green:#4ade80;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Space Grotesk',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:0 0 60px}
+header{border-bottom:1px solid var(--border);padding:20px 32px;display:flex;align-items:center;gap:14px;position:sticky;top:0;background:var(--bg);z-index:20}
+.logo{font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:var(--accent);letter-spacing:-.5px}
+.logo span{color:var(--muted);font-weight:400}
+.back{margin-left:auto;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:6px 12px}
+.back:hover{color:var(--accent);border-color:var(--accent)}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 32px}
+.song{display:flex;gap:18px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+.song img{width:72px;height:72px;border-radius:8px;object-fit:cover;background:var(--surface3)}
+.song .t{font-size:20px;font-weight:600}
+.song .a{color:var(--text2);font-size:13px;margin-top:2px}
+.song .meta{color:var(--muted);font-family:'Space Mono',monospace;font-size:10px;margin-top:6px}
+.tag{display:inline-block;font-family:'Space Mono',monospace;font-size:10px;border:1px solid var(--border2);border-radius:20px;padding:3px 10px;margin-left:8px;color:var(--muted)}
+.tag.no{color:var(--amber);border-color:rgba(251,191,36,.4)}
+h2{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:26px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+label.f{display:block;font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:4px}
+input[type=text],input[type=number],textarea,select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:13px;padding:9px 11px}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
+.opts{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)}
+.opt:last-child{border-bottom:none}
+.opt input[type=checkbox]{width:18px;height:18px;margin-top:2px;accent-color:var(--accent)}
+.opt .txt{font-size:13px}
+.opt .sub{color:var(--muted);font-size:11px;margin-top:3px;line-height:1.45}
+.toll{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:8px}
+.toll .box{width:150px}
+button.go{width:100%;margin-top:10px;background:var(--accent);color:#080808;border:none;border-radius:10px;padding:16px;font-family:'Space Mono',monospace;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.06em}
+button.go:hover{opacity:.9}
+button.go:disabled{opacity:.45;cursor:not-allowed}
+.progress{display:none;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:16px}
+.progress.on{display:block}
+.bar{height:8px;background:var(--surface3);border-radius:20px;overflow:hidden;margin:12px 0}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .4s}
+.step{font-family:'Space Mono',monospace;font-size:13px;color:var(--accent)}
+.status{color:var(--text2);font-size:13px;margin-top:4px}
+.msgs{margin-top:14px;display:none}
+.msgs.on{display:block}
+.msg{font-family:'Space Mono',monospace;font-size:11px;line-height:1.6;padding:2px 0}
+.verdicts{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.v{font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 12px;border:1px solid var(--border2)}
+.v.ok{color:var(--green);border-color:rgba(74,222,128,.4)}
+.v.no{color:var(--red);border-color:rgba(255,69,69,.45)}
+.v.amb{color:var(--amber);border-color:rgba(251,191,36,.4)}
+.v.mut{color:var(--muted)}
+details{margin-top:22px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px}
+summary{cursor:pointer;font-family:'Space Mono',monospace;font-size:12px;color:var(--text2)}
+iframe{width:100%;height:640px;border:1px solid var(--border);border-radius:10px;margin-top:12px;background:var(--bg)}
+.hint{color:var(--muted);font-size:11px;font-family:'Space Mono',monospace;margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SampleLab <span>· verifica guidata</span></div>
+  <a class="back" href="/?tab=database">← torna al database</a>
+</header>
+<div class="wrap">
+
+  <div class="song">
+    <img id="cover" alt="" src="">
+    <div style="flex:1">
+      <div class="t" id="songTitle">Caricamento…</div>
+      <div class="a" id="songArtist"></div>
+      <div class="meta" id="songMeta"></div>
+    </div>
+    <div id="songTags"></div>
+  </div>
+
+  <h2>1 · I dati che finiscono nella ricerca (correggili prima di verificare)</h2>
+  <div class="grid" id="metadati"></div>
+  <div class="hint">Sono gli stessi campi di ✏️ Edit: quello che scrivi qui viene salvato PRIMA della ricerca.
+    Nel caso *End of the World* è stata la correzione del titolo a far trovare la pagina giusta.</div>
+
+  <h2>2 · Cosa deve fare la verifica</h2>
+  <div class="opts">
+    <div class="opt">
+      <input type="checkbox" id="optAudio" checked>
+      <div><div class="txt">🔊 <b>Controlla audio</b></div>
+        <div class="sub">Cerca l'anteprima ufficiale (iTunes) e la confronta col file locale con l'impronta acustica. 5-10 s.
+          Riconosce il brano anche se è tagliato, più lungo o con un altro master.</div></div>
+    </div>
+    <div class="opt">
+      <input type="checkbox" id="optTesto">
+      <div><div class="txt">🗣 <b>Controlla voce</b> (trascrizione Whisper)</div>
+        <div class="sub">Trascrive quello che si sente e lo confronta col testo della canzone (le liriche di Genius, o l'anteprima ufficiale
+          se le liriche non ci sono). 20-70 s per brano. È l'unico controllo che funziona sui brani senza anteprima ufficiale.</div></div>
+    </div>
+    <div class="opt">
+      <input type="checkbox" id="optAcapella">
+      <div><div class="txt">🎤 <b>Prima separa la voce</b> (a cappella, demucs)</div>
+        <div class="sub">Più preciso: si trascrive solo la voce invece del brano intero. Costa 1-3 minuti in più per ogni file.</div></div>
+    </div>
+    <div class="opt">
+      <input type="checkbox" id="optNoGenius">
+      <div><div class="txt">🚫 <b>Non è su Genius</b> (freestyle, mixtape, brano locale)</div>
+        <div class="sub">Salta la ricerca su Genius e la etichetta come tale: per questi brani la ricerca non ha senso.</div></div>
+    </div>
+    <div class="opt" style="display:block">
+      <div class="txt" style="margin-bottom:2px">🎚 <b>Tolleranze</b></div>
+      <div class="sub">Quanto deve combaciare perché il verdetto sia «confermato» e sotto quanto è decisamente «non confermato».</div>
+      <div class="toll">
+        <div class="box"><label class="f">Audio: hash conferma</label><input type="number" id="tolVotiConf" value="50" min="1"></div>
+        <div class="box"><label class="f">Audio: hash rifiuto</label><input type="number" id="tolVotiRif" value="20" min="0"></div>
+        <div class="box"><label class="f">Voce: % conferma</label><input type="number" id="tolTestoConf" value="40" min="1" max="100"></div>
+        <div class="box"><label class="f">Voce: % rifiuto</label><input type="number" id="tolTestoRif" value="15" min="0" max="100"></div>
+      </div>
+      <div class="hint">Misure reali: sul brano giusto l'impronta fa 250-2.500 hash e il testo 60-78%; su un brano sbagliato 5-16 hash e ≤16%.</div>
+    </div>
+  </div>
+
+  <button class="go" id="btnVerifica" onclick="avviaVerifica()">🔎 Verifica</button>
+  <div class="hint" id="avvisoTesto"></div>
+
+  <div class="progress" id="progress">
+    <div class="step" id="passo">Passo 1/7</div>
+    <div class="status" id="stato">Avvio…</div>
+    <div class="bar"><i id="barra"></i></div>
+    <div class="msgs" id="msgs"></div>
+    <div class="verdicts" id="verdicts"></div>
+  </div>
+
+  <details>
+    <summary>📄 Scheda della canzone (campioni, remix, cover, stem) — si aggiorna da sola</summary>
+    <iframe id="scheda" src="about:blank" loading="lazy"></iframe>
+  </details>
+</div>
+
+<script>
+// ── PAGINA /verifica ─────────────────────────────────────────────────────────
+// Una schermata dedicata per UNA canzone: si correggono i dati, si sceglie cosa
+// controllare e con quali tolleranze, si lancia la verifica e si guarda il
+// progresso (passo x/7) — senza toccare la tabella del database.
+const CAMPI = [
+  ["title", "Titolo"], ["artist", "Artisti"], ["album", "Album"],
+  ["album_artist", "Artista album"], ["composer", "Compositore"], ["producers", "Produttori"],
+  ["genre", "Genere"], ["year", "Anno"], ["release_date", "Data uscita"],
+  ["bpm", "BPM"], ["musical_key", "Tonalità"], ["comment", "Commento"],
+];
+let canzone = null;
+let idCanzone = new URLSearchParams(location.search).get("song") || "";
+
+// Funzione PURA: dai valori dei campi al corpo della POST (test_audio_match.py la
+// esegue in JavaScriptCore). `testo_acapella` ha senso solo con `testo`.
+function payloadVerifica(metadati, opzioni) {
+  const o = opzioni || {};
+  return {
+    metadata: metadati || {},
+    audio: !!o.audio,
+    testo: !!o.testo,
+    testo_acapella: !!o.testo && !!o.acapella,
+    non_su_genius: !!o.non_su_genius,
+    voti_conferma: Number(o.voti_conferma),
+    voti_rifiuto: Number(o.voti_rifiuto),
+    testo_conferma: Number(o.testo_conferma),
+    testo_rifiuto: Number(o.testo_rifiuto),
+  };
+}
+
+// Funzione PURA: come si mostra un verdetto (classe CSS + testo).
+function etichettaVerdetto(esito) {
+  const mappa = {
+    "confermato": ["ok", "✓ confermato"],
+    "non confermato": ["no", "✗ non confermato"],
+    "ambiguo": ["amb", "? ambiguo"],
+    "scartato": ["no", "✗ candidato scartato"],
+    "non verificabile": ["mut", "– non verificabile"],
+  };
+  return mappa[esito] || ["mut", esito || "—"];
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function valoreCampo(campo) {
+  const el = document.getElementById("m_" + campo);
+  return el ? el.value.trim() : "";
+}
+
+function mostraVerdetti(s) {
+  const pezzi = [];
+  if (s.audio_match_esito) {
+    const [cl, tx] = etichettaVerdetto(s.audio_match_esito);
+    const extra = (s.audio_match_voti != null) ? ` · ${s.audio_match_voti} hash` : "";
+    pezzi.push(`<div class="v ${cl}">🔊 canzone di Genius: ${tx}${extra}</div>`);
+  }
+  if (s.ws_audio_esito) {
+    const [cl, tx] = etichettaVerdetto(s.ws_audio_esito);
+    const extra = (s.ws_audio_voti != null) ? ` · ${s.ws_audio_voti} hash` : "";
+    pezzi.push(`<div class="v ${cl}">🔗 link WhoSampled: ${tx}${extra}</div>`);
+  }
+  if (s.testo_esito) {
+    const [cl, tx] = etichettaVerdetto(s.testo_esito);
+    const extra = (s.testo_voti != null) ? ` · ${Number(s.testo_voti).toFixed(1)}%` : "";
+    const par = (s.testo_parole != null) ? ` · ${s.testo_parole} parole` : "";
+    pezzi.push(`<div class="v ${cl}">🗣 voce: ${tx}${extra}${par}</div>`);
+  }
+  document.getElementById("verdicts").innerHTML = pezzi.join("");
+}
+
+async function carica() {
+  if (!idCanzone) { document.getElementById("songTitle").textContent = "Nessuna canzone indicata"; return; }
+  const s = await fetch("/db/songs/" + encodeURIComponent(idCanzone)).then(r => r.json());
+  if (!s || s.error) { document.getElementById("songTitle").textContent = "Canzone non trovata"; return; }
+  canzone = s;
+  document.getElementById("songTitle").textContent = s.title || s.local_file || s.id;
+  document.getElementById("songArtist").textContent = s.artist || "";
+  document.getElementById("songMeta").textContent =
+    [s.album, s.year, s.bpm ? s.bpm + " BPM" : "", s.musical_key, s.local_file].filter(Boolean).join(" · ");
+  const cover = document.getElementById("cover");
+  if (s.cover_art_path) { cover.src = "/cover/" + encodeURIComponent(s.cover_art_path); }
+  else { cover.style.display = "none"; }
+  document.getElementById("songTags").innerHTML =
+    (s.genius_escluso ? '<span class="tag no">🚫 non su Genius</span>' : "") +
+    (s.genius_url ? `<a class="tag" href="${esc(s.genius_url)}" target="_blank">Genius ↗</a>` : "") +
+    (s.whosampled_url ? `<a class="tag" href="${esc(s.whosampled_url)}" target="_blank">WhoSampled ↗</a>` : "");
+  document.getElementById("metadati").innerHTML = CAMPI.map(([campo, etichetta]) =>
+    `<div><label class="f">${etichetta}</label>` +
+    `<input type="text" id="m_${campo}" value="${esc(s[campo] == null ? "" : s[campo])}"></div>`).join("");
+  document.getElementById("optNoGenius").checked = !!s.genius_escluso;
+  mostraVerdetti(s);
+  if (!s.local_file) {
+    document.getElementById("avvisoTesto").textContent =
+      "⚠️ Questa canzone non ha un file locale: il controllo audio e quello della voce non possono partire.";
+  }
+}
+
+function metadatiDiversi() {
+  const out = {};
+  CAMPI.forEach(([campo]) => {
+    const nuovo = valoreCampo(campo);
+    const vecchio = canzone && canzone[campo] != null ? String(canzone[campo]) : "";
+    if (nuovo !== vecchio) out[campo] = nuovo;
+  });
+  return out;
+}
+
+async function avviaVerifica() {
+  if (!idCanzone) return;
+  const btn = document.getElementById("btnVerifica");
+  btn.disabled = true; btn.textContent = "⏳ Verifica in corso…";
+  const progress = document.getElementById("progress");
+  progress.classList.add("on");
+  const box = document.getElementById("msgs");
+  box.classList.remove("on"); box.innerHTML = "";
+  document.getElementById("verdicts").innerHTML = "";
+  const inizio = Date.now();
+  // Il progresso viene dal server: /verify_status dice passo e testo corrente
+  // («Passo 4/7 · Ricerca WhoSampled…»), come chiesto.
+  const poll = setInterval(async () => {
+    try {
+      const st = await fetch(`/db/songs/${encodeURIComponent(idCanzone)}/verify_status`).then(r => r.json());
+      if (st && st.active) {
+        document.getElementById("passo").textContent = `Passo ${st.step}/${st.total}`;
+        document.getElementById("stato").textContent = st.status || "";
+        document.getElementById("barra").style.width = Math.round((st.step / Math.max(st.total, 1)) * 100) + "%";
+      } else {
+        document.getElementById("stato").textContent =
+          `in corso… ${Math.round((Date.now() - inizio) / 1000)} s`;
+      }
+    } catch (_) {}
+  }, 1500);
+  try {
+    const corpo = payloadVerifica(metadatiDiversi(), {
+      audio: document.getElementById("optAudio").checked,
+      testo: document.getElementById("optTesto").checked,
+      acapella: document.getElementById("optAcapella").checked,
+      non_su_genius: document.getElementById("optNoGenius").checked,
+      voti_conferma: document.getElementById("tolVotiConf").value,
+      voti_rifiuto: document.getElementById("tolVotiRif").value,
+      testo_conferma: document.getElementById("tolTestoConf").value,
+      testo_rifiuto: document.getElementById("tolTestoRif").value,
+    });
+    const res = await fetch(`/db/songs/${encodeURIComponent(idCanzone)}/verify`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) })
+      .then(r => r.json());
+    clearInterval(poll);
+    document.getElementById("passo").textContent = "Verifica conclusa";
+    document.getElementById("barra").style.width = "100%";
+    document.getElementById("stato").textContent = `in ${Math.round((Date.now() - inizio) / 1000)} s`;
+    box.classList.add("on");
+    box.innerHTML = (res.messages || []).map(m => {
+      const colore = m.includes("✅") ? "var(--green)" : (m.includes("❌") ? "var(--red)" :
+                    (m.includes("🟡") ? "var(--amber)" : (m.includes("🚫") ? "var(--accent)" : "var(--muted)")));
+      return `<div class="msg" style="color:${colore}">${esc(m)}</div>`;
+    }).join("");
+    mostraVerdetti(res.song || {});
+    const scheda = document.getElementById("scheda");
+    if (scheda && scheda.src.indexOf("/scheda") >= 0) {
+      scheda.src = `/scheda?song=${encodeURIComponent(idCanzone)}&t=${Date.now()}`;
+    }
+    await carica();
+  } catch (e) {
+    clearInterval(poll);
+    document.getElementById("stato").textContent = "❌ " + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "🔎 Verifica";
+  }
+}
+
+document.querySelector("details").addEventListener("toggle", function () {
+  const scheda = document.getElementById("scheda");
+  if (this.open && scheda.src.indexOf("/scheda") < 0 && idCanzone) {
+    scheda.src = `/scheda?song=${encodeURIComponent(idCanzone)}`;
+  }
+});
+
+carica();
+</script>
+</body>
+</html>

@@ -13,3 +13,8 @@ python-Levenshtein==0.27.4
 # Opzionali (analisi audio / BPM): servono librerie pesanti
 librosa==0.11.0
 numpy==2.4.6
+# Opzionale (conferma dal PARLATO nella pagina /verifica): trascrizione Whisper.
+# Senza, la Verifica funziona lo stesso e la conferma dal parlato resta "non
+# verificabile". Pesa ~1,5 GB fra dipendenze (ctranslate2, onnxruntime…) e modello
+# (145-480 MB, scaricato la prima volta in `modelli/`, non versionata).
+faster-whisper==1.2.1

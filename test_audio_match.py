@@ -53,6 +53,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_PATH = os.path.join(BASE_DIR, "app (2).py")
 INDEX_PATH = os.path.join(BASE_DIR, "index (2).html")
 ONYX_PATH = os.path.join(BASE_DIR, "onyx_whosampled.html")
+VERIFICA_PATH = os.path.join(BASE_DIR, "verifica.html")
 GITIGNORE_PATH = os.path.join(BASE_DIR, ".gitignore")
 FFMPEG = shutil.which("ffmpeg")
 HA_OSASCRIPT = shutil.which("osascript") is not None
@@ -738,6 +739,79 @@ class TestWsDaCercare(unittest.TestCase):
     def test_query_vuote(self):
         self.assertFalse(APP.ws_da_cercare(None, "scartato", "", ""))
         self.assertTrue(APP.ws_da_cercare("   ", None, None, ""))     # link vuoto = nessun link
+
+
+@unittest.skipUnless(HA_OSASCRIPT, "JavaScriptCore (osascript) non disponibile")
+class TestPaginaVerifica(unittest.TestCase):
+    """La schermata di verifica guidata (`/verifica`): le funzioni pure della pagina
+    (corpo della verifica, etichette dei verdetti) e la sintassi dello script —
+    senza questo un errore di battitura romperebbe la pagina senza che nessun test
+    se ne accorga (è già successo due volte, vedi il README)."""
+
+    def _script(self):
+        src = leggi(VERIFICA_PATH)
+        m = re.search(r"<script>(.*?)</script>", src, re.S)
+        if not m:
+            raise AssertionError("nessun <script> in verifica.html")
+        return src, m.group(1)
+
+    def test_lo_script_compila(self):
+        _, script = self._script()
+        esito = esegui_js("try { new Function(%s); JSON.stringify('ok'); }"
+                          " catch (e) { JSON.stringify('ERRORE: ' + e.message); }"
+                          % json.dumps(script), "/tmp/test_verifica_sintassi.js")
+        self.assertEqual(esito, "ok")
+
+    def test_payload_della_verifica(self):
+        src, _ = self._script()
+        codice = (estrai_funzione(src, "payloadVerifica") + "\n"
+                  "JSON.stringify(payloadVerifica({title:'Nuovo', artist:'Tizio'},"
+                  " {audio:true, testo:true, acapella:true, non_su_genius:true,"
+                  "  voti_conferma:'60', voti_rifiuto:'25', testo_conferma:'45', testo_rifiuto:'10'}));")
+        d = esegui_js(codice, "/tmp/test_verifica_payload.js")
+        self.assertEqual(d["metadata"], {"title": "Nuovo", "artist": "Tizio"})
+        self.assertTrue(d["audio"] and d["testo"] and d["testo_acapella"] and d["non_su_genius"])
+        self.assertEqual([d["voti_conferma"], d["voti_rifiuto"]], [60, 25])
+        self.assertEqual([d["testo_conferma"], d["testo_rifiuto"]], [45, 10])
+
+    def test_l_acapella_non_ha_senso_senza_il_controllo_voce(self):
+        src, _ = self._script()
+        codice = (estrai_funzione(src, "payloadVerifica") + "\n"
+                  "JSON.stringify(payloadVerifica({}, {testo:false, acapella:true}));")
+        d = esegui_js(codice, "/tmp/test_verifica_acapella.js")
+        self.assertFalse(d["testo"])
+        self.assertFalse(d["testo_acapella"])
+
+    def test_etichette_dei_verdetti(self):
+        src, _ = self._script()
+        codice = (estrai_funzione(src, "etichettaVerdetto") + "\n"
+                  "JSON.stringify(['confermato','non confermato','ambiguo','scartato',"
+                  "'non verificabile','strano',''].map(etichettaVerdetto));")
+        d = esegui_js(codice, "/tmp/test_verifica_etichette.js")
+        self.assertEqual(d[0], ["ok", "✓ confermato"])
+        self.assertEqual(d[1], ["no", "✗ non confermato"])
+        self.assertEqual(d[2], ["amb", "? ambiguo"])
+        self.assertEqual(d[3], ["no", "✗ candidato scartato"])
+        self.assertEqual(d[4], ["mut", "– non verificabile"])
+        self.assertEqual(d[5][0], "mut")          # esito sconosciuto: si mostra com'è
+        self.assertEqual(d[6], ["mut", "—"])
+
+    def test_la_pagina_ha_tutto_quello_che_serve(self):
+        src, _ = leggi(VERIFICA_PATH), None
+        for pezzo in ('id="metadati"', 'id="optAudio"', 'id="optTesto"', 'id="optAcapella"',
+                      'id="optNoGenius"', 'id="tolVotiConf"', 'id="tolTestoConf"',
+                      'id="progress"', 'id="passo"', 'id="msgs"', 'id="verdicts"',
+                      'id="scheda"', "avviaVerifica()", "verify_status"):
+            self.assertIn(pezzo, src, pezzo)
+
+    def test_la_pagina_e_collegata_ai_pulsanti(self):
+        self.assertIn("function apriVerifica(id)", leggi(INDEX_PATH))
+        self.assertIn("onclick=\"apriVerifica('${s.id}')\"", leggi(INDEX_PATH))
+        self.assertIn("function apriVerifica(trackId)", leggi(ONYX_PATH))
+        self.assertIn("apriVerifica('${t.id}')", leggi(ONYX_PATH))
+        # la rotta esiste nel backend e serve il file
+        self.assertIn('@app.route("/verifica")', leggi(APP_PATH))
+        self.assertIn('send_file(os.path.join(BASE_DIR, "verifica.html"))', leggi(APP_PATH))
 
 
 def estrai_funzione_py(src, nome):

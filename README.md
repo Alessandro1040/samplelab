@@ -34,6 +34,9 @@ con `(2)` nella cartella locale:
 - `index (2).html` — interfaccia principale
 - `browse.html` — interfaccia di navigazione libreria
 - `onyx_whosampled.html` — scraping WhoSampled
+- `verifica.html` — schermata di **verifica guidata** (pagina `/verifica`): dati da
+  correggere, opzioni (audio / voce Whisper / a cappella / non su Genius), tolleranze,
+  progresso passo-per-passo (`Passo x/7`) e la scheda della canzone
 - `samplelab (2).db` — database SQLite della libreria
 - `README_sampler.md` — **guida utente del sampler** (il trimmer FL-Studio della
   pagina `/`: griglia, BPM, offset, Battute Sel., Diventa Bar N°, Allinea griglia,
@@ -300,6 +303,44 @@ sintassi JS, handler inline verso funzioni inesistenti, un `const` che si
 auto-inizializzava, delta-time negativi che corrompevano i `.mid`): la copia
 servita dall'app è corretta e l'elenco dei fix è in `midi_studio/README.md`.
 
+## Verifica guidata (pagina `/verifica`) — 18/09/2026
+
+Una **schermata dedicata** per verificare una canzone (si apre da 🔎 Verifica nel
+database o dal 🔍 del player): prima si correggono i dati e si scelgono i controlli,
+poi si lancia la verifica e si guarda il **progresso passo-per-passo** (`Verifica
+status` → `Passo 4/7 · Ricerca WhoSampled…`), senza toccare la tabella.
+
+**1 · I dati che finiscono nella ricerca**: titolo, artisti, album, artista album,
+compositore, produttori, genere, anno, data, BPM, tonalità, commento — gli stessi
+campi di ✏️ Edit. Vengono salvati **prima** della ricerca (ed è quello che aveva
+risolto il caso *End of the World*: titolo corretto a mano → pagina giusta trovata).
+
+**2 · Cosa deve fare la verifica** (ogni voce è una casella):
+
+| opzione | cosa fa | costo |
+|---|---|---|
+| 🔊 **Controlla audio** | cerca l'anteprima ufficiale (iTunes) e la cerca dentro il file locale con l'impronta acustica | 5-10 s |
+| 🗣 **Controlla voce** | trascrive quello che si sente (Whisper) e lo confronta col testo: le liriche della canzone, o l'anteprima ufficiale se le liriche non ci sono | 20-70 s |
+| 🎤 **Prima separa la voce** | trascrive l'**a cappella** (demucs `--two-stems=vocals`) invece del brano intero | +1-3 min |
+| 🚫 **Non è su Genius** | freestyle/mixtape: salta la ricerca Genius e la riga resta etichettata (`genius_escluso`) | — |
+
+**3 · Le tolleranze** (numeri che si scelgono prima): hash per dire *confermato* e
+*hash* per dire *non confermato* (`50` / `20`, misure reali: 250-2.500 sul brano
+giusto, 5-16 su uno sbagliato); percentuale di parole per la voce (`40%` / `15%`,
+misure reali: 68-78% contro ≤16%). L'inizio, la fine e la qualità dei due file non
+contano: l'impronta riconosce il brano anche tagliato o più rumoroso.
+
+**Cosa scrive nel database**: `audio_match_*` (canzone di Genius), `ws_audio_*`
+(link WhoSampled), **`testo_*`** (verdetto dal parlato: esito, percentuale, parole
+riconosciute, fonte, motivo) e `genius_escluso`. La pagina mostra i verdetti come
+pastiglie e i messaggi della verifica; in fondo c'è la **Scheda** della canzone
+(campioni, remix, cover, stem) dentro la stessa schermata.
+
+**Dipendenze**: la trascrizione è **opzionale e pesante** (`faster-whisper`, ~1,5 GB
+fra pacchetti e modello). Senza, la pagina funziona lo stesso e il controllo voce
+risponde "non verificabile" col motivo. Vedi la sezione «Note operative» per le
+impostazioni che contano (a cappella, VAD spento, guardia sulle parole).
+
 ## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
@@ -365,6 +406,16 @@ Da tenere presente nelle sessioni di lavoro successive:
   sembrava che la Verifica non avesse controllato (segnalato il 18/09/2026). Ora la
   sincronizzazione **assegna sempre** (`track.whosampledUrl = s.whosampled_url || ''`)
   e il pannello info mostra anche il verdetto 🔒 (`🔊 link WhoSampled: scartato — …`).
+- **Verifica guidata (`/verifica`, 18/09/2026).** Il pulsante 🔎 del database e il 🔍
+  del player aprono una **schermata dedicata** invece di verificare in silenzio dentro
+  la riga: dati da correggere (**salvati PRIMA della ricerca**), caselle per i controlli
+  (🔊 audio, 🗣 voce/Whisper, 🎤 a cappella, 🚫 non su Genius), **tolleranze** scelte a
+  mano (hash 50/20, parole 40%/15%) e **progresso passo-per-passo** (`Passo x/7`).
+  Colonne nuove: `genius_escluso` (freestyle/mixtape → la ricerca Genius si salta) e
+  `testo_esito`/`testo_voti`/`testo_parole`/`testo_fonte`/`testo_motivo`/`testo_at`.
+  La trascrizione richiede **`faster-whisper`** (opzionale, ~1,5 GB fra pacchetti e
+  modello): senza, la pagina funziona e il controllo voce dice "non verificabile" col
+  motivo. «Verifica tutto» continua a lavorare in blocco (percorso inline).
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
   `do_download_playlist`): con yt-dlp recenti provocava "Video unavailable"/403.
 - **FORTISSIMO COMPARE (11/09/2026).** Aggiunti `fortissimo_compare_v3.py`, la
@@ -1785,6 +1836,75 @@ Da tenere presente nelle sessioni di lavoro successive:
   testo, con stopword tolte) e soglie 40% / 15% per confermato / non confermato.
   Costo: ≈1,5 GB di wheel + modello (145-480 MB) e **20-70 s di CPU per brano**
   (`small`) — accettabile sul pulsante di una riga, ~10-15 h su tutte le 890.
+
+- **LA VERIFICA DIVENTA UNA SCHERMATA: `/verifica` (18/09/2026, sera).** Richiesta di
+  Alessandro: «fai in modo che appena un utente clicchi su verifica apra una nuova
+  schermata che ti dice il progresso 1/7 … prima di dire 1/7 … deve chiedere all'utente
+  in che modo fare la verifica … l'utente potrà pure scrivere se è una canzone che si
+  trova su genius oppure no … in quella l'utente potrà vedere sia le informazioni della
+  canzone attuale (quelle che compaiono in database → edit) sia "scheda" … prima di
+  quello l'utente dovrà decidere tutti gli iperparametri … ci sarà una casella "controlla
+  audio" … e anche qualcosa del tipo "controlla voce" … userà la trascrizione di whisper
+  però fatta solo sull'acapella … prima di confrontarle estrarrà la acapella di entrambe
+  … e l'utente potrà decidere che percentuale di tolleranza usare». Ora c'è
+  `verifica.html` (pagina **`/verifica?song=<id>`**, rotta `GET /verifica`), aperta dal
+  🔎 Verifica del database e dal 🔍 del player in una **nuova scheda** («Verifica tutto»
+  continua a lavorare in blocco, senza finestre):
+  - **dati** (12 campi: titolo, artisti, album, artista album, compositore, produttori,
+    genere, anno, data, BPM, tonalità, commento) salvati nel database **PRIMA** della
+    ricerca (`metadata` nel corpo della POST, applicato all'inizio di `verify_song`):
+    è la lezione del caso *End of the World*, dove il titolo corretto a mano aveva fatto
+    trovare la pagina giusta;
+  - **opzioni**: `audio` (🔊 anteprima ufficiale), `testo` (🗣 trascrizione Whisper),
+    `testo_acapella` (🎤 separa prima la voce con demucs `--two-stems=vocals`),
+    `non_su_genius` (🚫 freestyle/mixtape → colonna `genius_escluso`, ricerca Genius e
+    copertina saltate), più le **tolleranze** `voti_conferma`/`voti_rifiuto` (50/20) e
+    `testo_conferma`/`testo_rifiuto` (40%/15%);
+  - **progresso**: la pagina interroga `/db/songs/<id>/verify_status` ogni 1,5 s e
+    mostra «Passo x/7 · <cosa sta facendo>» con la barra, poi i messaggi e i verdetti
+    come pastiglie (canzone di Genius, link WhoSampled, voce) e in fondo la **Scheda**
+    della canzone nella stessa schermata;
+  - lato server: `verifica_testo_riferimento(percorso, riferimento, tipo='liriche'|'audio')`
+    con le funzioni pure `parole_contenuto` (toglie le `[Chorus: …]` con
+    `pulisci_annotazioni`), `copertura_testo` (unidirezionale: le liriche hanno ad-lib
+    che nessuno canta) ed `esito_testo` (con la **guardia sulle parole**: sotto le 100
+    parole si resta a "non verificabile"); `modello_whisper` (caricato una volta sola,
+    cache), `a_cappella` (demucs) e `trascrivi`; le soglie dell'audio sono diventate
+    parametri di `esito_confronto_audio`/`verifica_audio_riferimento`.
+  Verifiche del 18/09/2026: **end-to-end** su *1998 Freestyle* con
+  `{"testo": true, "non_su_genius": true}` → «🚫 Segnata come NON su Genius (freestyle/
+  mixtape): ricerca Genius saltata» e «✅ Testo confermato: **60.9%** delle parole è nel
+  testo atteso (112 parole riconosciute · liriche (78 parole) · trascrizione mix)», con
+  `testo_*` e `genius_escluso` scritti nel database; **in Chrome vero** la pagina carica
+  la canzone (12 campi riempiti, tolleranze 50/20/40/15, tag «🚫 non su Genius», verdetti
+  già mostrati «🗣 voce: ✓ confermato · 60.9% · 112 parole», pulsante «🔎 Verifica»);
+  `faster-whisper 1.2.1` installato nel Python dell'app e messo in `requirements.txt`
+  fra gli opzionali (il modello si scarica la prima volta; `modelli/` è in `.gitignore`);
+  **103 test** in `test_audio_match.py` (erano 97: la pagina, il payload, le etichette
+  dei verdetti, la sintassi dello script in JavaScriptCore, i collegamenti ai pulsanti) e
+  la **suite completa**; pagine `/` `/onyx` `/browse` `/scheda` `/verifica` → **200**
+  dopo il riavvio. ⚠️ Da sapere: senza `faster-whisper` la pagina funziona lo stesso e
+  il controllo voce risponde "non verificabile" col motivo; l'a cappella ha senso solo
+  con «controlla voce» e la pagina lo impone (`testo_acapella` vero solo se `testo` è
+  spuntato).
+
+- **A CAPPELLA E CONFRONTO CON L'ANTEPRIMA: COLLAUDATI (18/09/2026).** Due strade della
+  pagina `/verifica` che non erano ancora state provate dal vivo:
+  1. **🎤 a cappella** (`a_cappella`, demucs `--two-stems=vocals`): su *1998 Freestyle*
+     (49 s) ha prodotto `anteprime/acapella_…/htdemucs/<nome>/vocals.mp3` (2,0 MB) in
+     **12,7 s** — veloce sui brani corti, 1-2 minuti su un brano intero;
+  2. **confronto voce ↔ anteprima ufficiale** (`tipo='audio'`: si trascrive l'anteprima
+     e si controlla che le sue parole si sentano nel file locale): il meccanismo
+     funziona (copertura calcolata: 16,7%) ma su un'anteprima di **30 secondi** escono
+     solo **36 parole**, sotto la guardia di 100 → il verdetto resta
+     **"non verificabile"** («Trascrizione troppo povera: 36 parole riconosciute
+     (servono almeno 100) — audio di riferimento (mix, 36 parole)»). 👉 Lezione: la
+     strada utile è quella con le **liriche** (68-78% misurato sul brano giusto); il
+     confronto con l'anteprima va bene solo se il riferimento è lungo (brano intero
+     scaricato, non i 30 s del negozio). Nessuna modifica necessaria: la guardia ha
+     fatto esattamente il suo lavoro, meglio nessun verdetto che un verdetto casuale.
+
+
 
 
 

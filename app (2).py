@@ -170,6 +170,18 @@ try:
 except ImportError:
     HAS_LIBROSA = False; np = None
 
+# ── TRASCRIZIONE (Whisper) per la conferma dal PARLATO ───────────────────────
+# Opzionale e pesante (~1,5 GB fra dipendenze e modello): l'app funziona lo stesso
+# senza. Misure del 18/09/2026 (modello `small`, CPU): 20-70 s per brano e, sul
+# brano giusto, il 68-78% delle parole ascoltate si ritrova nel testo (contro ≤16%
+# di un brano sbagliato) — numeri completi nel README.
+try:
+    from faster_whisper import WhisperModel as _WhisperModel
+    HAS_WHISPER = True
+except Exception:
+    _WhisperModel = None
+    HAS_WHISPER = False
+
 # ── MUTAGEN (scrittura tag audio nei file scaricati) ─────────────────────────
 try:
     import mutagen
@@ -339,7 +351,20 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               ("ws_audio_fonte", "TEXT"),
                               ("ws_audio_motivo", "TEXT"),
                               ("ws_query", "TEXT"),
-                              ("ws_audio_at", "TEXT")):
+                              ("ws_audio_at", "TEXT"),
+                              # ── Verifica guidata dalla pagina /verifica (18/09/2026) ──
+                              # `genius_escluso`: l'utente dichiara che la canzone NON è su
+                              # Genius (freestyle, mixtape): la ricerca si salta e la riga
+                              # resta etichettata come tale.
+                              ("genius_escluso", "INTEGER DEFAULT 0"),
+                              # conferma dal PARLATO (Whisper): percentuale di parole
+                              # ascoltate che compaiono nel testo, e verdetto
+                              ("testo_esito", "TEXT"),
+                              ("testo_voti", "REAL"),
+                              ("testo_parole", "INTEGER"),
+                              ("testo_fonte", "TEXT"),
+                              ("testo_motivo", "TEXT"),
+                              ("testo_at", "TEXT")):
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
 
@@ -2555,6 +2580,14 @@ def fortissimo():
 def scheda():
     return send_file(os.path.join(BASE_DIR, "scheda.html"))
 
+@app.route("/verifica")
+def verifica_pagina():
+    """La schermata di verifica guidata (18/09/2026): una pagina per UNA canzone,
+    con i dati da correggere, le opzioni (audio / voce / a cappella / non-su-Genius),
+    le tolleranze e il progresso passo-per-passo. Si apre da 🔎 Verifica nel
+    database o dal player con `?song=<id>`."""
+    return send_file(os.path.join(BASE_DIR, "verifica.html"))
+
 # ── STREAMING ────────────────────────────────────────────────────────────────
 @app.route("/stream/<path:filename>")
 def stream_file(filename):
@@ -3422,8 +3455,14 @@ def db_changed():
 # e "Analizza" nel player) lo interroga per mostrare una riga di stato live.
 verify_progress = {}
 # Passi della Verifica: 1 Genius, 2 testo/copertina, 3 YouTube, 4 WhoSampled,
-# 5 Tunebat, 6 conferma audio (🔊), 7 analisi audio per BPM/Key.
+# 5 Tunebat, 6 conferma audio (🔊), 7 analisi audio per BPM/Key (+ conferma dal parlato).
 VERIFY_TOTALE = 7
+# Campi che la pagina /verifica può correggere PRIMA di lanciare la ricerca: sono
+# quelli che finiscono nelle query (titolo, artista, anno…) — gli stessi di ✏️ Edit.
+METADATI_MODIFICABILI = ("title", "artist", "album", "album_artist", "composer",
+                         "producers", "genre", "year", "release_date", "bpm",
+                         "musical_key", "comment", "lyrics", "youtube_url",
+                         "genius_url", "whosampled_url", "cover_art_path")
 
 def _set_verify_status(song_id, step, total, status):
     verify_progress[song_id] = {"step": step, "total": total, "status": status, "ts": time.time()}
@@ -3448,6 +3487,52 @@ def verify_song(song_id):
     updates = {}
     messages = []
     primary_for_search = ""      # solo artista principale, per le ricerche successive
+
+    # ─── METADATI scritti nella pagina /verifica (prima della ricerca) ──────────
+    # La pagina fa correggere titolo/artista/anno e il resto PRIMA di lanciare la
+    # verifica: sono esattamente i valori che finiscono nelle ricerche. È ciò che
+    # aveva risolto il caso *End of the World* (titolo corretto a mano → pagina
+    # giusta trovata). Si scrivono subito nel database, come fa ✏️ Edit.
+    metadati = (request.json or {}).get("metadata") or {}
+    if isinstance(metadati, dict) and metadati:
+        modifiche = {campo: metadati[campo] for campo in METADATI_MODIFICABILI if campo in metadati}
+        if modifiche:
+            with get_db() as conn:
+                for campo, valore in modifiche.items():
+                    conn.execute(f"UPDATE songs SET {campo}=?, updated_at=datetime('now') WHERE id=?",
+                                 (valore, song_id))
+            s.update(modifiche)
+            messages.append("✏️ Metadati aggiornati prima della verifica: "
+                            + ", ".join(sorted(modifiche)))
+
+    # ─── OPZIONI SCELTE NELLA PAGINA /verifica ──────────────────────────────────
+    # La pagina fa decidere PRIMA cosa controllare e con quali TOLLERANZE (e vale
+    # anche per il pulsante "Verifica" del database, che manda solo `{"audio": …}`):
+    #   audio          → confronto con l'anteprima ufficiale (5-10 s)
+    #   testo          → confronto dal parlato, Whisper (20-70 s)
+    #   testo_acapella → trascrive solo la voce, demucs (1-3 min in più)
+    #   non_su_genius  → la canzone non è su Genius (freestyle/mixtape): si salta
+    #   voti_conferma/voti_rifiuto e testo_conferma/testo_rifiuto → le tolleranze
+    opzioni = request.json or {}
+
+    def _tolleranza(chiave, default, minimo, massimo):
+        try:
+            return max(minimo, min(massimo, float(opzioni.get(chiave, default))))
+        except Exception:
+            return float(default)
+
+    audio_richiesto = bool(opzioni.get("audio"))
+    testo_richiesto = bool(opzioni.get("testo"))
+    sorgente_testo = "a cappella" if opzioni.get("testo_acapella") else "mix"
+    non_su_genius = bool(opzioni.get("non_su_genius"))
+    soglie_audio = (_tolleranza("voti_conferma", AUDIO_VOTI_CONFERMA, 1, 100000),
+                    _tolleranza("voti_rifiuto", AUDIO_VOTI_RIFIUTO, 0, 100000))
+    soglie_testo = (_tolleranza("testo_conferma", TESTI_SOGLIA_CONFERMA, 1, 100),
+                    _tolleranza("testo_rifiuto", TESTI_SOGLIA_RIFIUTO, 0, 100))
+    if soglie_audio[1] >= soglie_audio[0]:      # il rifiuto sta sempre sotto la conferma
+        soglie_audio = (soglie_audio[0], max(0.0, soglie_audio[0] - 1))
+    if soglie_testo[1] >= soglie_testo[0]:
+        soglie_testo = (soglie_testo[0], max(0.0, soglie_testo[0] - 1))
 
     # Versione "pulita" di titolo/artista per la ricerca web: via il numeretto
     # iniziale di traccia ('1 - TRE STRONZI' → 'TRE STRONZI'), i trattini inutili
@@ -3479,6 +3564,13 @@ def verify_song(song_id):
     # `genius` è inizializzato QUI (non solo dentro il try): il passo della
     # copertina lo legge anche se la ricerca Genius esplode a metà.
     genius = None
+    if non_su_genius:
+        # Dichiara l'UTENTE nella pagina /verifica: la canzone non è su Genius
+        # (freestyle, mixtape) → la ricerca si salta e la riga resta etichettata.
+        updates["genius_escluso"] = 1
+        messages.append("🚫 Segnata come NON su Genius (freestyle/mixtape): ricerca Genius saltata")
+    elif s.get("genius_escluso"):
+        updates["genius_escluso"] = 0
     try:
         # Candidati (artista, titolo) da provare per Genius, in ordine:
         #  1) artista/titolo estratti dal nome del file locale (se coerente col DB)
@@ -3520,7 +3612,7 @@ def verify_song(song_id):
 
         genius = None
         genius_score = 0.0
-        for ca, ct in uniq:
+        for ca, ct in ([] if non_su_genius else uniq):
             g = fetch_genius(ca, ct)
             if g:
                 # Controllo di similarità tra la query originale e il risultato di
@@ -3545,7 +3637,7 @@ def verify_song(song_id):
         # es. "1 - TRE STRONZI" invece di "TRE STRONZI"): cerchiamo il titolo
         # corretto su YouTube (con la versione pulita della query) e riproviamo
         # Genius con quello. Se YouTube conferma il titolo, viene salvato.
-        if not genius:
+        if not genius and not non_su_genius:
             _set_verify_status(song_id, 1, VERIFY_TOTALE, "Genius non ha trovato: cerco titolo corretto su YouTube…")
             try:
                 yt_artist = base_artist
@@ -3665,7 +3757,7 @@ def verify_song(song_id):
             if genius.get("genius_url") and not s.get("genius_url"):
                 updates["genius_url"] = genius["genius_url"]
                 messages.append("URL Genius trovato")
-        else:
+        elif not non_su_genius:
             messages.append("⚠️ Genius: nessun risultato trovato")
     except Exception as e:
         messages.append(f"⚠️ Genius: errore ({str(e)[:50]})")
@@ -3705,11 +3797,8 @@ def verify_song(song_id):
     # (score < 0,95) — cioè proprio le righe a rischio falso positivo. Su
     # "Verifica tutto" delle righe mai abbinate (score assente) non si attiva,
     # altrimenti sarebbero 890 × 8 s di attesa.
-    audio_richiesto = False
-    try:
-        audio_richiesto = bool((request.json or {}).get("audio"))
-    except Exception:
-        audio_richiesto = False
+    # (Le opzioni della pagina /verifica — audio, testo, tolleranze, non-su-Genius —
+    #  sono lette all'inizio della funzione, subito dopo i metadati.)
     score_eff = updates.get("genius_match_score", s.get("genius_match_score"))
     # Anche il match Genius va confermato con l'audio quando l'artista della riga è
     # un segnaposto ("Brano locale"): lì il confronto testuale è strutturalmente
@@ -3723,7 +3812,8 @@ def verify_song(song_id):
             audio_s = dict(s); audio_s.update(updates)   # titolo/artista/score appena trovati
             upd_audio, msg_audio = conferma_audio(
                 audio_s,
-                status=lambda testo: _set_verify_status(song_id, 6, VERIFY_TOTALE, testo))
+                status=lambda testo: _set_verify_status(song_id, 6, VERIFY_TOTALE, testo),
+                soglie=soglie_audio)
             updates.update(upd_audio)
             messages.append(msg_audio)
         except Exception as e:
@@ -3803,7 +3893,8 @@ def verify_song(song_id):
                     verdetto = verifica_audio_riferimento(
                         os.path.join(DL_DIR, s.get("local_file") or "") if s.get("local_file") else "",
                         track.get("artist", ""), track.get("title", ""),
-                        status=lambda testo: _set_verify_status(song_id, 4, VERIFY_TOTALE, testo))
+                        status=lambda testo: _set_verify_status(song_id, 4, VERIFY_TOTALE, testo),
+                        soglie=soglie_audio)
                     decisione = esito_whosampled(
                         ws_score, verdetto["esito"],
                         artista_mancante=not (search_artist or "").strip(),
@@ -3920,6 +4011,35 @@ def verify_song(song_id):
                         messages.append(f"Chiave stimata dal file audio ({meta_audio.get('source')}): {meta_audio['key']}")
             except Exception as e:
                 messages.append(f"⚠️ Analisi audio: errore ({str(e)[:50]})")
+
+    # ─── CONFERMA DAL PARLATO (Whisper) ────────────────────────────────────────
+    # Quello che si SENTE è il testo che ci si aspetta? Il riferimento sono le
+    # liriche della canzone trovata su Genius (o già in database); se non ci sono,
+    # si trascrive l'ANTEPRIMA ufficiale e si controlla che le sue parole si
+    # sentano nel file locale. `sorgente_testo` = 'a cappella' se l'utente ha
+    # chiesto di separare prima la voce (demucs, 1-3 min in più).
+    if testo_richiesto:
+        percorso_locale = (os.path.join(DL_DIR, s.get("local_file") or "")
+                           if s.get("local_file") else "")
+        try:
+            liriche_rif = (updates.get("lyrics") or s.get("lyrics") or "").strip()
+            if liriche_rif:
+                risultato_testo = verifica_testo_riferimento(
+                    percorso_locale, liriche_rif, tipo="liriche", sorgente=sorgente_testo,
+                    status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo),
+                    soglie=soglie_testo)
+            else:
+                _set_verify_status(song_id, 7, VERIFY_TOTALE, "🗣 Cerco un audio di riferimento…")
+                info_rif = cerca_anteprima_itunes(search_artist, search_title)
+                audio_rif = scarica_anteprima(info_rif) if info_rif else None
+                risultato_testo = verifica_testo_riferimento(
+                    percorso_locale, audio_rif or "", tipo="audio", sorgente=sorgente_testo,
+                    status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo),
+                    soglie=soglie_testo)
+            updates.update(campi_dal_risultato_testo(risultato_testo))
+            messages.append(risultato_testo["messaggio"])
+        except Exception as e:
+            messages.append(f"⚠️ Confronto dal parlato: errore ({str(e)[:60]})")
 
     # ─── SALVA NEL DATABASE ─────────────────────────────────
     if updates:
@@ -4547,6 +4667,13 @@ COLUMN_DOCS = {"songs": {
     "ws_audio_motivo": "PERCHÉ il confronto del link WhoSampled non si è potuto fare (vuoto se è stato fatto)",
     "ws_query": "cosa è stato cercato su WhoSampled per quest'ultimo verdetto (se il titolo cambia, la Verifica riprova)",
     "ws_audio_at": "quando è stato fatto il confronto audio del link WhoSampled",
+    "genius_escluso": "1 = la canzone NON è su Genius (freestyle/mixtape): la Verifica salta la ricerca",
+    "testo_esito": "conferma dal PARLATO (Whisper): 'confermato'/'non confermato'/'ambiguo'/'non verificabile'",
+    "testo_voti": "percentuale di parole ascoltate che compaiono nel testo (0-100)",
+    "testo_parole": "quante parole sono state riconosciute nella trascrizione",
+    "testo_fonte": "testo usato per il confronto (pagina Genius) e come è stato trascritto (mix o a cappella)",
+    "testo_motivo": "PERCHÉ il confronto dal parlato non si è potuto fare (vuoto se è stato fatto)",
+    "testo_at": "quando è stato fatto il confronto dal parlato",
     "created_at": "quando è stata aggiunta",
     "updated_at": "ultima modifica",
 }}
@@ -4793,20 +4920,25 @@ def istogramma_offset(hash_locali, hash_anteprima, hop=AUDIO_HOP, sr=AUDIO_SR):
     return voti[migliore], migliore * hop / float(sr), comuni
 
 
-def esito_confronto_audio(voti):
+def esito_confronto_audio(voti, soglia_conferma=None, soglia_rifiuto=None):
     """Funzione PURA. Verdetto in parole dal confronto audio:
-    - 'confermato' se gli hash allineati allo STESSO offset sono ≥ AUDIO_VOTI_CONFERMA;
-    - 'ambiguo' se stanno fra AUDIO_VOTI_RIFIUTO e AUDIO_VOTI_CONFERMA;
-    - 'non confermato' se sono pochissimi (≤ AUDIO_VOTI_RIFIUTO): l'anteprima
-      ufficiale NON è dentro il file locale, quindi il match testuale di Genius è
-      da rivedere (falso positivo, oppure remix/live/versione diversa).
+    - 'confermato' se gli hash allineati allo STESSO offset sono ≥ soglia_conferma;
+    - 'ambiguo' se stanno fra soglia_rifiuto e soglia_conferma;
+    - 'non confermato' se sono pochissimi (≤ soglia_rifiuto): l'anteprima ufficiale
+      NON è dentro il file locale, quindi il match testuale di Genius è da rivedere
+      (falso positivo, oppure remix/live/versione diversa).
+    Le soglie sono quelle dell'app (AUDIO_VOTI_CONFERMA / AUDIO_VOTI_RIFIUTO) ma la
+    pagina /verifica può passarne di proprie: sono le "tolleranze" che Alessandro
+    vuole poter scegliere prima di lanciare la verifica.
     Il caso "non si è potuto provare" — nessuna anteprima ufficiale, file locale
     assente o non decodificabile — NON passa da qui: lo decide `conferma_audio` e
     vale 'non verificabile', così un dato mancante non diventa mai un verdetto.
     """
-    if voti >= AUDIO_VOTI_CONFERMA:
+    conferma = AUDIO_VOTI_CONFERMA if soglia_conferma is None else float(soglia_conferma)
+    rifiuto = AUDIO_VOTI_RIFIUTO if soglia_rifiuto is None else float(soglia_rifiuto)
+    if voti >= conferma:
         return "confermato"
-    if voti <= AUDIO_VOTI_RIFIUTO:
+    if voti <= rifiuto:
         return "non confermato"
     return "ambiguo"
 
@@ -5130,10 +5262,13 @@ def artista_titolo_da_whosampled_url(url):
     return artista, titolo
 
 
-def verifica_audio_riferimento(percorso, artista, titolo, status=None):
+def verifica_audio_riferimento(percorso, artista, titolo, status=None, soglie=None):
     """Conferma AUDIO di un riferimento QUALSIASI (il match Genius, il candidato
     WhoSampled, un link già salvato…): cerca l'anteprima ufficiale di (artista,
     titolo) su iTunes e la cerca dentro il file locale.
+
+    `soglie` = (voti_conferma, voti_rifiuto) per le "tolleranze" scelte nella pagina
+    /verifica; None = quelle dell'app.
 
     Restituisce {"esito", "voti", "offset", "comuni", "fonte", "messaggio",
     "confronto", "motivo"}: `confronto` dice se il confronto è stato eseguito
@@ -5174,7 +5309,7 @@ def verifica_audio_riferimento(percorso, artista, titolo, status=None):
         return senza_confronto("calcolo", "confronto audio non riuscito (decodifica o spettrogramma)", "⚠️")
 
     voti, comuni, offset = calcolo["voti"], calcolo["comuni"], calcolo["offset"]
-    esito = esito_confronto_audio(voti)
+    esito = esito_confronto_audio(voti, *(soglie or (None, None)))
     etichetta = f"{info['artist']} — {info['track']}"
     fonte = "iTunes %s · %s (%.1f s)" % (info["id"], etichetta, info["durata"] or 0)
     if esito == "confermato":
@@ -5211,12 +5346,13 @@ def campi_dal_risultato_audio(risultato, prefisso="audio_match_"):
     }
 
 
-def conferma_audio(song, status=None):
+def conferma_audio(song, status=None, soglie=None):
     """Il passo 🔊 della Verifica sul match GENIUS: il file locale contiene
     l'anteprima ufficiale della canzone trovata su Genius?
 
     Restituisce (aggiornamenti, messaggio): i campi `audio_match_*` da scrivere nel
-    database e la riga da mostrare in interfaccia. Non solleva MAI eccezioni: ogni
+    database e la riga da mostrare in interfaccia. `soglie` = (conferma, rifiuto)
+    sulle tolleranze scelte nella pagina /verifica. Non solleva MAI eccezioni: ogni
     intoppo diventa un messaggio ⚪/⚠️, perché la Verifica deve poter continuare.
     """
     locale = song.get("local_file") or ""
@@ -5227,9 +5363,263 @@ def conferma_audio(song, status=None):
     # dei motivi per cui su queste righe la Verifica non trovava né album né data).
     if is_placeholder_artist(artista):
         artista = ""
-    risultato = verifica_audio_riferimento(percorso, artista, song.get("title") or "", status)
+    risultato = verifica_audio_riferimento(percorso, artista, song.get("title") or "",
+                                           status, soglie)
     return campi_dal_risultato_audio(risultato), risultato["messaggio"]
 
+
+
+# ── CONFERMA DAL PARLATO (Whisper) — 18/09/2026 ───────────────────────────────
+# Idea di Alessandro: «sentire effettivamente il testo che viene detto a parole e
+# confrontarlo con quelli presunti di genius». Serve dove l'impronta audio non può
+# arrivare (nessuna anteprima ufficiale: freestyle, mixtape). Misure del 18/09/2026
+# su righe vere della libreria (modello `small`, CPU int8, VAD spento): *Get Up*
+# 77,9% delle parole ascoltate dentro le sue liriche, *Simon Says* 76,6%,
+# *ANTIPATICO* (italiano) 68,8%, mentre il brano di confronto sta sotto il 16,3% —
+# e *Havana* (liriche di una pagina di traduzioni su audio inglese) sta al 10,9%,
+# cioè il metodo scopre anche le liriche sbagliate. ⚠️ Le impostazioni contano più
+# del metodo: col default (`base` + VAD attivo) due brani rendevano 18 e 3 parole
+# utili, quindi qui si usa `vad_filter=False`, `no_speech_threshold=None`,
+# `log_prob_threshold=None`, `condition_on_previous_text=False` e una GUARDIA sul
+# numero di parole (sotto le 100 parole si resta a "non verificabile").
+TESTI_MODELLO = os.environ.get("SAMPLELAB_WHISPER", "small")
+TESTI_SOGLIA_CONFERMA = 40.0      # % di parole ascoltate presenti nel testo
+TESTI_SOGLIA_RIFIUTO = 15.0       # sotto questa: si sta cantando un'altra cosa
+TESTI_MIN_PAROLE = 100            # meno parole di così = trascrizione troppo povera
+MODELLI_DIR = os.path.join(BASE_DIR, "modelli"); os.makedirs(MODELLI_DIR, exist_ok=True)
+_whisper_cache = {}
+
+# Parole che non distinguono un testo dall'altro (articoli, pronomi, "yeah"…):
+# italiano e inglese, le due lingue della libreria.
+STOPWORD = set("""a an the and or but if of to in on at for with from by is are was were be been being
+it its this that these those you your i me my we our he she they them his her her as so not no
+do does did done have has had will would can could should may might must just like all any there
+here what when who whom which how why then than too very s t re ve ll d m o yeah uh ah oh
+il lo la i gli le un uno una di da in con su per tra fra non che chi cui come dove quando e o ma
+se anche solo piu meno molto poco io tu lui lei noi voi loro mi ti si ci vi ne""".split())
+
+
+_SEZIONI_LIRICHE = {"intro", "chorus", "verse", "bridge", "outro", "hook", "refrain",
+                    "pre-chorus", "prechorus", "post-chorus", "strofa", "ritornello",
+                    "skit", "interlude", "part", "pre", "post", "repeat", "x2"}
+
+
+def pulisci_annotazioni(testo):
+    """Funzione PURA. Toglie le indicazioni di sezione delle liriche di Genius
+    («[Chorus: Akon]», «[Verse 1: 50 Cent]», «[Ritornello]»): sono parole che
+    nessuno canta e abbasserebbero la copertura (misurato: valgono ~10% delle
+    parole del testo). Le parentesi quadre che NON sono sezioni restano."""
+    def sostituisci(m):
+        interno = m.group(1).strip().lower()
+        primo = re.split(r"[:\-–]", interno)[0].strip()
+        if primo in _SEZIONI_LIRICHE or (primo and primo.split()[0] in _SEZIONI_LIRICHE):
+            return " "
+        return m.group(0)
+    return re.sub(r"\[([^\]]{0,80})\]", sostituisci, testo or "")
+
+
+def parole_contenuto(testo):
+    """Funzione PURA. Le parole che contano di un testo: minuscole, solo lettere e
+    numeri, senza le indicazioni di sezione, senza le parole funzionali (STOPWORD) e
+    senza i monosillabi."""
+    testo = pulisci_annotazioni(testo).lower()
+    for brutto, buono in (("’", "'"), ("`", "'"), ("–", " "), ("—", " ")):
+        testo = testo.replace(brutto, buono)
+    pulito = "".join(c if (c.isalnum() or c == "'") else " " for c in testo)
+    return [p for p in pulito.split() if p not in STOPWORD and len(p) > 1]
+
+
+def copertura_testo(parole_riferimento, parole_ascoltate):
+    """Funzione PURA. Quanta parte del RIFERIMENTO si sente davvero (0-100).
+
+    È unidirezionale di proposito: le liriche di Genius contengono anche le
+    indicazioni delle sezioni («[Chorus: Akon]») e gli ad-lib che nessuno canta,
+    quindi si misura se *ciò che si sente* copre il riferimento, non il contrario.
+    """
+    rif = set(p for p in (parole_riferimento or []) if p)
+    ascoltate = set(p for p in (parole_ascoltate or []) if p)
+    if not rif:
+        return 0.0
+    return round(100.0 * len(rif & ascoltate) / len(rif), 1)
+
+
+def esito_testo(copertura, n_parole, soglia_conferma=TESTI_SOGLIA_CONFERMA,
+                soglia_rifiuto=TESTI_SOGLIA_RIFIUTO, min_parole=TESTI_MIN_PAROLE):
+    """Funzione PURA. Verdetto dal confronto del parlato:
+    - 'non verificabile' se la trascrizione è troppo povera (meno di `min_parole`):
+      lì non si può dire né sì né no (misurato: con le impostazioni sbagliate si
+      scendeva a 3-18 parole e il verdetto sarebbe stato casuale);
+    - 'confermato' se la copertura è ≥ `soglia_conferma`;
+    - 'non confermato' se è ≤ `soglia_rifiuto`;
+    - 'ambiguo' in mezzo.
+    """
+    if (n_parole or 0) < min_parole:
+        return "non verificabile"
+    if copertura >= soglia_conferma:
+        return "confermato"
+    if copertura <= soglia_rifiuto:
+        return "non confermato"
+    return "ambiguo"
+
+
+def modello_whisper(nome=None):
+    """Il modello Whisper, caricato una volta sola (il caricamento dura ~30 s).
+    Restituisce None se la trascrizione non è disponibile (pacchetto non installato
+    o modello non scaricabile): la Verifica deve poter continuare lo stesso."""
+    if not HAS_WHISPER or _WhisperModel is None:
+        return None
+    nome = (nome or TESTI_MODELLO).strip() or "small"
+    if nome not in _whisper_cache:
+        try:
+            _whisper_cache[nome] = _WhisperModel(nome, device="cpu", compute_type="int8",
+                                                 download_root=(os.environ.get("SAMPLELAB_MODELLI") or None))
+        except Exception as e:
+            print(f"[whisper] modello non caricabile: {e}")
+            return None
+    return _whisper_cache[nome]
+
+
+def a_cappella(percorso, timeout=900):
+    """Estrae la VOCE con demucs (`--two-stems=vocals`: 1-3 minuti per brano) e
+    restituisce il percorso dell'a cappella, oppure None. Si usa quando si vuole
+    trascrivere SOLO la voce: sul mix la trascrizione funziona già (68-78% nel
+    brano giusto) ma con la musica sotto sbaglia più parole."""
+    if not percorso or not os.path.exists(percorso):
+        return None
+    import tempfile
+    cartella = tempfile.mkdtemp(prefix="acapella_", dir=ANTEPRIME_DIR)
+    try:
+        p = subprocess.run(["python3", "-m", "demucs", "--two-stems=vocals", "--mp3",
+                            "--mp3-bitrate", "320", "-o", cartella, percorso],
+                           capture_output=True, text=True, timeout=timeout)
+    except Exception as e:
+        print(f"[demucs] {e}")
+        return None
+    if p.returncode != 0:
+        print(f"[demucs] errore: {(p.stderr or '')[-200:]}")
+        return None
+    for radice, _, files in os.walk(cartella):
+        for f in sorted(files):
+            if f.startswith("vocals"):
+                return os.path.join(radice, f)
+    return None
+
+
+def trascrivi(percorso, sorgente="mix", modello=None):
+    """Trascrive un file e restituisce {"testo", "parole", "durata", "lingua",
+    "fonte"} oppure None. `sorgente` = 'mix' (veloce) | 'a cappella' (demucs)."""
+    m = modello_whisper(modello)
+    if m is None or not percorso or not os.path.exists(percorso):
+        return None
+    da_trascrivere, nota = percorso, "mix"
+    if sorgente == "a cappella":
+        voce = a_cappella(percorso)
+        if voce:
+            da_trascrivere, nota = voce, "a cappella"
+    try:
+        segmenti, info = m.transcribe(da_trascrivere, vad_filter=False,
+                                      no_speech_threshold=None, log_prob_threshold=None,
+                                      condition_on_previous_text=False)
+        testo = " ".join(s.text.strip() for s in segmenti)
+    except Exception as e:
+        print(f"[whisper] trascrizione fallita: {e}")
+        return None
+    return {"testo": testo, "parole": parole_contenuto(testo),
+            "durata": getattr(info, "duration", None),
+            "lingua": getattr(info, "language", ""), "fonte": nota}
+
+
+def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="mix",
+                               status=None, soglie=None, min_parole=TESTI_MIN_PAROLE):
+    """Conferma dal PARLATO: quello che si sente è il testo che ci si aspetta?
+
+    `riferimento` è il TESTO delle liriche (`tipo='liriche'`) oppure il percorso di
+    un AUDIO ufficiale (`tipo='audio'`, es. l'anteprima iTunes). Restituisce
+    {"esito", "copertura", "parole", "fonte", "motivo", "confronto", "messaggio"}.
+
+    La direzione della misura è scelta perché sia informativa in entrambi i casi:
+    - con le LIRICHE (più lunghe di ciò che si sente) si misura quanta parte delle
+      parole ASCOLTATE sta nel testo (misurato: 68-78% sul brano giusto, ≤16% su
+      quello sbagliato);
+    - con un AUDIO di riferimento (30 s di anteprima, più corto) si misura quanta
+      parte delle parole del riferimento si sente nel nostro file.
+    Non solleva mai: ogni intoppo diventa un verdetto "non verificabile" col motivo.
+    """
+    def segnala(testo):
+        if status:
+            try:
+                status(testo)
+            except Exception:
+                pass
+
+    def senza_confronto(codice, testo):
+        return {"esito": "non verificabile", "copertura": None, "parole": None,
+                "fonte": None, "motivo": testo, "confronto": False,
+                "messaggio": f"⚪ {testo}", "codice": codice}
+
+    if not HAS_WHISPER:
+        return senza_confronto("whisper", "conferma dal parlato non disponibile "
+                                "(faster-whisper non è installato)")
+    if not percorso or not os.path.exists(percorso):
+        return senza_confronto("file", "conferma dal parlato non possibile: manca il file locale")
+
+    segnala("🗣 Trascrivo il file locale" + (" (a cappella)" if sorgente == "a cappella" else "") + "…")
+    nostro = trascrivi(percorso, sorgente=sorgente)
+    if not nostro:
+        return senza_confronto("trascrizione", "trascrizione del file locale non riuscita")
+    nota_sorgente = f"trascrizione {nostro['fonte']}"
+
+    if tipo == "audio":
+        if not riferimento or not os.path.exists(riferimento):
+            return senza_confronto("riferimento", "nessun audio di riferimento da trascrivere")
+        segnala("🗣 Trascrivo l'audio di riferimento…")
+        altro = trascrivi(riferimento, sorgente=sorgente)
+        if not altro:
+            return senza_confronto("trascrizione", "trascrizione dell'audio di riferimento non riuscita")
+        parole_rif = set(altro["parole"])
+        copertura = copertura_testo(altro["parole"], nostro["parole"])
+        # La guardia guarda il più corto dei due: se il riferimento ha poche parole,
+        # il confronto non è affidabile nemmeno se il nostro file ne ha tante.
+        n_guardia = min(len(parole_rif), len(nostro["parole"]))
+        fonte = f"audio di riferimento ({altro['fonte']}, {len(parole_rif)} parole) · {nota_sorgente}"
+    else:
+        parole_rif = set(parole_contenuto(riferimento or ""))
+        if not parole_rif:
+            return senza_confronto("liriche", "nessun testo di riferimento (liriche non disponibili)")
+        copertura = copertura_testo(nostro["parole"], parole_rif)
+        n_guardia = len(nostro["parole"])
+        fonte = f"liriche ({len(parole_rif)} parole) · {nota_sorgente}"
+
+    conferma, rifiuto = soglie or (TESTI_SOGLIA_CONFERMA, TESTI_SOGLIA_RIFIUTO)
+    esito = esito_testo(copertura, n_guardia, conferma, rifiuto, min_parole)
+    base = {"esito": esito, "copertura": copertura, "parole": n_guardia, "fonte": fonte[:200],
+            "confronto": True, "codice": "ok", "motivo": None}
+    if esito == "confermato":
+        base["messaggio"] = (f"✅ Testo confermato: {copertura}% delle parole è nel testo atteso "
+                             f"({n_guardia} parole riconosciute · {fonte})")
+    elif esito == "non confermato":
+        base["messaggio"] = (f"❌ Testo NON confermato: solo {copertura}% — quello che si sente "
+                             f"non è questo testo ({n_guardia} parole · {fonte})")
+    elif esito == "ambiguo":
+        base["messaggio"] = (f"🟡 Testo ambiguo: {copertura}% ({n_guardia} parole · {fonte}) — "
+                             f"da controllare a orecchio")
+    else:
+        base["messaggio"] = (f"⚪ Trascrizione troppo povera: {n_guardia} parole riconosciute "
+                            f"(servono almeno {min_parole}) — {fonte}")
+    return base
+
+
+def campi_dal_risultato_testo(risultato):
+    """Funzione PURA. Dai campi di `verifica_testo_riferimento` alle colonne del
+    database (`testo_*`)."""
+    return {
+        "testo_esito": risultato["esito"],
+        "testo_voti": risultato["copertura"],
+        "testo_parole": risultato["parole"],
+        "testo_fonte": risultato["fonte"],
+        "testo_motivo": risultato["motivo"],
+        "testo_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 def run_cleanup(tolerance, progress=None):

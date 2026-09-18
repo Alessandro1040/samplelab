@@ -2396,6 +2396,20 @@ function normalizeForSearch(str) {
 // ──────────────────────────────────────────────
 //  MODIFICA 6: ANALYZE (riscritta con Fuzzy Matching e Scraping avanzato)
 // ──────────────────────────────────────────────
+// ─── VERIFICA GUIDATA (nuova schermata, 18/09/2026) ─────────────────────────
+// Il 🔍 sul singolo brano (e la voce «Verifica guidata» del menu) apre la pagina
+// /verifica: si correggono i dati, si scelgono i controlli (audio / voce /
+// a cappella / non su Genius) e le tolleranze, e si guarda il progresso
+// passo-per-passo. «🔍 Analizza tutto» continua a usare `analyzeTrack` in blocco.
+// Un brano non ancora nel database viene prima registrato, come faceva il flusso
+// vecchio (altrimenti la pagina non saprebbe di che canzone parlare).
+function apriVerifica(trackId){
+  const t = (tracks || []).find(x => x.id === trackId);
+  const id = (t && t.dbSongId) || "";
+  if (!id) { analyzeTrack(trackId); return; }
+  window.open('/verifica?song=' + encodeURIComponent(id), '_blank');
+}
+
 async function analyzeTrack(trackId) {
   // ══════════════════════════════════════════════════════════
   // "Analizza" nel player = STESSA IDENTICA operazione del
@@ -2712,7 +2726,7 @@ function renderTracks() {
         <div class="track-year" title="${escHtml(t.release_date||'')}">${formatReleaseDate(t.release_date)}</div>
         <div class="track-dur">${fmtTime(t.dur)}</div>
         <div style="text-align:center;">
-           <button class="analyze-btn ${analyzeClass}" onclick="event.stopPropagation(); analyzeTrack('${t.id}')">${analyzeIcon}</button>
+           <button class="analyze-btn ${analyzeClass}" onclick="event.stopPropagation(); apriVerifica('${t.id}')">${analyzeIcon}</button>
            ${analyzeStatus}
         </div>
         <div class="track-opts-col">
@@ -3145,7 +3159,7 @@ function showTrackCtxMenu(e, trackId) {
   showCtxMenu(e.clientX, e.clientY, [
     {label: "▶ Riproduci", fn: () => { const i = visibleTracks().findIndex(t=>t.id===trackId); if(i>=0) playTrack(i); }},
     {label: "📁 Aggiungi a playlist", fn: () => openAssignPlaylist(trackId)},
-    {label: "🔍 Analizza singolo", fn: () => analyzeTrack(trackId)},
+    {label: "🔎 Verifica guidata", fn: () => apriVerifica(trackId)},
     {label: "✏️ Modifica info avanzata", fn: () => openEditTrackModal(trackId)},
     {label: "🎛 Apri nel sampler", fn: () => openInSampler(trackId)},
     {sep: true},

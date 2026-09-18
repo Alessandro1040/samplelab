@@ -4889,7 +4889,7 @@ function renderDbTable(songs){
       <td>${s.relation_count>0?`<span class="db-rel-badge">🔗 ${s.relation_count}</span>`:`<span style="color:var(--muted);font-size:10px">—</span>`}</td>
       <td>
         <div class="db-cell-stack">
-          <button class="db-verify-btn" onclick="verifySong('${s.id}')">🔎 Verifica</button>
+          <button class="db-verify-btn" onclick="apriVerifica('${s.id}')" title="Apre la schermata di verifica guidata: dati, opzioni (audio / voce / a cappella / non su Genius), tolleranze e progresso passo-per-passo">🔎 Verifica</button>
           ${s.local_file?`<button class="db-verify-btn db-audio-btn" onclick="audioCheckSong('${s.id}')" title="Confronta l'audio del file locale con l'anteprima UFFICIALE su iTunes: dice se la canzone trovata su Genius è davvero questa (5-10 s)">🔊 Audio</button>${chipAudio(s)}`:''}
           ${s.genius_url?`<a href="${esc(s.genius_url)}" target="_blank" style="font-size:9px;color:var(--muted);font-family:'Space Mono',monospace">Genius ↗</a>`:''}
           ${s.tunebat_url?`<a href="${esc(s.tunebat_url)}" target="_blank" style="font-size:9px;color:var(--accent2);font-family:'Space Mono',monospace">Tunebat ↗</a>`:''}
@@ -4945,6 +4945,15 @@ async function updateSongField(id,field,value){
   }
   allDbSongs=allDbSongs.map(s=>s.id===id?{...s,...res}:s);
   pushDbToPlayer();
+}
+
+// ─── VERIFICA GUIDATA (nuova schermata) ─────────────────────────────────────
+// Il pulsante 🔎 Verifica apre la pagina dedicata /verifica: lì si correggono i
+// dati, si scelgono i controlli (audio, voce/Whisper, a cappella) e le tolleranze,
+// e si guarda il progresso passo-per-passo (1/7 …). `verifySong` resta invece la
+// funzione usata da «Verifica tutto», che lavora in blocco senza aprire finestre.
+function apriVerifica(id){
+  window.open('/verifica?song=' + encodeURIComponent(id), '_blank');
 }
 
 async function verifySong(id) {
