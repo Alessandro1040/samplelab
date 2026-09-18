@@ -288,9 +288,13 @@ class TestCablaggioScheda(unittest.TestCase):
         self.assertIn("function heroApriAlbum(", self.src)
         self.assertRegex(self.src, r"slice\(0, HERO_MAX_CHIP\)")
         self.assertIn("altri album", self.src)
-        # ogni chip porta il pallino col colore della cover dell'album
-        self.assertIn('class="hero-chip-dot" style="background:${gradienteDa(a.nome)}"', self.src)
+        # ogni chip porta il pallino dell'album: dal 18/09/2026 è la COPERTINA
+        # dell'album (mini 18×18) e il gradiente resta come secondo strato, così
+        # se il file manca non si vede un buco; senza cover è il pallino 9px.
+        self.assertIn('class="hero-chip-dot${cov ? " con-cover" : ""}"', self.src)
+        self.assertIn("background-image:url('${cov}'),${gradienteDa(a.nome)}", self.src)
         self.assertIn(".hero-chip-dot{width:9px", self.src)
+        self.assertIn(".hero-chip-dot.con-cover{width:18px", self.src)
 
     def test_scheda_album_con_badge_segnaposto(self):
         self.assertIn("⚠ album segnaposto", self.src)

@@ -1433,3 +1433,65 @@ Da tenere presente nelle sessioni di lavoro successive:
   (Nella stessa sessione la Verifica è stata usata anche dal vivo su *My Life*
   di 50 Cent: `covers/song_3f702a0aa998.png`, 327 KB.)
 
+- **COVER NEL PLAYER, NELLE RIGHE E NEGLI ALBUM (18/09/2026).** Richiesta di
+  Alessandro: «nel player però dovrebbe comparire la cover, dovrebbe comparire
+  sempre a fianco alla canzone, dovrebbero comparire le cover degli album anche!».
+  Dopo il riquadro della nowbar, il resto della pagina del player era ancora senza
+  copertine: ogni riga aveva un quadratino 40×40 (`.track-art`) che mostrava
+  **sempre l'icona ♪** (`<img>` non c'era proprio), l'hero dell'album disegnava
+  gradiente + monogramma, le chip degli album un pallino colorato e in `/browse`
+  non c'era nessuna immagine. Ora:
+  - **riga della lista del player**: `artRigaBrano(t, brani)` mette la copertina
+    del brano nel quadratino 40×40 (con `loading="lazy"`: le righe fuori schermo
+    non scaricano niente) e `mostraIconaTrackArt` rimette l'icona ♪ se il file non
+    c'è più;
+  - **album**: `coverDiAlbum(brani, nome)` prende la copertina del primo brano
+    dell'album che ce l'ha (la Verifica la salva per canzone, il disco è lo
+    stesso); l'hero 104×104 la mostra con la classe `con-cover`, che spegne i
+    **solchi del disco** disegnati sopra la cover generata, e se l'immagine non si
+    carica `mostraFallbackHeroArt` torna a gradiente + monogramma; le **chip degli
+    album** nella vista artista diventano una mini-copertina 18×18 (l'immagine è il
+    primo `background-image`, il gradiente resta come secondo strato: se il file
+    manca non si vede un buco);
+  - **pannello «Testo & Info»**: intestazione con copertina 52×52, titolo e
+    artista del brano in riproduzione;
+  - **`/browse`**: copertina 104×104 in testa alla pagina (album o artista) e
+    miniatura 34×34 su **ogni riga**, con `/cover/<file>` come unica fonte.
+  Trovati e corretti, grazie a un **nuovo test di sintassi**, DUE errori che
+  avevano rotto le pagine senza che nessun test se ne accorgesse (i test «di
+  cablaggio» cercavano le stringhe, non l'esecuzione):
+  1. una mia modifica al documento del player aveva **cancellato la riga
+     `function renderNowBar(t) {`**: in `/onyx` lo script non veniva più eseguito
+     (lista dei brani vuota);
+  2. in `browse.html` a `sortVal` **mancavano la chiusura dello `switch` e della
+     funzione** (c'era già dalla versione `9a1a073`, la «versione funzionante»):
+     lo script non compilava e `/browse` era una **pagina vuota** (si salvava solo
+     l'HTTP 200, che è quello che controllavano i test). Ora c'è anche un
+     `default` che copre le tendine Titolo/Artista/Album/Chiave, prima senza ramo.
+  Verifiche del 18/09/2026: **16 test nuovi** (`test_verify_cover.py`: 3 puri in
+  JavaScriptCore — `coverDiAlbum` su 9 casi, `artRigaBrano` e il markup dell'`img`
+  — 4 di cablaggio su onyx e browse, 2 sull'app viva e **`TestSintassiDellePagine`**
+  che compila gli script inline di `onyx_whosampled.html`, `index (2).html`,
+  `browse.html` e `scheda.html` con JavaScriptCore) e **282 test di suite**
+  (erano 272, `OK`; aggiornato anche il test vecchio `test_player_hero.py` che
+  fissava il markup precedente della chip dell'album); in **Chrome vero**
+  (ricetta `make_driver()`),
+  sull'app viva e con la canzone *In My Baggie* (Chris Webby, album *88
+  Milligrams*): riga della lista → `<img src="/cover/song_0770e7f756d0.png">`
+  **1000×1000 naturali dentro 40×40 px**; hero dell'album → stessa immagine in
+  **102×102** con classe `hero-art con-cover`; chip dell'album → `hero-chip-dot
+  con-cover` 18 px con `background-image: url(http://localhost:5070/cover/song_0770e7f756d0.png),
+  linear-gradient(...)`; `/browse?album=88 Milligrams` → copertina in testa
+  104×104 e miniatura di riga 34×34, entrambe `complete: true` e 1000×1000 (è la
+  stessa pagina che, prima della correzione di `sortVal`, restava **vuota**);
+  pagine `/` `/onyx` `/browse` → 200 e **nessun riavvio** (backend non toccato).
+  Mappa del codice (dal file vero): `coverDiAlbum` 2863, `mostraFallbackHeroArt`
+  2877, `mostraIconaTrackArt` 2887, `artRigaBrano` 2895 in `onyx_whosampled.html`
+  (e `coverBrano` 133, `coverAlbumDi` 134 in `browse.html`).
+  Nella stessa sessione è stato anche **chiuso l'audio che andava da solo**: era
+  un Chrome **headless dimenticato dall'automazione** (avviato alle 00:06) con la
+  pagina `/?tab=player` aperta, che con `--autoplay-policy=no-user-gesture-required`
+  riprendeva lo stato salvato e suonava aggiornando `playback_state` ogni 4 s
+  (chiusi anche gli altri 5 browser di automazione rimasti aperti da sessioni
+  precedenti: il Chrome dell'utente non è stato toccato).
+

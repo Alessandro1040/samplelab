@@ -100,6 +100,11 @@ def esegui_js(codice, nome_file="/tmp/test_verify_cover.js"):
     return json.loads(righe[-1])
 
 
+def script_inline(percorso):
+    """Gli script inline di una pagina HTML (quelli senza `src=`)."""
+    return re.findall(r"<script>(.*?)</script>", leggi(percorso), re.S)
+
+
 def app_is_up(url):
     try:
         urllib.request.urlopen(url + "/db/stats", timeout=3)
@@ -451,6 +456,72 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("covers/", leggi(os.path.join(BASE_DIR, ".gitignore")))
 
 
+class TestCablaggioCoverPagina(unittest.TestCase):
+    """Le copertine «sempre accanto alla canzone» e negli album: righe della lista,
+    hero e chip degli album, pannello Testo & Info e pagina `/browse`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.onyx = leggi(ONYX_PATH)
+        cls.browse = leggi(os.path.join(BASE_DIR, "browse.html"))
+
+    def test_riga_della_lista_usa_la_cover(self):
+        self.assertIn('<div class="track-art">${artRigaBrano(t, tracks)}</div>', self.onyx)
+        self.assertIn("function artRigaBrano(t, brani){", self.onyx)
+        self.assertIn("const ICONA_TRACK_ART = ICONA_NOWART;", self.onyx)
+
+    def test_album_hero_e_chip(self):
+        self.assertIn("const coverAlbum = album ? coverDiAlbum(brani, nome) : '';", self.onyx)
+        self.assertIn('class="hero-art con-cover"', self.onyx)
+        self.assertIn("mostraFallbackHeroArt(this)", self.onyx)
+        self.assertIn('class="hero-chip-dot${cov ? " con-cover" : ""}"', self.onyx)
+        self.assertIn(".hero-art.con-cover::before,.hero-art.con-cover::after{display:none;}", self.onyx)
+        self.assertIn(".hero-chip-dot.con-cover{width:18px;height:18px;border-radius:3px;}", self.onyx)
+
+    def test_pannello_testo_e_info(self):
+        self.assertIn('class="lyrics-cover"', self.onyx)
+        self.assertIn("const copertina = coverDaBrano(track, tracks);", self.onyx)
+
+    def test_pagina_browse(self):
+        self.assertIn('class="page-art" id="page-art"', self.browse)
+        self.assertIn('class="row-cover"', self.browse)
+        self.assertIn("function coverBrano(s){", self.browse)
+        self.assertIn("function coverAlbumDi(songs,nomeAlbum){", self.browse)
+        self.assertIn("const arte = isAlbum ? coverAlbumDi(allSongs, nomePagina)", self.browse)
+
+
+@unittest.skipUnless(HA_OSASCRIPT, "JavaScriptCore (osascript) non disponibile")
+class TestSintassiDellePagine(unittest.TestCase):
+    """Gli script inline delle pagine devono COMPILARE.
+
+    Non basta controllare le stringhe: il 18/09/2026 una modifica al documento
+    del player aveva cancellato la riga `function renderNowBar(t) {` e in `/onyx`
+    lo script non veniva più eseguito (lista dei brani vuota), mentre i test «di
+    cablaggio» passavano lo stesso perché cercavano solo il testo della chiamata.
+    Stesso caso in `/browse`: mancavano due graffe in `sortVal` e la pagina era
+    vuota da mesi senza che nessun test se ne accorgesse.
+    """
+
+    PAGINE = ("onyx_whosampled.html", "index (2).html", "browse.html", "scheda.html")
+
+    def test_gli_script_compilano(self):
+        for nome in self.PAGINE:
+            for i, codice in enumerate(script_inline(os.path.join(BASE_DIR, nome))):
+                with self.subTest(pagina=nome, script=i):
+                    percorso = "/tmp/compila_%s_%d.js" % (re.sub(r"\W+", "_", nome), i)
+                    with open(percorso, "w", encoding="utf-8") as fh:
+                        fh.write(codice)
+                    r = subprocess.run(["osascript", "-l", "JavaScript", percorso],
+                                       capture_output=True, text=True)
+                    uscita = ((r.stderr or "") + (r.stdout or "")).strip().splitlines()
+                    prima = uscita[0] if uscita else ""
+                    # Se il parser non si lamenta, l'errore è di ESECUZIONE (nel
+                    # guscio di JavaScriptCore mancano document/window…): è la
+                    # prova che lo script è stato compilato.
+                    self.assertNotIn("SyntaxError", prima,
+                                     "%s script %d non compila: %s" % (nome, i, prima))
+
+
 @unittest.skipUnless(app_is_up(SAMPLELAB_URL), "app non attiva su " + SAMPLELAB_URL)
 class TestEndpointVivo(unittest.TestCase):
     """Sull'app VERA, in sola lettura: la rotta risponde, la tabella ha il campo
@@ -520,6 +591,41 @@ class TestEndpointVivo(unittest.TestCase):
             self.assertTrue(str(r.headers.get("Content-Type", "")).startswith("image/"))
             self.assertGreater(len(r.read()), 1000)
 
+    def test_le_pagine_hanno_le_cover_negli_album_e_nelle_righe(self):
+        attesi = {
+            "/onyx": ("function artRigaBrano(t, brani){", "function coverDiAlbum(brani, nomeAlbum){",
+                      'class="lyrics-cover"', "const ICONA_TRACK_ART = ICONA_NOWART;"),
+            "/browse": ("function coverAlbumDi(songs,nomeAlbum){", 'id="page-art"', 'class="row-cover"'),
+        }
+        for rotta, pezzi in attesi.items():
+            with self.subTest(rotta=rotta):
+                with urllib.request.urlopen(SAMPLELAB_URL + rotta, timeout=30) as r:
+                    pagina = r.read().decode("utf-8", "replace")
+                for pezzo in pezzi:
+                    self.assertIn(pezzo, pagina, "%s: manca %r" % (rotta, pezzo))
+
+    def test_la_cover_dell_album_viene_dal_database(self):
+        """Catena vera: il brano nel database → `coverDiAlbum` (JavaScriptCore) →
+        URL su /cover → immagine servita."""
+        with urllib.request.urlopen(SAMPLELAB_URL + "/db/songs", timeout=60) as r:
+            brani = json.load(r)
+        canzone = next((s for s in brani
+                        if s.get("cover_art_path") and (s.get("album") or "").strip()), None)
+        if not canzone:
+            self.skipTest("nessuna canzone con copertina E album nel database")
+        ridotti = [{"id": s.get("id"), "album": s.get("album"), "local_file": s.get("local_file"),
+                    "cover_art_path": s.get("cover_art_path")} for s in brani]
+        sorgente = leggi(ONYX_PATH)
+        js = (estrai_funzione(sorgente, "coverDaBrano") + "\n"
+              + estrai_funzione(sorgente, "coverDiAlbum"))
+        codice = (js + "\nconst brani = " + json.dumps(ridotti) + ";\n"
+                  + "JSON.stringify([coverDiAlbum(brani, " + json.dumps(canzone["album"]) + ")]);")
+        url = esegui_js(codice, "/tmp/test_cover_album_vivo.js")[0]
+        self.assertEqual(url, "/cover/" + urllib.parse.quote(canzone["cover_art_path"]))
+        with urllib.request.urlopen(SAMPLELAB_URL + url, timeout=20) as r:
+            self.assertEqual(r.status, 200)
+            self.assertTrue(str(r.headers.get("Content-Type", "")).startswith("image/"))
+
 
 # ── casi scritti a mano per la cover della nowbar (brano, lista DB, URL) ─────
 CASI_COVER_NOWBAR = [
@@ -548,6 +654,74 @@ CASI_COVER_NOWBAR = [
     ({"dbSongId": "s2"}, [{"id": "s2", "cover_art_path": ""}, {"id": "s3"}], ""),
 ]
 
+
+# ── casi per la cover dell'album (brani, nome album, URL atteso) ─────────────
+CASI_COVER_ALBUM = [
+    # il primo brano dell'album che ha la copertina la "presta" a tutto il disco
+    ([{"album": "Recovery", "cover": "a.png"}, {"album": "Recovery", "cover": ""}],
+     "Recovery", "/cover/a.png"),
+    ([{"album": "Recovery", "cover": ""}, {"album": "Recovery", "cover_art_path": "b.jpg"}],
+     "Recovery", "/cover/b.jpg"),
+    # album scritto con maiuscole/spazi diversi: è lo stesso disco
+    ([{"album": "  recovery ", "cover": "c.png"}], "Recovery", "/cover/c.png"),
+    # brani di ALTRI album non contano
+    ([{"album": "Relapse", "cover": "x.png"}], "Recovery", ""),
+    ([{"album": "Recovery", "cover": ""}], "Recovery", ""),
+    ([], "Recovery", ""),
+    ([{"album": "Recovery", "cover": "a.png"}], "", ""),
+    ([{"album": "Recovery", "cover": "a.png"}], None, ""),
+    ([None, {"album": "Recovery", "cover": "a.png"}], "Recovery", "/cover/a.png"),
+]
+
+# ── casi per il quadratino 40×40 di una riga (brano, lista, tipo atteso) ─────
+CASI_RIGA_ART = [
+    ({"cover": "a.png"}, [], "img"),
+    ({"dbSongId": "s1"}, [{"id": "s1", "cover_art_path": "b.jpg"}], "img"),
+    ({"title": "senza copertina"}, [], "icona"),
+    (None, [], "icona"),
+]
+
+
+@unittest.skipUnless(HA_OSASCRIPT, "JavaScriptCore (osascript) non disponibile")
+class TestCoverAlbumEPaginaPura(unittest.TestCase):
+    """Le funzioni che mettono le copertine nella pagina del player: `coverDiAlbum`
+    (la copertina dell'album) e `artRigaBrano` (il quadratino di ogni riga),
+    eseguite davvero in JavaScriptCore sul codice del file vero."""
+
+    @classmethod
+    def setUpClass(cls):
+        src = leggi(ONYX_PATH)
+        cls.js = "\n".join([
+            "const ICONA_TRACK_ART = '<icona>';",
+            estrai_funzione(src, "coverDaBrano"),
+            estrai_funzione(src, "coverDiAlbum"),
+            estrai_funzione(src, "artRigaBrano"),
+        ])
+
+    def test_cover_dell_album(self):
+        attesi = [caso[2] for caso in CASI_COVER_ALBUM]
+        codice = (self.js + "\nconst casi = " + json.dumps(CASI_COVER_ALBUM) + ";\n"
+                  + "JSON.stringify(casi.map(function(c){ return coverDiAlbum(c[0], c[1]); }));")
+        self.assertEqual(esegui_js(codice, "/tmp/test_cover_album.js"), attesi)
+
+    def test_quadratino_della_riga(self):
+        casi = [[c[0], c[1]] for c in CASI_RIGA_ART]
+        codice = (self.js + "\nconst casi = " + json.dumps(casi) + ";\n"
+                  + "JSON.stringify(casi.map(function(c){ var h = artRigaBrano(c[0], c[1]);"
+                  + " return h === '<icona>' ? 'icona' : (h.indexOf('<img') === 0 ? 'img' : 'altro'); }));")
+        attesi = [c[2] for c in CASI_RIGA_ART]
+        self.assertEqual(esegui_js(codice, "/tmp/test_cover_riga.js"), attesi)
+
+    def test_la_riga_usa_limmagine_lazy_con_fallback(self):
+        # l'immagine si scarica solo quando la riga entra in vista e, se non c'è
+        # più, torna l'icona (niente quadratino rotto)
+        casi = [[{"cover": "a.png"}, []]]
+        codice = (self.js + "\nconst casi = " + json.dumps(casi) + ";\n"
+                  + "JSON.stringify(casi.map(function(c){ return artRigaBrano(c[0], c[1]); }));")
+        html = esegui_js(codice, "/tmp/test_cover_riga2.js")[0]
+        self.assertIn('<img src="/cover/a.png"', html)
+        self.assertIn('loading="lazy"', html)
+        self.assertIn('onerror="mostraIconaTrackArt(this)"', html)
 
 @unittest.skipUnless(HA_OSASCRIPT, "JavaScriptCore (osascript) non disponibile")
 class TestCoverNowbarPura(unittest.TestCase):

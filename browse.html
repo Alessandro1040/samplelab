@@ -21,6 +21,11 @@ header{display:flex;align-items:center;gap:16px;padding:20px 32px;border-bottom:
 .page-type{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
 .page-sub{font-size:26px;font-weight:700;margin-bottom:6px;word-break:break-word}
 .count-badge{display:inline-block;background:var(--surface);border:1px solid var(--border2);border-radius:20px;padding:4px 12px;font-family:'Space Mono',monospace;font-size:11px;color:var(--accent);margin-bottom:18px}
+/* Copertina in testa alla pagina (album/artista) e miniatura su ogni riga:
+   il database tiene il NOME del file, la pagina chiede /cover/<file>. */
+.page-head{display:flex;gap:18px;align-items:center;margin-bottom:14px}
+.page-art{width:104px;height:104px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border2);box-shadow:0 10px 26px rgba(0,0,0,.5);display:none}
+.row-cover{width:34px;height:34px;border-radius:5px;object-fit:cover;vertical-align:middle;margin-right:9px;border:1px solid var(--border)}
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
 .toolbar label{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
 select,input[type=text]{background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:13px;border-radius:8px;padding:8px 12px;outline:none}
@@ -60,8 +65,13 @@ a.song-title:hover{color:var(--accent)}
   <a class="back-btn" href="/">← Torna alla app</a>
 </header>
 <div class="wrap">
-  <div class="page-type" id="page-type"></div>
-  <div class="page-sub" id="page-sub"></div>
+  <div class="page-head">
+    <img class="page-art" id="page-art" alt="">
+    <div>
+      <div class="page-type" id="page-type"></div>
+      <div class="page-sub" id="page-sub"></div>
+    </div>
+  </div>
   <div class="count-badge" id="count-badge"></div>
 
   <div class="toolbar" id="toolbar">
@@ -116,6 +126,22 @@ function escA(s){return String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
 function fmtTime(sec){if(sec==null||isNaN(sec))return'—';const m=Math.floor(sec/60);return m+':'+String(Math.floor(sec%60)).padStart(2,'0')}
 function artistHref(a){return a?'/browse?artist='+encodeURIComponent(a):''}
 function albumHref(a){return a?'/browse?album='+encodeURIComponent(a):''}
+// ── COPERTINE ────────────────────────────────────────────────────────────────
+// Il database tiene il NOME del file della copertina (`cover_art_path`, quello
+// che salva la Verifica): qui diventa l'URL servito da /cover/<file>. L'album non
+// ha una copertina propria, quindi si usa quella del primo suo brano che ce l'ha.
+function coverBrano(s){ return (s && s.cover_art_path) ? '/cover/'+encodeURIComponent(s.cover_art_path) : ''; }
+function coverAlbumDi(songs,nomeAlbum){
+  const al=String(nomeAlbum||'').trim().toLowerCase();
+  if(!al) return '';
+  for(const s of (songs||[])){
+    if(!s) continue;
+    if(String(s.album||'').trim().toLowerCase()!==al) continue;
+    const u=coverBrano(s);
+    if(u) return u;
+  }
+  return '';
+}
 // Multi-artista: ogni artista diventa un link cliccabile separato.
 // Separatori: / , ; | + & feat. ft. with. Lo slash "/" vale solo con spazi
 // attorno (es. "Eminem / D12"), così "AC/DC" non viene spezzato.
@@ -138,6 +164,15 @@ function sortVal(s){
     case 'bpm':         return (s.bpm==null||s.bpm==='')?Infinity:Number(s.bpm);
     case 'duration':    return (s.duration==null||s.duration==='')?Infinity:Number(s.duration);
     case 'track_number':{const t=String(s.track_number??'').match(/\d+/);return t?parseInt(t[0],10):Infinity;}
+    // ⚠️ Qui MANCAVANO la chiusura dello `switch` e quella della funzione: lo
+    // script di /browse non compilava affatto e la pagina restava vuota (bug
+    // trovato il 18/09/2026 dal nuovo test di sintassi, che esegue davvero gli
+    // script delle pagine con JavaScriptCore). Il caso di ripiego copre le
+    // tendine «Titolo/Artista/Album/Chiave», che non avevano nessun ramo.
+    default:            return String(s[sortBy] ?? '').toLowerCase();
+  }
+}
+
 function applyRender(){
   const q=(document.getElementById('quick-filter').value||'').toLowerCase();
   const list=allSongs.filter(s=>!q||(s.title||'').toLowerCase().includes(q)||(s.artist||'').toLowerCase().includes(q)||(s.album||'').toLowerCase().includes(q));
@@ -159,7 +194,7 @@ function applyRender(){
     const isPlay=playingId===s.id;
     return `<tr data-id="${esc(s.id)}">
       <td>${s.local_file?`<button class="play-btn ${isPlay?'playing':''}" onclick="togglePlay('${esc(s.id)}','${escA(s.local_file)}')" title="Play / Pausa">${isPlay?'❚❚':'▶'}</button>`:'<span class="mono">—</span>'}</td>
-      <td>${s.album?`<a class="song-title" href="${albumHref(s.album)}" title="Vai all'album di questa canzone">${esc(s.title||s.local_file||'—')}</a>`:`<span class="song-title">${esc(s.title||s.local_file||'—')}</span>`}</td>
+      <td>${coverBrano(s)?`<img class="row-cover" src="${coverBrano(s)}" alt="" loading="lazy" onerror="this.remove()">`:''}${s.album?`<a class="song-title" href="${albumHref(s.album)}" title="Vai all'album di questa canzone">${esc(s.title||s.local_file||'—')}</a>`:`<span class="song-title">${esc(s.title||s.local_file||'—')}</span>`}</td>
       <td>${artistChipsHtml(s.artist)}</td>
       <td>${s.album?`<a class="album-link" href="${albumHref(s.album)}" title="Vai all'album">${esc(s.album)}</a>`:'<span class="mono">—</span>'}</td>
       <td class="mono">${s.year||'—'}</td>
@@ -230,6 +265,15 @@ function closeDock(){
   }catch(e){ allSongs=[]; }
   document.title='SampleLab (2) — '+pageSub.textContent;
   document.getElementById('count-badge').textContent=allSongs.length+' brani nel database';
+  // Copertina in testa: l'album usa la copertina di un suo brano, l'artista la
+  // prima copertina disponibile fra i suoi (la Verifica ne salva una per canzone).
+  const nomePagina = isAlbum ? albumParam : artistParam;
+  const arte = isAlbum ? coverAlbumDi(allSongs, nomePagina)
+                       : coverBrano(allSongs.find(s=>coverBrano(s)));
+  if(arte){
+    const img=document.getElementById('page-art');
+    img.src=arte; img.alt='Copertina di '+nomePagina; img.style.display='block';
+  }
   applyRender();
 })();
 })();
