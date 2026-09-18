@@ -1737,6 +1737,34 @@ Da tenere presente nelle sessioni di lavoro successive:
   resto del database (prima erano ora locale e i due timestamp sembravano in
   disordine).
 
+- **TRASCRIZIONE (Whisper) PER CONFRONTARE IL PARLATO CON I TESTI — VALUTATA, NON
+  IMPLEMENTATA (18/09/2026).** Idea di Alessandro per il caso in cui non esiste
+  un'anteprima ufficiale: «implementare qualcosa che va a sentire la canzone e sentire
+  effettivamente il testo che viene detto a parole, e confrontarlo con quelli presunti
+  di genius». **Fattibilità misurata su questo Mac**: `torch 2.13.0` è già installato e
+  `faster-whisper` si installa senza problemi con Python 3.14 (`ctranslate2 4.8.2`,
+  `onnxruntime 1.30.0`, `tokenizers`, `huggingface_hub` — tutto in un venv usa-e-getta
+  in `/tmp/asr`, niente toccato nel Python di sistema). **Qualità**: la trascrizione del
+  file di *End of the World* è inglese rap leggibile («Take flight… I'm not a rapper,
+  I'm a demon of big things») — quindi il segnale esiste — pur con errori di parole
+  singole. **Misure** (Whisper `base`, CPU int8): 258,6 s di audio in **17,4 s** e
+  127,5 s in **5,2 s** (≈5-25× realtime); confronto fra parole ascoltate (senza
+  stopword) e liriche già presenti nel database — controllo **positivo** (*21 Questions*
+  trascritta vs le sue liriche) **78,4%** (109/139 parole), controllo **negativo**
+  (trascrizione di *End of the World* vs le liriche di *21 Questions*) **12,4%** (18
+  parole generiche: *back, get, know, love, still, take…*): **le due popolazioni si
+  separano**, con una soglia dell'ordine del 30-40%. Perché non è (ancora) nel codice:
+  serve una dipendenza pesante (≈1,5 GB di wheel + modello 145-480 MB), va usata SOLO
+  dove il confronto audio ufficiale non è possibile (brano del candidato senza anteprima
+  iTunes) e solo se il candidato ha liriche su Genius, richiede tolleranza (le
+  trascrizioni sbagliano parole singole e le liriche di Genius contengono ad-lib che
+  nessuno canta) e non deve mai battere l'impronta audio, che dove c'è è ~1000 volte più
+  selettiva (2.525 hash contro 9 nel caso *End of the World*). Resta anche il limite
+  oggettivo: su un brano strumentale non c'è niente da trascrivere → verdetto
+  "non verificabile". Va quindi progettata come **secondo parere** con campo suo
+  (es. `testo_esito`), soglia conservativa e degradazione pulita se il modello non c'è.
+
+
 
 
 
