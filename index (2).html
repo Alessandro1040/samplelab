@@ -2243,15 +2243,19 @@ async function trovaBattuta(key) {
   const bottone = document.getElementById(`bar-btn-${key}`);
   if (info) info.textContent = '⏳ cerco dove comincia la battuta…';
   if (bottone) bottone.disabled = true;
+  const url = urlBackend('/beat/bar');
   let esito = null;
   try {
-    esito = await fetch('/beat/bar', {
+    esito = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: p.filename, quarters: quartiBattuta(key) })
     }).then(r => r.json());
   } catch (e) {
-    if (info) info.textContent = '❌ ' + e.message;
+    // Senza URL assoluta Chrome si ferma prima di partire e il TypeError nudo
+    // («Failed to parse URL from /beat/bar») non dice cosa fare: lo spieghiamo.
+    if (info) info.textContent = '❌ non riesco a chiedere la battuta: ' + ((e && e.message) || e)
+      + (url.charAt(0) === '/' ? ' (il sampler è aperto fuori dalla pagina di SampleLab: riaprilo dal database)' : '');
     return;
   } finally {
     if (bottone) bottone.disabled = false;
@@ -3183,6 +3187,36 @@ function downloadFull(key) {
 console.log('SampleLab (2) Player — Undo/Redo Globale (Snapshot) & Metronomo Sempre Attivo inseriti.');
 </script>
 <script>
+// ── URL ASSOLUTA DEL BACKEND (questo documento è un iframe "blob:") ──────────
+// La pagina ci monta dentro un iframe con src = blob:… (il documento lo prende da
+// una <textarea>): in un documento blob: la base NON è http, quindi una fetch con
+// URL RELATIVA non parte nemmeno — Chrome dice «Failed to parse URL from
+// /beat/bar» — anche col backend attivo e rispondente. Qui il percorso diventa
+// assoluto con l'origine che la pagina ci manda nel messaggio 'load'
+// (window.location.origin); se quel campo manca si prova l'origine del mittente,
+// il referrer e infine la nostra posizione. La usa 🎯 Trova la battuta
+// (trovaBattuta, più sopra).
+// Sta in fondo al documento e non accanto a trovaBattuta di proposito: i numeri
+// di riga interni citati in README_sampler.md (§12) si contano da qui e così
+// restano validi.
+let baseBackend = '';
+
+function origineHttp(valore) {
+  const m = /^(https?:\/\/[^\/?#\s]+)/i.exec(String(valore || ''));
+  return m ? m[1] : '';
+}
+
+function urlBackend(percorso) {
+  const p = String(percorso || '');
+  if (/^https?:\/\//i.test(p)) return p;      // già assoluto: non si tocca
+  const candidati = [baseBackend, document.referrer, window.location.href];
+  for (let i = 0; i < candidati.length; i++) {
+    const base = origineHttp(candidati[i]);
+    if (base) return base + (p.charAt(0) === '/' ? p : '/' + p);
+  }
+  return p;   // aperto da http (non dal blob): la relativa va bene così
+}
+
 window.addEventListener('message', function(e) {
   if (!e.data) return;
   if (e.data.action === 'pauseall') {
@@ -3198,12 +3232,17 @@ window.addEventListener('message', function(e) {
     return;
   }
   if (e.data.action === 'load') {
+    // L'origine della pagina che ci ha aperti: da qui in poi i percorsi dell'app
+    // (es. /beat/bar) si rendono assoluti con urlBackend().
+    const originePagina = origineHttp(e.data.origin);
+    if (originePagina) baseBackend = originePagina;
+    else if (origineHttp(e.origin)) baseBackend = origineHttp(e.origin);
     document.getElementById('upload-area').style.display = 'none';
     document.getElementById('file-info').style.display = 'flex';
-    document.getElementById('file-name').textContent = e.data.filename || 'audio';
+    document.getElementById('file-name').textContent = e.data.etichetta || e.data.filename || 'audio';
     document.getElementById('file-size').textContent = 'Stream';
     document.getElementById('player-container').style.display = 'block';
-    document.getElementById('player-title').textContent = e.data.filename || 'audio';
+    document.getElementById('player-title').textContent = e.data.etichetta || e.data.filename || 'audio';
     if (currentAudioUrl && currentAudioUrl.startsWith('blob:')) URL.revokeObjectURL(currentAudioUrl);
     // Risolve l'URL relativo (es. /stream/...) contro l'origine del parent:
     // dentro un iframe blob: un URL relativo verrebbe risolto come blob:.../stream/...
@@ -3884,14 +3923,16 @@ function setContainerError(id,msg){
 }
 
 // ── EMBED AUDIO EDITOR X (schermata di editing avanzato) per i sample ──
-function embedAudioEditorX(containerId, url, filename, startSec){
+function embedAudioEditorX(containerId, url, filename, startSec, etichetta){
   const cont=document.getElementById(containerId); if(!cont) return;
   const html=document.getElementById('audio-editor-src').value;
   const blob=new Blob([html],{type:'text/html'});
   const blobUrl=URL.createObjectURL(blob);
   const fr=document.createElement('iframe');
   fr.style.cssText='width:100%;height:540px;border:1px solid var(--border);border-radius:10px;background:#0a0a0a;display:block';
-  fr.onload=function(){ try{ fr.contentWindow.postMessage({action:'load',url:url,filename:filename||'audio',startSec:startSec||0},'*'); }catch(_){} };
+  // `filename` è il nome del FILE in downloads/ (lo usano 🎯 Trova la battuta e
+  // «Scarica selezione»), `etichetta` è solo il nome da mostrare nel sampler.
+  fr.onload=function(){ try{ fr.contentWindow.postMessage({action:'load',origin:window.location.origin,url:url,filename:filename||'audio',etichetta:etichetta||filename||'audio',startSec:startSec||0},'*'); }catch(_){} };
   fr.src=blobUrl;
   cont.innerHTML='';
   cont.appendChild(fr);
@@ -3899,7 +3940,7 @@ function embedAudioEditorX(containerId, url, filename, startSec){
 function loadSampleXEditor(containerId, query, startSec, label, expectArtist){
   const cacheKey=query.trim();
   const doBuild=function(filename){
-    embedAudioEditorX(containerId,'/stream/'+encodeURIComponent(filename), label||filename, startSec||0);
+    embedAudioEditorX(containerId,'/stream/'+encodeURIComponent(filename), filename, startSec||0, label||filename);
   };
   if(downloadCache[cacheKey]?.status==="done"){ doBuild(downloadCache[cacheKey].filename); return; }
   if(downloadCache[cacheKey]?.status==="pending"){ downloadCache[cacheKey].callbacks.push({fn:doBuild}); return; }
@@ -5701,17 +5742,23 @@ async function saveDbEditor(){
 // ─── AUDIO EDITOR INTEGRATION ─────────────────────────────────
 // `startSec` = secondo da cui partire, `bpm` = BPM da mettere nella casella
 // (arrivano dal database quando il sampler viene aperto da una canzone).
-function openAudioEditor(url, filename, startSec, bpm, songId) {
+function openAudioEditor(url, filename, startSec, bpm, songId, etichetta) {
   const modal = document.getElementById('audio-editor-modal');
   const iframe = document.getElementById('audio-editor-iframe');
   const title = document.getElementById('audio-editor-title');
-  if (title) title.textContent = filename ? ('🎛️ ' + filename) : '🎛️ Audio Editor';
+  const nome = etichetta || filename;      // nel titolo: la canzone, non il file
+  if (title) title.textContent = nome ? ('🎛️ ' + nome) : '🎛️ Audio Editor';
   modal.classList.add('visible');
   const html = document.getElementById('audio-editor-src').value;
   const blob = new Blob([html], {type: 'text/html'});
   const blobUrl = URL.createObjectURL(blob);
   iframe.onload = function() {
-    iframe.contentWindow.postMessage({action: 'load', url: url, filename: filename,
+    // `filename` è il nome del FILE in downloads/ — 🎯 Trova la battuta e
+    // «Scarica selezione» lavorano lì: col titolo della canzone il backend
+    // rispondeva «File non trovato». `etichetta` è solo il nome da mostrare.
+    iframe.contentWindow.postMessage({action: 'load', origin: window.location.origin,
+                                      url: url, filename: filename,
+                                      etichetta: nome || 'audio',
                                       startSec: startSec || 0, bpm: bpm || 0,
                                       songId: songId || ''}, '*');
   };
@@ -5751,8 +5798,8 @@ async function openInSampler(songIdOrFile, opts){
   }
   const label = (song && (song.title || song.local_file)) || localFile;
   const bpm = (song && song.bpm) || opts.bpm || 0;
-  openAudioEditor('/stream/'+encodeURIComponent(localFile), label, opts.startSec||0, bpm,
-                  (song && song.id) || '');
+  openAudioEditor('/stream/'+encodeURIComponent(localFile), localFile, opts.startSec||0, bpm,
+                  (song && song.id) || '', label);
   toast('🎛️ "'+label+'" aperto nel sampler' +
         (bpm ? (' — BPM nel database: '+bpm+' (controlla con griglia/TAP)')
              : ' — nessun BPM nel database: misuralo con TAP'), 'ok');

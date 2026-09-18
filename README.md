@@ -1003,3 +1003,54 @@ Da tenere presente nelle sessioni di lavoro successive:
   c'era prima: nel sampler aperto da una canzone `p.filename` restava `'audio'`, e
   «Scarica selezione» non sapeva quale file tagliare.
 
+- **«🎯 TROVA LA BATTUTA» NON PARTIVA — CORRETTI DUE DIFETTI (18/09/2026).**
+  Segnalazione di Alessandro: «non funziona *trova la battuta*, compare questo:
+  `Failed to execute 'fetch' on 'Window': Failed to parse URL from /beat/bar`».
+  Il backend era sano (`POST /beat/bar` rispondeva 200/404/400 come previsto): i
+  difetti erano due, entrambi **davanti**, e il secondo si è visto solo dopo aver
+  corretto il primo.
+  1. **L'URL era relativa e il sampler vive in un iframe `blob:`.** Il documento
+     del sampler è un `<textarea>` (`index (2).html` righe 830–3273) che la pagina
+     monta con `src = blob:…` (`openAudioEditor`, `embedAudioEditorX`). In un
+     documento `blob:` la base **non è http**: `fetch('/beat/bar')` non parte
+     nemmeno — Chrome si ferma al parse dell'URL. L'audio invece caricava già,
+     perché il suo URL arrivava risolto dal parent (`new URL(e.data.url,
+     e.origin)`). Ora in coda al documento del sampler ci sono due funzioni pure,
+     `origineHttp()` e `urlBackend()`, e `trovaBattuta` fa
+     `fetch(urlBackend('/beat/bar'))`: la pagina dichiara la **sua** origine
+     (`window.location.origin`) nel messaggio `'load'`, con ripiego su `e.origin`,
+     `document.referrer` e sulla posizione del documento. Se non c'è nessuna base
+     http l'interfaccia lo dice («il sampler è aperto fuori dalla pagina di
+     SampleLab: riaprilo dal database») invece di mostrare il `TypeError` nudo.
+  2. **Al sampler arrivava il TITOLO della canzone al posto del nome del FILE.**
+     Trovato provando il pulsante **dal vivo**: dopo il fix dell'URL la risposta
+     era «File non trovato». `openInSampler` passava `label` dove ci vuole
+     `local_file`, e `loadSampleXEditor` faceva lo stesso con
+     `embedAudioEditorX`; il backend cerca in `downloads/`, quindi col titolo non
+     trovava niente (e nemmeno «Scarica selezione» sapeva quale file tagliare).
+     Ora il messaggio `'load'` porta `filename` (il file vero) **e** `etichetta`
+     (il nome mostrato in testa al sampler, che resta il titolo della canzone).
+  Perché i test non li avevano visti: la `load` la mandavano i test stessi (col
+  nome giusto) e l'endpoint veniva chiamato con un `local_file` preso dal
+  database — il guasto stava **nel cablaggio fra pagina e sampler**, che solo un
+  clic vero esercita.
+  Verifiche del 18/09/2026: **4 test nuovi** in `test_sampler_battuta.py` (25 in
+  tutto: `origineHttp`, i 9 casi di `urlBackend`, il nome file contro etichetta) e
+  **208 test di suite** (erano 204); **Chrome vero** (Selenium) su
+  `http://localhost:5070/?sampler=song_799822c51db6` → l'iframe è `blob:…`,
+  `baseBackend` = `http://localhost:5070`, `urlBackend('/beat/bar')` =
+  `http://localhost:5070/beat/bar`, la vecchia `fetch` relativa dà **ancora**
+  l'errore segnalato (prova che la diagnosi è giusta) e 🎯 **Trova la battuta**
+  risponde «battuta a 0:00,9 → 0:03,0 · 116,4 BPM · 3/4 quarti a fuoco · batteria
+  da 0:00,0» col trim celeste nel player (0,902–2,965 s, BPM 116,3);
+  `/` servita con il fix (200, 320.564 byte) e nessun clic su 💾 Salva BPM
+  (il database non è stato toccato dalla verifica). Verificato anche l'**altro
+  punto che monta il sampler** (`embedAudioEditorX`, l'editor embedded dello
+  scraper) intercettando il messaggio `'load'`: `origin` =
+  `http://localhost:5070`, `filename` = `onyx_t_…Cha-Ching` (il file vero),
+  `etichetta` = 'Etichetta di prova'. Il backend **non** è stato
+  modificato, quindi l'app non è stata riavviata: la pagina la legge dal disco a
+  ogni richiesta (`send_file`). Mappa del codice in `README_sampler.md` §12
+  aggiornata: il documento finisce a riga **3273** e i **34 numeri interni** dopo
+  `trovaBattuta` sono stati ricalcolati dal file vero (non a mano).
+

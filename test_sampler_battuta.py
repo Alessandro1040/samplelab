@@ -24,9 +24,32 @@ Questo file prova:
 2. `TestFunzioniPagina` — `bpmDaBattuta`, `barTrimClamp`, `etichettaBattuta`
    estratte dal documento del sampler ed eseguite in JavaScriptCore.
 3. `TestCablaggio` — markup, stili e handler: trim celeste, tre pulsanti, loop a
-   tre modalità, messaggio `saveBpm` verso la pagina, sparizione della stima.
+   tre modalità, messaggio `saveBpm` verso la pagina, sparizione della stima,
+   URL ASSOLUTA del backend (vedi la nota qui sotto).
 4. `TestEndpointVivo` — `POST /beat/bar` sull'app attiva con un file vero della
    libreria (se c'è): 200 con battuta sensata, 404 per un file inesistente.
+
+Nota del 18/09/2026 — «non funziona *Trova la battuta*, compare `Failed to
+execute 'fetch' on 'Window': Failed to parse URL from /beat/bar`»: il documento
+del sampler viene montato in un iframe con `src` = **blob:** (la pagina lo prende
+da una `<textarea>`), e in un documento `blob:` la base NON è http: una `fetch`
+con URL **relativa** non parte nemmeno, anche col backend attivo. Il backend era
+sano (`POST /beat/bar` rispondeva 400/404 correttamente) e l'audio già caricava
+perché l'URL arrivava risolto dal parent (`new URL(e.data.url, e.origin)`).
+Ora `trovaBattuta` usa `urlBackend('/beat/bar')` — assoluto, costruito con
+l'origine che la pagina manda nel messaggio `'load'` (`window.location.origin`,
+dai due punti che montano il sampler: `openAudioEditor` e `embedAudioEditorX`) —
+e in coda al documento del sampler ci sono le due funzioni pure `origineHttp` e
+`urlBackend`.
+
+Secondo difetto, scoperto provando il pulsante DAL VIVO dopo il primo fix (i test
+non lo vedevano perché la `load` la mandavano loro e l'endpoint lo chiamavano con
+un nome file preso dal database): al sampler arrivava il **titolo** della canzone
+al posto del **nome del file** (`openInSampler` passava `label` dove ci vuole
+`local_file`, e `loadSampleXEditor` faceva lo stesso con `embedAudioEditorX`), così
+la risposta era «File non trovato». Ora il messaggio `'load'` porta `filename`
+(il file in `downloads/`, per 🎯 e per «Scarica selezione») **e** `etichetta` (il
+nome da mostrare in testa al sampler, che resta il titolo della canzone).
 
 Esecuzione (dalla cartella di SampleLab):
     python3 -m unittest -v test_sampler_battuta
@@ -210,16 +233,45 @@ class TestFunzioniPagina(unittest.TestCase):
             estrai_funzione(src, "bpmDaBattuta"),
             estrai_funzione(src, "barTrimClamp"),
             estrai_funzione(src, "etichettaBattuta"),
+            estrai_funzione(src, "origineHttp"),
+            estrai_funzione(src, "urlBackend"),
         ])
         js += """
+// Il documento del sampler vive in un iframe blob:: qui `document` e `window` non
+// esistono (JavaScriptCore non ha le API del browser), quindi si mettono due
+// oggetti finti con quello che urlBackend() legge davvero — i testi.
+var document = {referrer: ''};
+var window = {location: {href: ''}};
+var baseBackend = '';
+function urlDa(base, referrer, href, percorso) {
+  baseBackend = base; document.referrer = referrer; window.location.href = href;
+  return urlBackend(percorso);
+}
 const clamp = [[-5, 300, 200, 0.05], [10, 10, 200, 0.05], [30, 20, 200, 0.05],
                [10, 11.5, 200, 0.05], [1, 2, 0, 0.05]];
+// (nome, base del messaggio, referrer, nostra posizione, percorso)
+const urlCasi = [
+  ['origine',          'http://localhost:5070',      '',                        'blob:http://localhost:5070/x', '/beat/bar'],
+  ['origine_con_path', 'http://localhost:5070/onyx', '',                        'blob:http://localhost:5070/x', '/beat/bar'],
+  ['referrer',         '',                           'http://localhost:5070/',  'blob:http://localhost:5070/x', '/beat/bar'],
+  ['nessuna_base',     '',                           '',                        'blob:http://localhost:5070/x', '/beat/bar'],
+  ['assoluto',         '',                           '',                        '',                             'http://127.0.0.1:5075/beat/bar'],
+  ['senza_slash',      'http://localhost:5070',      '',                        '',                             'beat/bar'],
+  ['porta',            'http://127.0.0.1:5070',      '',                        '',                             '/beat/bar'],
+  ['mittente_nullo',   'null',                       '',                        'blob:http://localhost:5070/x', '/beat/bar'],
+  ['nostra_posizione', '',                           '',                        'http://localhost:5075/',       '/beat/bar']
+];
 console.log(JSON.stringify({
   bpm: [bpmDaBattuta(4, 2), bpmDaBattuta(4, 1.5), bpmDaBattuta(8, 4), bpmDaBattuta(4, 0),
         bpmDaBattuta(4, 0.1), bpmDaBattuta(0, 2), bpmDaBattuta('4', '2'), bpmDaBattuta(4, null)],
   clamp: clamp.map(c => barTrimClamp(c[0], c[1], c[2], c[3])),
   etichette: [etichettaBattuta(160, 4, 1.5), etichettaBattuta(null, 4, 2),
-              etichettaBattuta(null, 4, 0), etichettaBattuta(120, 8, 4)]
+              etichettaBattuta(null, 4, 0), etichettaBattuta(120, 8, 4)],
+  url: urlCasi.map(c => urlDa(c[1], c[2], c[3], c[4])),
+  url_nomi: urlCasi.map(c => c[0]),
+  origini: ['http://localhost:5070', 'http://localhost:5070/onyx?x=1',
+            'blob:http://localhost:5070/abc', 'null', '',
+            'https://esempio.test:8443/x', undefined].map(origineHttp)
 }));
 """
         cls.risultati = esegui_js(js)
@@ -249,6 +301,42 @@ console.log(JSON.stringify({
         self.assertEqual(et[1], "battuta di 2.00 s · 4 quarti · 120 BPM")
         self.assertIn("nessuna battuta", et[2])
         self.assertEqual(et[3], "battuta di 4.00 s · 8 quarti · 120 BPM")
+
+    def test_percorso_del_backend_diventa_assoluto(self):
+        # Dentro l'iframe blob: del sampler una fetch con '/beat/bar' non parte
+        # nemmeno: il percorso va reso assoluto con l'origine della pagina.
+        nomi, url = self.risultati["url_nomi"], self.risultati["url"]
+        self.assertEqual(nomi, ['origine', 'origine_con_path', 'referrer', 'nessuna_base',
+                                'assoluto', 'senza_slash', 'porta', 'mittente_nullo',
+                                'nostra_posizione'])
+        self.assertEqual(url[0], "http://localhost:5070/beat/bar",
+                         "l'origine che la pagina manda nel messaggio 'load'")
+        self.assertEqual(url[1], "http://localhost:5070/beat/bar",
+                         "l'origine può avere un percorso dietro: non conta")
+        self.assertEqual(url[2], "http://localhost:5070/beat/bar",
+                         "senza origine nel messaggio si ripiega sul referrer")
+        self.assertEqual(url[3], "/beat/bar",
+                         "base blob: e niente referrer: resta relativa (non c'è di meglio)")
+        self.assertEqual(url[4], "http://127.0.0.1:5075/beat/bar",
+                         "un percorso già assoluto non si tocca")
+        self.assertEqual(url[5], "http://localhost:5070/beat/bar",
+                         "percorso senza slash iniziale")
+        self.assertEqual(url[6], "http://127.0.0.1:5070/beat/bar",
+                         "la porta fa parte dell'origine")
+        self.assertEqual(url[7], "/beat/bar", "origine 'null': non è una base http")
+        self.assertEqual(url[8], "http://localhost:5075/beat/bar",
+                         "sampler servito da http (non da blob): vale la sua posizione")
+
+    def test_origine_http(self):
+        o = self.risultati["origini"]
+        self.assertEqual(o[0], "http://localhost:5070")
+        self.assertEqual(o[1], "http://localhost:5070",
+                         "percorso e query restano fuori dall'origine")
+        self.assertEqual(o[2], "", "blob: non è un'origine http")
+        self.assertEqual(o[3], "", "'null' non è un'origine http")
+        self.assertEqual(o[4], "", "stringa vuota: nessuna origine")
+        self.assertEqual(o[5], "https://esempio.test:8443", "https e porta valgono")
+        self.assertEqual(o[6], "", "undefined: nessuna origine")
 
 
 class TestCablaggio(unittest.TestCase):
@@ -299,6 +387,44 @@ class TestCablaggio(unittest.TestCase):
         self.assertNotIn("BPM &amp; Key", self.pagina)
         self.assertNotIn("/metadata/estimate", self.pagina)
         self.assertIn("misuralo nel sampler", self.pagina)
+
+    def test_la_battuta_si_chiede_con_url_assoluta(self):
+        # Difetto del 18/09/2026: il sampler gira in un iframe blob: e la fetch
+        # con '/beat/bar' falliva con «Failed to parse URL from /beat/bar».
+        self.assertIn("const url = urlBackend('/beat/bar');", self.pagina)
+        self.assertIn("esito = await fetch(url, {", self.pagina)
+        self.assertNotIn("fetch('/beat/bar'", self.pagina,
+                         "niente più URL relativa: dal documento blob: non partirebbe")
+        self.assertRegex(self.pagina, r"function\s+origineHttp\s*\(")
+        self.assertRegex(self.pagina, r"function\s+urlBackend\s*\(")
+        self.assertIn("let baseBackend = '';", self.pagina)
+        self.assertIn("const originePagina = origineHttp(e.data.origin);", self.pagina)
+        self.assertIn("if (originePagina) baseBackend = originePagina;", self.pagina)
+        # la pagina dichiara la SUA origine in tutti e due i punti che montano il
+        # sampler: il modale e l'editor embedded dello scraper
+        self.assertIn("origin: window.location.origin,", self.pagina)
+        self.assertIn("action:'load',origin:window.location.origin,", self.pagina)
+        # l'errore in interfaccia non è più il TypeError nudo di Chrome
+        self.assertIn("non riesco a chiedere la battuta: ", self.pagina)
+        self.assertIn("riaprilo dal database", self.pagina)
+
+    def test_al_sampler_arriva_il_nome_del_file_e_non_il_titolo(self):
+        # Secondo difetto trovato il 18/09/2026 provando il pulsante dal vivo (dopo
+        # il fix dell'URL): al sampler arrivava il TITOLO della canzone come
+        # `filename`, quindi il backend rispondeva «File non trovato» (i file
+        # stanno in downloads/) e nemmeno «Scarica selezione» sapeva cosa tagliare.
+        self.assertIn("function openAudioEditor(url, filename, startSec, bpm, songId, etichetta) {",
+                      self.pagina)
+        self.assertIn("etichetta: nome || 'audio',", self.pagina)
+        self.assertIn("(song && song.id) || '', label);", self.pagina,
+                      "`openInSampler` passa il FILE locale e in più l'etichetta da mostrare")
+        self.assertIn("function embedAudioEditorX(containerId, url, filename, startSec, etichetta){",
+                      self.pagina)
+        self.assertIn("embedAudioEditorX(containerId,'/stream/'+encodeURIComponent(filename), filename, startSec||0, label||filename);",
+                      self.pagina, "anche l'editor embedded riceve il file, non l'etichetta")
+        # l'interfaccia del sampler continua a mostrare il nome della canzone
+        self.assertIn("e.data.etichetta || e.data.filename || 'audio'", self.pagina)
+        self.assertIn("pl.filename = e.data.filename || pl.filename;", self.pagina)
 
     def test_endpoint_nellapp(self):
         self.assertIn('@app.route("/beat/bar", methods=["POST"])', self.app)
