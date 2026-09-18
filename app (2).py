@@ -312,6 +312,22 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
             c.execute("ALTER TABLE songs ADD COLUMN tunebat_url TEXT")
         if "genius_match_score" not in cols:
             c.execute("ALTER TABLE songs ADD COLUMN genius_match_score REAL")
+        # Conferma AUDIO della Verifica (18/09/2026). Il match di Genius è solo
+        # TESTUALE, quindi può essere un falso positivo (misurato sui dati veri:
+        # `song_b6e7cc46b04c` "Fast Lane(Eminem & Royce Da 5'9 Remix)" è finita
+        # abbinata a due artisti sconosciuti con score 0,589). Qui si registra
+        # l'esito del confronto fra il file locale e l'ANTEPRIMA UFFICIALE di
+        # iTunes: `audio_match_esito` è 'confermato' | 'non confermato' |
+        # 'ambiguo' | 'non verificabile', `audio_match_voti` sono gli hash
+        # acustici allineati allo stesso offset (più alto = più sicuro).
+        for colonna, tipo in (("audio_match_esito", "TEXT"),
+                              ("audio_match_voti", "INTEGER"),
+                              ("audio_match_offset", "REAL"),
+                              ("audio_match_comuni", "INTEGER"),
+                              ("audio_match_fonte", "TEXT"),
+                              ("audio_match_at", "TEXT")):
+            if colonna not in cols:
+                c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
 
 @contextmanager
 def get_db():
@@ -3381,6 +3397,9 @@ def db_changed():
 # Stato di avanzamento della verifica: il frontend (pulsante "Verifica" nel DB
 # e "Analizza" nel player) lo interroga per mostrare una riga di stato live.
 verify_progress = {}
+# Passi della Verifica: 1 Genius, 2 testo/copertina, 3 YouTube, 4 WhoSampled,
+# 5 Tunebat, 6 conferma audio (🔊), 7 analisi audio per BPM/Key.
+VERIFY_TOTALE = 7
 
 def _set_verify_status(song_id, step, total, status):
     verify_progress[song_id] = {"step": step, "total": total, "status": status, "ts": time.time()}
@@ -3401,7 +3420,7 @@ def verify_song(song_id):
     if not s:
         return jsonify({"error": "Non trovata"}), 404
 
-    _set_verify_status(song_id, 1, 6, "Ricerca canzone su Genius…")
+    _set_verify_status(song_id, 1, VERIFY_TOTALE, "Ricerca canzone su Genius…")
     updates = {}
     messages = []
     primary_for_search = ""      # solo artista principale, per le ricerche successive
@@ -3503,7 +3522,7 @@ def verify_song(song_id):
         # corretto su YouTube (con la versione pulita della query) e riproviamo
         # Genius con quello. Se YouTube conferma il titolo, viene salvato.
         if not genius:
-            _set_verify_status(song_id, 1, 6, "Genius non ha trovato: cerco titolo corretto su YouTube…")
+            _set_verify_status(song_id, 1, VERIFY_TOTALE, "Genius non ha trovato: cerco titolo corretto su YouTube…")
             try:
                 yt_artist = base_artist
                 yt_title = base_title
@@ -3580,7 +3599,7 @@ def verify_song(song_id):
                 r'^\s*\[(?:' + _TRANS_KEYS + r')[^\]\n]{0,90}\]',
                 existing_lyrics, re.IGNORECASE | re.MULTILINE))
             if lyrics_dirty and genius.get("genius_url"):
-                _set_verify_status(song_id, 2, 6, "Recupero testo da Genius…")
+                _set_verify_status(song_id, 2, VERIFY_TOTALE, "Recupero testo da Genius…")
                 lyrics = fetch_genius_lyrics_text(genius["genius_url"])
                 if lyrics:
                     updates["lyrics"] = lyrics
@@ -3635,7 +3654,7 @@ def verify_song(song_id):
     # (MP3/M4A/FLAC). Nel database va il NOME del file, non l'URL: gli URL delle
     # CDN di Genius cambiano, il nome no. Se il file esiste già non si rifà nulla.
     if _cover_mancante(s.get("cover_art_path")):
-        _set_verify_status(song_id, 2, 6, "Recupero copertina da Genius…")
+        _set_verify_status(song_id, 2, VERIFY_TOTALE, "Recupero copertina da Genius…")
         nome_cover, msg_cover = _salva_copertina(
             song_id, (genius or {}).get("cover_art", ""), s.get("local_file", "") or "")
         if nome_cover:
@@ -3650,6 +3669,35 @@ def verify_song(song_id):
         primary_for_search = (base_artist or "").split(" / ")[0].strip() or base_artist
     search_artist = primary_for_search
     search_title = updates.get("title") or base_title
+
+    # ─── CONFERMA AUDIO (🔊) ─────────────────────────────────
+    # Genius NON ha audio: il match è solo TESTUALE (match_score = 0,80·titolo +
+    # 0,20·artista) e quindi può essere un falso positivo. Qui si controlla
+    # l'AUDIO: si cerca l'ANTEPRIMA UFFICIALE della canzone su iTunes (API
+    # pubblica, 30 s) e la si cerca DENTRO il file locale con un'impronta
+    # acustica (vedi `conferma_audio`). Il passo costa 5-10 s (ricerca + 1 MB di
+    # anteprima + impronta), quindi si fa quando serve davvero: se il chiamante
+    # lo chiede (`{"audio": true}` nel corpo) o se il match testuale è DEBOLE
+    # (score < 0,95) — cioè proprio le righe a rischio falso positivo. Su
+    # "Verifica tutto" delle righe mai abbinate (score assente) non si attiva,
+    # altrimenti sarebbero 890 × 8 s di attesa.
+    audio_richiesto = False
+    try:
+        audio_richiesto = bool((request.json or {}).get("audio"))
+    except Exception:
+        audio_richiesto = False
+    score_eff = updates.get("genius_match_score", s.get("genius_match_score"))
+    if audio_richiesto or (score_eff is not None and score_eff < AUDIO_SCORE_SOSPETTO):
+        _set_verify_status(song_id, 6, VERIFY_TOTALE, "🔊 Confronto con l'anteprima ufficiale…")
+        try:
+            audio_s = dict(s); audio_s.update(updates)   # titolo/artista/score appena trovati
+            upd_audio, msg_audio = conferma_audio(
+                audio_s,
+                status=lambda testo: _set_verify_status(song_id, 6, VERIFY_TOTALE, testo))
+            updates.update(upd_audio)
+            messages.append(msg_audio)
+        except Exception as e:
+            messages.append(f"⚠️ Conferma audio: errore ({str(e)[:60]})")
 
     # ─── BPM & KEY + URL (YouTube / WhoSampled / Tunebat) ──────────
     # Logica BPM/Key:
@@ -3670,7 +3718,7 @@ def verify_song(song_id):
     try:
 
         # 1) URL YouTube → stessa ricerca dello scraper di WhoSampled
-        _set_verify_status(song_id, 3, 6, "Ricerca URL YouTube…")
+        _set_verify_status(song_id, 3, VERIFY_TOTALE, "Ricerca URL YouTube…")
         try:
             if not s.get("youtube_url") and not updates.get("youtube_url"):
                 yt_url, yt_title = yt_search_first(
@@ -3697,7 +3745,7 @@ def verify_song(song_id):
 
         # 3) URL WhoSampled → stessa ricerca dello scraper (artista + titolo)
         if ws_driver and not s.get("whosampled_url"):
-            _set_verify_status(song_id, 4, 6, "Ricerca WhoSampled…")
+            _set_verify_status(song_id, 4, VERIFY_TOTALE, "Ricerca WhoSampled…")
             try:
                 track, _ = search_whosampled(
                     ws_driver,
@@ -3719,7 +3767,7 @@ def verify_song(song_id):
 
         # 4) TUNEBAT PRIMA → BPM/Key (fonte principale) e link — solo se non già verificati
         if not bpmkey_done and ws_driver:
-            _set_verify_status(song_id, 5, 6, "Verifica BPM/Key su Tunebat…")
+            _set_verify_status(song_id, 5, VERIFY_TOTALE, "Verifica BPM/Key su Tunebat…")
             tb = scrape_tunebat(search_artist, search_title, driver=ws_driver)
             if tb:
                 if tb.get("bpm") is not None:
@@ -3769,7 +3817,7 @@ def verify_song(song_id):
     if not bpmkey_done and (eff_bpm in (None, "") or eff_key in (None, "")) and s.get("local_file"):
         fp = os.path.join(DL_DIR, s["local_file"])
         if os.path.exists(fp):
-            _set_verify_status(song_id, 6, 6, "Analisi audio (BPM/Key)…")
+            _set_verify_status(song_id, 7, VERIFY_TOTALE, "Analisi audio (BPM/Key)…")
             try:
                 # Analisi audio VELOCE e SICURA: prima ffmpeg via os.posix_spawn
                 # (niente fork) + numpy vettorizzato (rilascia il GIL → il server
@@ -3810,6 +3858,39 @@ def verify_song(song_id):
         "messages": messages,
         "success": len(updates) > 0
     })
+
+@app.route("/db/songs/<song_id>/audio_check", methods=["POST"])
+def audio_check_song(song_id):
+    """🔊 Solo il controllo audio di una canzone (senza rifare tutta la Verifica).
+
+    È il passo che risponde alla domanda «la canzone trovata su Genius è davvero
+    questa?»: cerca l'anteprima UFFICIALE su iTunes e la confronta col file locale
+    con un'impronta acustica, poi scrive l'esito nei campi `audio_match_*`. Dura
+    5-10 s (ricerca + ~1 MB di anteprima + impronta). Lo usa il pulsante "🔊 Audio"
+    della tabella del database e i controlli mirati sulle righe sospette.
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return jsonify({"error": "Non trovata"}), 404
+
+    _set_verify_status(song_id, 6, VERIFY_TOTALE, "🔊 Confronto con l'anteprima ufficiale…")
+    try:
+        updates, messaggio = conferma_audio(
+            s, status=lambda testo: _set_verify_status(song_id, 6, VERIFY_TOTALE, testo))
+    finally:
+        verify_progress.pop(song_id, None)
+
+    if updates:
+        with get_db() as conn:
+            for campo, valore in updates.items():
+                conn.execute(f"UPDATE songs SET {campo}=?, updated_at=datetime('now') WHERE id=?",
+                             (valore, song_id))
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    return jsonify({"song": s, "updated": updates, "messages": [messaggio],
+                    "esito": updates.get("audio_match_esito"), "success": bool(updates)})
+
 
 # ── DB: MASS RENAME ───────────────────────────────────────────────────────────
 # ── DB: MODIFICHE IN BLOCCO (✏️ Rinomina in massa / ➡️ Sposta) ────────────────
@@ -4341,6 +4422,12 @@ COLUMN_DOCS = {"songs": {
     "key_verified": "1 = tonalità confermata",
     "lyrics_verified": "1 = testo confermato",
     "genius_match_score": "somiglianza del match Genius (0-1)",
+    "audio_match_esito": "conferma AUDIO: 'confermato'/'non confermato'/'ambiguo'/'non verificabile'",
+    "audio_match_voti": "hash acustici allineati con l'anteprima ufficiale (più alto = più sicuro)",
+    "audio_match_comuni": "hash in comune con l'anteprima (anche non allineati)",
+    "audio_match_offset": "dove sta l'anteprima ufficiale dentro il file locale (secondi)",
+    "audio_match_fonte": "anteprima usata: 'iTunes <id> · artista — titolo (durata)'",
+    "audio_match_at": "quando è stato fatto il confronto audio",
     "created_at": "quando è stata aggiunta",
     "updated_at": "ultima modifica",
 }}
@@ -4440,6 +4527,411 @@ def find_duplicate_groups(fps, tolerance):
         if not placed:
             groups.append({"rep": pts, "members": [sid]})
     return [g for g in groups if len(g["members"]) > 1]
+
+# ── CONFERMA AUDIO DELLA VERIFICA (18/09/2026) ────────────────────────────────
+# La Verifica abbina la canzone su Genius con un confronto TESTUALE e Genius NON
+# ha audio: il match può quindi essere un falso positivo (misurato sui dati veri
+# del 18/09/2026: `song_b6e7cc46b04c` "Fast Lane(Eminem & Royce Da 5'9 Remix)" è
+# finita abbinata a due artisti sconosciuti con score 0,589, e la riga
+# `song_7553a924d202` "1998 Freestyle" ha 0,754 — le due più basse in libreria).
+# Per avere una prova che NON sia testuale si usa l'ANTEPRIMA UFFICIALE di 30 s
+# di iTunes (API pubblica `itunes.apple.com/search`, nessuna chiave) e la si
+# cerca DENTRO il file locale con un'impronta acustica stile Shazam:
+#   1. spettrogramma (STFT) → picchi spettrali (i più forti per gruppo di
+#      frequenze, così sono unici nella loro cella);
+#   2. hash di coppie di picchi: (gruppo_f1, gruppo_f2, Δt fra i due);
+#   3. istogramma degli scarti temporali fra gli hash delle due impronte: se è
+#      lo stesso brano centinaia di hash si allineano allo STESSO offset, fra
+#      brani diversi l'istogramma è piatto.
+# Numeri misurati il 18/09/2026 con queste funzioni su *21 Questions* (50 Cent /
+# Nate Dogg, file locale da 258,6 s contro anteprima ufficiale di 30,0 s):
+# **2.525 hash allineati a 76,0 s** contro **5-9 hash** di 8 brani presi a caso
+# dalla libreria (e 806 contro 16 sul caso sintetico del test). La funzione è
+# indipendente da durata, tagli e master (nel file locale l'anteprima sta a 76 s
+# perché il file è più lungo del disco ufficiale: 258,6 s contro 224,4 s).
+# ⚠️ Le soglie qui sotto sono tarate su quelle misure: il primo tentativo usava i
+# picchi "più forti del frame" (la banda dei bassi è la più forte in ogni istante)
+# e un brano SBAGLIATO arrivava a 1.415 voti, cioè un falso positivo: da lì il
+# massimo LOCALE in frequenza × tempo dentro `picchi_spettrali`.
+# NIENTE nuove dipendenze: ffmpeg (già usato per le analisi) per la decodifica,
+# numpy + librosa (già in requirements.txt) per spettrogramma e picchi.
+ANTEPRIME_DIR = os.path.join(BASE_DIR, "anteprime"); os.makedirs(ANTEPRIME_DIR, exist_ok=True)
+AUDIO_SR, AUDIO_HOP, AUDIO_FFT = 11025, 512, 2048
+AUDIO_BIN_HASH = 8            # frequenze raggruppate a 8 a 8 (≈43 Hz per gruppo)
+AUDIO_RAGGIO_FREQ = 3         # picco = massimo locale su ±3 gruppi (≈±130 Hz)
+AUDIO_RAGGIO_TEMPO = 7        # picco = massimo locale su ±7 frame (≈±0,32 s)
+AUDIO_DT_MAX = 64             # "target zone": 3 s (un frame = 46,4 ms)
+AUDIO_COPPIE = 4              # accoppiamenti massimi per picco
+AUDIO_SOGLIA_DB = -55.0       # picchi più deboli di così sono rumore
+AUDIO_VOTI_CONFERMA = 50      # hash allineati per dire "audio confermato"
+AUDIO_VOTI_RIFIUTO = 20       # ≤ questo: l'anteprima NON è nel file (il massimo
+                              # misurato su un brano sbagliato è 16; sul brano
+                              # giusto il minimo è 806 — vedi il commento sopra)
+AUDIO_SCORE_SOSPETTO = 0.95   # match Genius sotto questa soglia → si controlla l'audio
+
+
+def _massimo_del_vicinato(matrice, raggio, asse):
+    """Massimo dei VICINI (esclusa la cella stessa) entro `raggio` lungo un asse.
+
+    Serve a dire "questa cella spicca": il massimo mobile normale comprende la
+    cella, quindi un confronto stretto non troverebbe mai nessun picco (misurato:
+    zero picchi su tutta la libreria). Padding a -inf per non leggere fuori bordo.
+    """
+    if raggio <= 0:
+        return np.full_like(matrice, -np.inf)
+    imbottitura = [(0, 0)] * matrice.ndim
+    imbottitura[asse] = (raggio, raggio)
+    P = np.pad(matrice, imbottitura, mode="constant", constant_values=-np.inf)
+    lunghezza = matrice.shape[asse]
+    out = np.full_like(matrice, -np.inf)
+    for d in range(-raggio, raggio + 1):
+        if d == 0:
+            continue                      # la cella non è un vicino di se stessa
+        out = np.maximum(out, P.take(range(raggio + d, raggio + d + lunghezza), axis=asse))
+    return out
+
+
+def picchi_spettrali(spettro_db, n_picchi=5, soglia_db=AUDIO_SOGLIA_DB,
+                     raggio_freq=AUDIO_RAGGIO_FREQ, raggio_tempo=AUDIO_RAGGIO_TEMPO):
+    """Funzione PURA. Picchi dello spettrogramma in dB: un picco è il massimo
+    LOCALE della sua cella (frequenza × tempo, dopo aver raggruppato le frequenze
+    a blocchi di AUDIO_BIN_HASH), non semplicemente la banda più forte del frame.
+
+    Perché il massimo locale e non "i più forti del frame": in un brano la banda
+    dei bassi è la più forte in OGNI istante, quindi sceglierla sempre produce
+    hash che si ripetono identici e falsi positivi (misurato: un brano sbagliato
+    arrivava a 1.415 voti). Un picco vero è un evento che spicca anche nel suo
+    intorno: così gli hash seguono gli attacchi del brano.
+
+    Restituisce (frame, gruppo_frequenza, ampiezza) per ogni picco, al massimo
+    `n_picchi` per istante, dal più forte al più debole.
+    """
+    if spettro_db is None or getattr(spettro_db, "size", 0) == 0:
+        return []
+    n_freq, n_frame = spettro_db.shape
+    gruppi = n_freq // AUDIO_BIN_HASH
+    if gruppi == 0:
+        return []
+    # massimo per (gruppo di frequenze, istante): vettoriale, niente cicli sulle frequenze
+    M = spettro_db[:gruppi * AUDIO_BIN_HASH].reshape(gruppi, AUDIO_BIN_HASH, n_frame).max(axis=1)
+    # un picco deve essere il massimo nel suo intorno in frequenza E in tempo
+    # (confronto STRETTO coi vicini: una banda costante non "spicca" e non è un picco)
+    e_massimo_freq = M > _massimo_del_vicinato(M, raggio_freq, 0)
+    e_massimo_tempo = M > _massimo_del_vicinato(M, raggio_tempo, 1)
+    picchi = []
+    for t in range(n_frame):
+        colonna = M[:, t]
+        forti = np.flatnonzero((colonna > soglia_db) & e_massimo_freq[:, t] & e_massimo_tempo[:, t])
+        if forti.size == 0:
+            continue
+        for g in forti[np.argsort(colonna[forti])[::-1][:n_picchi]]:
+            picchi.append((t, int(g), float(colonna[g])))
+    return picchi
+
+
+def hash_da_picchi(picchi, dt_max=AUDIO_DT_MAX, coppie=AUDIO_COPPIE):
+    """Funzione PURA. Da (frame, gruppo, ampiezza) agli hash stile Shazam: ogni
+    picco fa da àncora e si accoppia con i `coppie` picchi che lo seguono entro
+    `dt_max` frame. Restituisce [((g1, g2, dt), frame_àncora), …]."""
+    ordinati = sorted(picchi, key=lambda p: p[0])
+    hashes = []
+    for i, (t1, g1, _) in enumerate(ordinati):
+        presi = 0
+        for t2, g2, _ in ordinati[i + 1:]:
+            dt = t2 - t1
+            if dt > dt_max:
+                break                     # ordinati per tempo: oltre non serve guardare
+            if dt <= 0:
+                continue                  # picchi dello stesso istante: nessun Δt da confrontare
+            hashes.append(((g1, g2, dt), t1))
+            presi += 1
+            if presi >= coppie:
+                break
+    return hashes
+
+
+def istogramma_offset(hash_locali, hash_anteprima, hop=AUDIO_HOP, sr=AUDIO_SR):
+    """Funzione PURA. Confronta due impronte e restituisce (voti, offset, comuni).
+
+    `voti` = il massimo numero di hash che cadono sullo STESSO scarto temporale
+    (locali − anteprima); `offset` = quello scarto in secondi, cioè dove sta
+    l'anteprima dentro il file locale; `comuni` = quanti hash hanno combaciato in
+    totale (comprese le coincidenze sparse, che non contano nulla).
+    """
+    indici = {}
+    for h, t in hash_anteprima:
+        indici.setdefault(h, []).append(t)
+    voti = {}
+    comuni = 0
+    for h, t in hash_locali:
+        for tp in indici.get(h, ()):
+            comuni += 1
+            delta = t - tp
+            voti[delta] = voti.get(delta, 0) + 1
+    if not voti:
+        return 0, None, 0
+    migliore = max(voti, key=voti.get)
+    return voti[migliore], migliore * hop / float(sr), comuni
+
+
+def esito_confronto_audio(voti):
+    """Funzione PURA. Verdetto in parole dal confronto audio:
+    - 'confermato' se gli hash allineati allo STESSO offset sono ≥ AUDIO_VOTI_CONFERMA;
+    - 'ambiguo' se stanno fra AUDIO_VOTI_RIFIUTO e AUDIO_VOTI_CONFERMA;
+    - 'non confermato' se sono pochissimi (≤ AUDIO_VOTI_RIFIUTO): l'anteprima
+      ufficiale NON è dentro il file locale, quindi il match testuale di Genius è
+      da rivedere (falso positivo, oppure remix/live/versione diversa).
+    Il caso "non si è potuto provare" — nessuna anteprima ufficiale, file locale
+    assente o non decodificabile — NON passa da qui: lo decide `conferma_audio` e
+    vale 'non verificabile', così un dato mancante non diventa mai un verdetto.
+    """
+    if voti >= AUDIO_VOTI_CONFERMA:
+        return "confermato"
+    if voti <= AUDIO_VOTI_RIFIUTO:
+        return "non confermato"
+    return "ambiguo"
+
+def _audio_mono(filepath, sr=AUDIO_SR):
+    """Decodifica ffmpeg → float32 mono (numpy). None se ffmpeg/numpy mancano o il
+    file è rotto: la conferma audio non deve mai far fallire la Verifica."""
+    if not FFMPEG or np is None:
+        return None
+    try:
+        p = subprocess.run([FFMPEG, "-v", "error", "-i", filepath, "-ac", "1",
+                            "-ar", str(sr), "-f", "f32le", "pipe:1"],
+                           capture_output=True, timeout=180)
+    except Exception as e:
+        print(f"[audio] decodifica fallita: {e}")
+        return None
+    if p.returncode != 0 or not p.stdout:
+        return None
+    arr = np.frombuffer(p.stdout, dtype=np.float32)
+    return arr if arr.size else None
+
+
+def spettrogramma_db(campioni, n_fft=AUDIO_FFT, hop=AUDIO_HOP):
+    """Spettrogramma in dB (la base dei picchi). None se librosa non c'è."""
+    if campioni is None or not HAS_LIBROSA or np is None:
+        return None
+    try:
+        S = np.abs(librosa.stft(campioni, n_fft=n_fft, hop_length=hop))
+        return librosa.amplitude_to_db(S, ref=np.max)
+    except Exception as e:
+        print(f"[audio] spettrogramma fallito: {e}")
+        return None
+
+
+def impronta_audio(campioni):
+    """Impronta acustica (lista di hash) dei campioni decodificati: dipende solo
+    dall'audio, mai dal nome del file. Lista vuota se non si può calcolare."""
+    spettro = spettrogramma_db(campioni)
+    if spettro is None:
+        return []
+    return hash_da_picchi(picchi_spettrali(spettro))
+
+
+def _parole_artista(nome):
+    """Minuscole, solo lettere/numeri con spazi singoli: serve a confrontare
+    l'artista per PAROLE INTERE (`normalize` toglie anche gli spazi, e così
+    "Ren" combaciava con "Rennes Choir")."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", (nome or "").lower())).strip()
+
+
+def artista_compatibile(artisti, candidato, soglia=0.7):
+    """Funzione PURA. Il candidato trovato è dello STESSO artista?
+
+    In `match_score` l'artista pesa solo 0,20, quindi da solo non protegge:
+    cercando "Control" di Big Sean, iTunes proponeva "Control (Kendrick Lamar
+    Diss)" di *The Rap Mafia* — titolo quasi identico, artista diverso, e il
+    confronto audio partiva contro il brano sbagliato (misurato il 18/09/2026).
+    Si accetta se una parte dell'artista atteso (la libreria usa "A / B" per i
+    feat.) compare come parola intera nel nome del candidato o viceversa, oppure
+    se i due nomi sono simili (soglia 0,7 di `SequenceMatcher`).
+    """
+    from difflib import SequenceMatcher
+    nome = _parole_artista(candidato)
+    if not nome:
+        return False
+    for parte in re.split(r"\s*/\s*", artisti or ""):
+        a = _parole_artista(parte)
+        if not a:
+            continue
+        if a == nome:
+            return True
+        if re.search(r"(?<![a-z0-9])" + re.escape(a) + r"(?![a-z0-9])", nome):
+            return True                     # "50 cent" dentro "50 cent feat nate dogg"
+        if re.search(r"(?<![a-z0-9])" + re.escape(nome) + r"(?![a-z0-9])", a):
+            return True                     # "50 cent" (candidato) dentro l'atteso
+        if SequenceMatcher(None, a, nome).ratio() >= soglia:
+            return True
+    return False
+
+
+def cerca_anteprima_itunes(artist, title, min_score=0.55):
+    """Anteprima UFFICIALE della canzone da iTunes (API pubblica, senza chiave).
+
+    Genius non ha audio: l'unico modo per sentire "ciò che Genius ha trovato" è
+    l'anteprima del negozio. Restituisce il candidato col `match_score` migliore
+    (stessa funzione e stessa soglia 0,55 usate dalle altre ricerche) **e con
+    l'artista compatibile** (`artista_compatibile`), come dict {"preview_url",
+    "track", "artist", "album", "durata", "id", "score"}: None se non c'è nessun
+    candidato decente — meglio nessun verdetto che un verdetto sul brano sbagliato.
+    """
+    termine = " ".join(p for p in [(artist or "").strip(), (title or "").strip()] if p)
+    if not termine:
+        return None
+    import urllib.request
+    url = "https://itunes.apple.com/search?" + urllib.parse.urlencode(
+        {"term": termine, "entity": "song", "limit": 5})
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "SampleLab/1.0 (+locale)"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        print(f"[anteprima] iTunes: {e}")
+        return None
+    migliore, punteggio = None, 0.0
+    for res in data.get("results", []):
+        if not res.get("previewUrl"):
+            continue
+        if not artista_compatibile(artist, res.get("artistName", "")):
+            continue
+        sc = match_score(artist or "", title or "",
+                         res.get("artistName", ""), res.get("trackName", ""))
+        if sc > punteggio:
+            migliore, punteggio = res, sc
+    if not migliore:
+        print(f"[anteprima] nessun candidato con l'artista compatibile per '{termine}'")
+        return None
+    if punteggio < min_score:
+        print(f"[anteprima] candidato '{migliore.get('trackName', '')}' sotto la soglia "
+              f"{min_score} per '{termine}'")
+        return None
+    return {
+        "preview_url": migliore["previewUrl"],
+        "track": migliore.get("trackName", ""),
+        "artist": migliore.get("artistName", ""),
+        "album": migliore.get("collectionName", ""),
+        "durata": round((migliore.get("trackTimeMillis") or 0) / 1000.0, 1),
+        "id": str(migliore.get("trackId") or ""),
+        "score": round(punteggio, 3),
+    }
+
+
+def scarica_anteprima(info):
+    """Scarica l'm4a dell'anteprima in `anteprime/` (cartella NON versionata) e
+    restituisce il percorso; None se il download fallisce. Se il file c'è già
+    (stesso id iTunes) non lo riscarica: l'anteprima di una canzone non cambia."""
+    if not info or not info.get("preview_url"):
+        return None
+    nome = re.sub(r"[^A-Za-z0-9_-]", "_",
+                  "%s_%s" % (info.get("id") or "anteprima", info.get("track") or ""))[:80]
+    dst = os.path.join(ANTEPRIME_DIR, nome + ".m4a")
+    if os.path.exists(dst) and os.path.getsize(dst) > 2048:
+        return dst
+    import urllib.request
+    try:
+        req = urllib.request.Request(info["preview_url"],
+                                     headers={"User-Agent": "SampleLab/1.0 (+locale)"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            dati = r.read()
+    except Exception as e:
+        print(f"[anteprima] download: {e}")
+        return None
+    if len(dati) < 2048:
+        return None
+    try:
+        with open(dst, "wb") as f:
+            f.write(dati)
+    except Exception as e:
+        print(f"[anteprima] scrittura: {e}")
+        return None
+    return dst
+
+
+def confronto_audio_file(percorso_locale, percorso_anteprima):
+    """Confronta DUE file audio e restituisce {"voti", "offset", "comuni", "hash"}
+    (offset = dove sta l'anteprima dentro il file locale, in secondi).
+    None se non si può fare (ffmpeg/librosa assenti o file illeggibili)."""
+    yl = _audio_mono(percorso_locale)
+    ya = _audio_mono(percorso_anteprima)
+    if yl is None or ya is None:
+        return None
+    hl, ha = impronta_audio(yl), impronta_audio(ya)
+    if not hl or not ha:
+        return None
+    voti, offset, comuni = istogramma_offset(hl, ha)
+    return {"voti": int(voti), "offset": offset, "comuni": int(comuni), "hash": len(hl)}
+
+
+def conferma_audio(song, status=None):
+    """Il passo 🔊 della Verifica: il file locale contiene l'anteprima ufficiale?
+
+    Restituisce (aggiornamenti, messaggio): i campi `audio_match_*` da scrivere nel
+    database e la riga da mostrare in interfaccia. Non solleva MAI eccezioni: ogni
+    intoppo diventa un messaggio ⚪/⚠️, perché la Verifica deve poter continuare.
+    """
+    def segnala(testo):
+        if status:
+            try:
+                status(testo)
+            except Exception:
+                pass
+
+    def non_verificabile(testo):
+        return ({"audio_match_esito": "non verificabile",
+                 "audio_match_voti": None, "audio_match_comuni": None,
+                 "audio_match_offset": None, "audio_match_fonte": None,
+                 "audio_match_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}, testo)
+
+    locale = song.get("local_file") or ""
+    percorso = os.path.join(DL_DIR, locale) if locale else ""
+    if not locale or not os.path.exists(percorso):
+        return non_verificabile("⚪ Audio non verificabile: manca il file locale in downloads/")
+
+    artista = (song.get("artist") or "").split(" / ")[0].strip()
+    titolo = song.get("title") or ""
+
+    segnala("🔊 Cerco l'anteprima ufficiale…")
+    info = cerca_anteprima_itunes(artista, titolo)
+    if not info:
+        return non_verificabile(
+            f"⚪ Nessuna anteprima ufficiale per \"{titolo}\": audio non verificabile "
+            f"(il match Genius resta solo testuale)")
+
+    segnala("🔊 Scarico l'anteprima ufficiale…")
+    anteprima_path = scarica_anteprima(info)
+    if not anteprima_path:
+        return non_verificabile("⚠️ Anteprima trovata ma non scaricabile: audio non verificabile")
+
+    segnala("🔊 Confronto l'audio del file locale con l'anteprima…")
+    calcolo = confronto_audio_file(percorso, anteprima_path)
+    if not calcolo:
+        return non_verificabile("⚠️ Confronto audio non riuscito (decodifica/spettrogramma)")
+
+    voti, comuni, offset = calcolo["voti"], calcolo["comuni"], calcolo["offset"]
+    esito = esito_confronto_audio(voti)
+    fonte = "iTunes %s · %s — %s (%.1f s)" % (info["id"], info["artist"], info["track"],
+                                              info["durata"] or 0)
+    aggiornamenti = {
+        "audio_match_esito": esito,
+        "audio_match_voti": voti,
+        "audio_match_comuni": comuni,
+        "audio_match_offset": round(offset, 3) if offset is not None else None,
+        "audio_match_fonte": fonte[:200],
+        "audio_match_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    etichetta = f"{info['artist']} — {info['track']}"
+    if esito == "confermato":
+        return aggiornamenti, (f"✅ Audio confermato: {voti} hash allineati a {offset:.1f} s "
+                               f"(anteprima ufficiale: {etichetta})")
+    if esito == "non confermato":
+        return aggiornamenti, (f"❌ Audio NON confermato: solo {voti} hash allineati — "
+                               f"l'anteprima ufficiale \"{etichetta}\" NON è dentro il file "
+                               f"locale: possibile falso positivo (o versione diversa/remix)")
+    return aggiornamenti, (f"🟡 Audio ambiguo: {voti} hash allineati ({comuni} in comune, soglia "
+                           f"di conferma {AUDIO_VOTI_CONFERMA}) — da controllare a orecchio")
+
 
 def run_cleanup(tolerance, progress=None):
     """Esegue la pulizia (durata zero + duplicati per contenuto audio).

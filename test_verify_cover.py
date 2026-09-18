@@ -449,7 +449,11 @@ class TestCablaggio(unittest.TestCase):
         # la Verifica riempie la colonna solo se il file non c'è già
         self.assertIn('if _cover_mancante(s.get("cover_art_path")):', self.app)
         self.assertIn('updates["cover_art_path"] = nome_cover', self.app)
-        self.assertIn('_set_verify_status(song_id, 2, 6, "Recupero copertina da Genius…")', self.app)
+        # il passo della copertina usa la costante dei passi (VERIFY_TOTALE = 7 dal
+        # 18/09/2026, quando la conferma audio è diventata il passo 6): il numero
+        # non è più scritto a mano, così aggiungere un passo non rompe la Verifica
+        self.assertIn('_set_verify_status(song_id, 2, VERIFY_TOTALE, "Recupero copertina da Genius…")', self.app)
+        self.assertIn("VERIFY_TOTALE = 7", self.app)
 
     def test_cover_escluse_dal_versionamento(self):
         # le immagini non vanno in repo (una per canzone): covers/ in .gitignore

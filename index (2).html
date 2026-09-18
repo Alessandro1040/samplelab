@@ -4791,6 +4791,30 @@ function coverThumb(f, size){
          `<img class="db-cover" style="width:${px}px;height:${px}px" src="${coverUrl(f)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></a>`;
 }
 
+// ─── CONFERMA AUDIO (🔊) ─────────────────────────────────────────────────────
+// La Verifica abbina la canzone su Genius con un confronto TESTUALE: può essere
+// un falso positivo. Il passo 🔊 confronta il file locale con l'ANTEPRIMA
+// UFFICIALE di iTunes e scrive l'esito in `songs.audio_match_*`; qui l'esito
+// diventa una pastiglia nella riga. Funzione PURA: la esegue JavaScriptCore
+// (test_audio_match.py), quindi non tocca il DOM e non fa rete.
+const AUDIO_CHIP = {
+  'confermato':      ['#4ade80', '✓ confermato'],
+  'non confermato':  ['#ff4545', '✗ non confermato'],
+  'ambiguo':         ['#fbbf24', '? ambiguo'],
+  'non verificabile':['var(--muted)', '– non verificabile'],
+};
+function chipAudio(s){
+  const esito=(s&&s.audio_match_esito)||'';
+  if(!esito) return '';
+  const stile=AUDIO_CHIP[esito]||['var(--muted)',esito];
+  const voti=(s.audio_match_voti==null)?'':` · ${s.audio_match_voti} hash`;
+  const off=(s.audio_match_offset==null)?'':` · offset ${Number(s.audio_match_offset).toFixed(1)} s`;
+  const fonte=s.audio_match_fonte?` · ${esc(s.audio_match_fonte)}`:'';
+  const quando=s.audio_match_at?` · ${esc(s.audio_match_at)}`:'';
+  return `<span class="db-rel-badge" style="color:${stile[0]};cursor:help" `+
+         `title="Confronto AUDIO con l'anteprima ufficiale (Genius non ha audio)${fonte}${voti}${off}${quando}">🔊 ${stile[1]}</span>`;
+}
+
 function renderDbTable(songs){
   const tbody=document.getElementById('db-tbody');
   if(!songs.length){tbody.innerHTML=`<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--muted);font-family:'Space Mono',monospace;font-size:12px">Nessuna canzone nel database<br>Usa il pannello "➕ Aggiungi canzone" oppure aggiungi brani dal player 🎧</td></tr>`;updateVerifyAllBtnState();return}
@@ -4841,6 +4865,7 @@ function renderDbTable(songs){
       <td>
         <div class="db-cell-stack">
           <button class="db-verify-btn" onclick="verifySong('${s.id}')">🔎 Verifica</button>
+          ${s.local_file?`<button class="db-verify-btn db-audio-btn" onclick="audioCheckSong('${s.id}')" title="Confronta l'audio del file locale con l'anteprima UFFICIALE su iTunes: dice se la canzone trovata su Genius è davvero questa (5-10 s)">🔊 Audio</button>${chipAudio(s)}`:''}
           ${s.genius_url?`<a href="${esc(s.genius_url)}" target="_blank" style="font-size:9px;color:var(--muted);font-family:'Space Mono',monospace">Genius ↗</a>`:''}
           ${s.tunebat_url?`<a href="${esc(s.tunebat_url)}" target="_blank" style="font-size:9px;color:var(--accent2);font-family:'Space Mono',monospace">Tunebat ↗</a>`:''}
           ${s.whosampled_url?`<a href="${esc(s.whosampled_url)}" target="_blank" style="font-size:9px;color:var(--muted);font-family:'Space Mono',monospace">WhoSampled ↗</a>`:''}
@@ -4955,7 +4980,7 @@ async function verifySong(id) {
       const song = res.song;
       let feedbackHtml = '';
       if (res.messages && res.messages.length) {
-        feedbackHtml = res.messages.map(m => `<div style="font-size:9px;color:${m.includes('✅')?'#4ade80':m.includes('⚠️')?'#fbbf24':'#aaa'}">${m}</div>`).join('');
+        feedbackHtml = res.messages.map(m => `<div style="font-size:9px;color:${m.includes('✅')?'#4ade80':(m.includes('❌')?'#ff4545':(m.includes('⚠️')?'#fbbf24':'#aaa'))}">${m}</div>`).join('');
         // Copertina appena trovata: si vede subito accanto ai messaggi, senza
         // dover scorrere fino alla miniatura della riga.
         if (song.cover_art_path) {
@@ -5026,6 +5051,47 @@ function waitForVerifyInactive(id, timeoutMs = 6000) {
     };
     check();
   });
+}
+
+// ─── 🔊 CONTROLLO AUDIO DI UNA RIGA (passo "conferma audio") ─────────────────
+// Chiede al backend di confrontare il file locale con l'anteprima UFFICIALE di
+// iTunes (endpoint dedicato: 5-10 s, nessun browser). L'esito finisce in
+// `audio_match_*` e si vede subito come pastiglia nella riga, più il messaggio
+// sotto la riga stessa (✅ confermato / ❌ non confermato / ⚪ non verificabile).
+async function audioCheckSong(id) {
+  const btn = document.querySelector(`tr[data-id="${id}"] .db-audio-btn`);
+  const testoOriginale = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '🔊 Controllo…'; }
+  try {
+    const resp = await fetch(`/db/songs/${id}/audio_check`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const res = await resp.json();
+    if (res.song) {
+      allDbSongs = allDbSongs.map(s => s.id === id ? res.song : s);
+      renderDbTable(allDbSongs.filter(s => {
+        const q = (document.getElementById('db-search')?.value || '').toLowerCase();
+        return !q || (s.title || '').toLowerCase().includes(q) || (s.artist || '').toLowerCase().includes(q);
+      }));
+      const msg = (res.messages && res.messages[0]) || '';
+      const nuovoBtn = document.querySelector(`tr[data-id="${id}"] .db-audio-btn`);
+      const cella = nuovoBtn?.closest('.db-cell-stack');
+      if (cella && msg) {
+        const box = document.createElement('div');
+        box.className = 'verify-messages';
+        box.style.cssText = 'margin-top:4px;font-size:9px;line-height:1.4;';
+        const colore = msg.includes('✅') ? '#4ade80' : (msg.includes('❌') ? '#ff4545' : (msg.includes('🟡') ? '#fbbf24' : '#aaa'));
+        box.innerHTML = `<div style="color:${colore}">${esc(msg)}</div>`;
+        cella.appendChild(box);
+      }
+      const esito = res.esito || 'non verificabile';
+      toast(`🔊 Audio: ${esito}`, esito === 'confermato' ? 'ok' : (esito === 'non confermato' ? 'err' : 'info'));
+    }
+  } catch (e) {
+    toast('❌ Controllo audio fallito: ' + e.message, 'err');
+  } finally {
+    const b = document.querySelector(`tr[data-id="${id}"] .db-audio-btn`);
+    if (b) { b.disabled = false; b.textContent = testoOriginale || '🔊 Audio'; }
+  }
 }
 
 // ═════════════════════════════════════════════════════════════

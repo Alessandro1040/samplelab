@@ -78,6 +78,14 @@ con `(2)` nella cartella locale:
   (nome del file, firma del formato, scelta dell'URL su Genius, copertina scritta
   nei tag di un mp3), la rotta `/cover/<file>` col client di Flask e le prove
   sull'app viva: `python3 -m unittest -v test_verify_cover`
+- `test_audio_match.py` — test della **conferma audio** 🔊 della Verifica (l'unico
+  controllo che NON è testuale: Genius non ha audio, quindi si cerca l'**anteprima
+  ufficiale iTunes** dentro il file locale con un'impronta acustica stile Shazam):
+  funzioni pure `picchi_spettrali`, `hash_da_picchi`, `istogramma_offset`,
+  `esito_confronto_audio`, `artista_compatibile` in esecuzione reale, una prova
+  completa su audio fabbricato (WAV + MP3, brano giusto contro brano sbagliato),
+  la pastiglia `chipAudio` in JavaScriptCore e le prove sull'app viva:
+  `python3 -m unittest -v test_audio_match`
 - `test_move_field.py` — test della **legenda 📖** e dello strumento **➡️ Sposta**
   del pannello SQL/script (funzione pura `move_field_value`: artista dal titolo
   agli artisti, anno dal titolo al campo anno, parola intera, parentesi rimaste
@@ -123,6 +131,9 @@ con `(2)` nella cartella locale:
 - `stems/` — tracce separate generate
 - `covers/` — copertine delle canzoni (una per brano, ~1000 px, servite da
   `/cover/<file>`; il database ne tiene il **nome**, non l'URL)
+- `anteprime/` — anteprime ufficiali iTunes (30 s, formato m4a) scaricate dalla
+  **conferma audio** 🔒 della Verifica (una per brano, ~1 MB): non si versionano,
+  si riscaricano da sé quando serve
 - `.trash/`, `.snapshots/`, `__pycache__/` — file temporanei
 
 ## Requisiti di sistema
@@ -314,6 +325,21 @@ Da tenere presente nelle sessioni di lavoro successive:
   `/cover/<file>`. La cartella **non è versionata** (come `downloads/`: centinaia
   di immagini pesano troppo) — su un altro Mac i nomi nel database ci sono ma i
   file no, e la prima Verifica di quel brano li riscarica da sé.
+- **Conferma audio della Verifica (🔊, 18/09/2026).** Genius **non ha audio**: il
+  match resta testuale e può essere un falso positivo. Il passo 🔊 cerca l'**anteprima
+  ufficiale di 30 s su iTunes** (API pubblica, nessuna chiave) e la cerca DENTRO il
+  file locale con un'impronta acustica (picchi spettrali → hash `(f1, f2, Δt)` →
+  istogramma degli offset). L'esito va in `songs.audio_match_esito`: 'confermato'
+  (≥ 50 hash allineati), 'ambiguo' (21-49), 'non confermato' (≤ 20), 'non
+  verificabile' quando l'anteprima ufficiale non esiste; con `audio_match_voti`,
+  `audio_match_comuni`, `audio_match_offset`, `audio_match_fonte`, `audio_match_at`.
+  Gira dentro la Verifica **solo quando il match è debole** (`genius_match_score`
+  < 0,95) o su richiesta (`{"audio": true}` nel corpo), e dall'endpoint
+  `POST /db/songs/<id>/audio_check` (pulsante **🔊 Audio** nella tabella del
+  database): 3-8 s per brano. Le anteprime stanno in `anteprime/` (**non
+  versionata**, come `covers/`). ⚠️ Limite noto: freestyle, mixtape e brani fuori
+  catalogo non hanno anteprima ufficiale → "non verificabile", cioè nessun verdetto
+  invece di un sì.
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
   `do_download_playlist`): con yt-dlp recenti provocava "Video unavailable"/403.
 - **FORTISSIMO COMPARE (11/09/2026).** Aggiunti `fortissimo_compare_v3.py`, la
@@ -1494,4 +1520,64 @@ Da tenere presente nelle sessioni di lavoro successive:
   riprendeva lo stato salvato e suonava aggiornando `playback_state` ogni 4 s
   (chiusi anche gli altri 5 browser di automazione rimasti aperti da sessioni
   precedenti: il Chrome dell'utente non è stato toccato).
+
+- **«LA CANZONE TROVATA SU GENIUS È DAVVERO QUESTA?» — CONFERMA AUDIO (🔊,
+  18/09/2026).** Domanda di Alessandro: «c'è un modo per avere la certezza che la
+  canzone x è stata veramente trovata su Genius e non è un falso positivo? ad
+  esempio scaricando la canzone trovata su genius e confrontando l'audio con quello
+  del computer presunto». La Verifica abbinava il brano **solo col testo**
+  (`match_score` = 0,80·titolo + 0,20·artista, soglie 0,55 e 0,75), e i falsi
+  positivi si vedevano nei dati veri: `song_b6e7cc46b04c` (*Fast Lane(Eminem &
+  Royce Da 5'9 Remix)*) è finita su una pagina di **Frost Icewalker & Dante** con
+  score **0,589**, il punteggio più basso delle 39 righe che ne hanno uno (34 sopra
+  0,95). Genius **non ospita audio** (è un database di testi), quindi la strada è
+  l'**anteprima ufficiale di 30 s di iTunes** (`itunes.apple.com/search`, API
+  pubblica senza chiave, campo `previewUrl`) cercata **DENTRO il file locale**:
+  1. spettrogramma → **picchi** = massimi locali frequenza × tempo (con i "più
+     forti del frame" la banda dei bassi veniva scelta in ogni istante e gli hash si
+     ripetevano);
+  2. **hash** di coppie di picchi `(f1, f2, Δt)`;
+  3. **istogramma degli scarti temporali**: se è lo stesso brano centinaia di hash
+     cadono sullo STESSO offset, fra brani diversi l'istogramma è piatto.
+  Misure del 18/09/2026 con le funzioni dell'app: *21 Questions* (50 Cent / Nate
+  Dogg) → **2.525 hash allineati a 76,0 s** contro **5-9 hash** di 8 brani presi a
+  caso dalla libreria (e **806 contro 16** sul caso sintetico del test: un brano
+  fabbricato in casa e la sua anteprima ricodificata in MP3). La durata da sola
+  **non** basta: il file locale è 258,6 s contro i 224,4 s del disco ufficiale e
+  l'anteprima sta *dentro* il file — la durata direbbe "diverso", l'audio dice
+  "uguale". In pagina: **pastiglia nella riga** (✓ confermato / ✗ non confermato /
+  ? ambiguo / – non verificabile, col numero di hash, l'offset e la fonte
+  nell'anteprima al passaggio del mouse) e pulsante **🔊 Audio**; nel backend
+  l'esito va in `songs.audio_match_*` (**6 colonne nuove**, migrazione automatica
+  come per `genius_match_score`) e c'è l'endpoint dedicato
+  `POST /db/songs/<id>/audio_check`. Il passo gira **anche nella Verifica** quando
+  il match testuale è debole (`genius_match_score` < 0,95) o su richiesta
+  (`{"audio": true}`): non si attiva su "Verifica tutto" delle righe mai abbinate,
+  che altrimenti passerebbe da 890 × 8 s. **Nessuna dipendenza nuova** (ffmpeg +
+  numpy + librosa, già in `requirements.txt`: `chromaprint`/`pyacoustid` non
+  servivano) e **nessun nuovo passo nei requisiti di sistema**. Le anteprime si
+  scaricano una volta in `anteprime/` (**non versionata**, come `covers/`).
+  Verifiche del 18/09/2026: **52 test nuovi** (`test_audio_match.py` — funzioni pure
+  in esecuzione reale, regressione del difetto dei picchi "più forti del frame",
+  prova completa su WAV+MP3 fabbricati, `chipAudio` in JavaScriptCore, endpoint e
+  pagine sull'app viva) e **334 test di suite** (erano 282); la misura sui brani
+  veri (2.525 contro 5-9); il caso reale col pulsante e con `curl` su
+  *21 Questions* → esito **confermato**, 1.230 hash allineati a 76,0 s, scritto nel
+  database (voti, comuni, offset, fonte `iTunes 6811474800 · 50 Cent — 21 Questions
+  (feat. Nate Dogg) (224,4 s)`, data); le **5 righe sospette** (le più a rischio,
+  `genius_match_score` < 0,95) controllate una per una: **tutte "non
+  verificabile"** perché di quei brani (freestyle, mixtape, un diss track) non
+  esiste un'anteprima ufficiale — e la nuova **guardia sull'artista**
+  (`artista_compatibile`) ha evitato di confrontare "Control" di Big Sean con
+  "Control (Kendrick Lamar Diss)" di *The Rap Mafia*, che iTunes proponeva per
+  titolo; pagine `/` `/browse` `/onyx` `/scheda` → **200** dopo il riavvio (log di
+  avvio senza errori); backup del database prima di scrivere in
+  `/tmp/samplelab_backup_18set2026_pre_audio.db`. Da sapere per il futuro: il
+  verdetto parla dell'anteprima **trovata da iTunes**, quindi se quella non esiste
+  o è di un altro artista il risultato è "non verificabile" — è il caso di tutti i
+  brani fuori catalogo, e per un remix/live/sped-up legittimo l'audio può non
+  combaciare ("non confermato" = allarme da leggere, non condanna); le soglie
+  (50 / 20 hash) sono tarate su queste misure e vanno riviste se si cambia la
+  matematica dell'impronta (`AUDIO_BIN_HASH`, `AUDIO_RAGGIO_FREQ`,
+  `AUDIO_RAGGIO_TEMPO`, `AUDIO_DT_MAX`, `AUDIO_COPPIE`).
 
