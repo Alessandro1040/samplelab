@@ -262,6 +262,33 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("function urlBackend(percorso)", self.pagina)
         self.assertIn("function origineHttp(valore)", self.pagina)
 
+    def test_legenda_dei_controlli_della_griglia(self):
+        # Richiesta di Alessandro (18/09/2026): «puoi aggiungere una legenda nel
+        # sampler? qualcosa che spieghi quello che hai appena detto, magari con un
+        # esempio di utilizzo» — cioè Offset, Battute Sel., Diventa Bar N° e
+        # Allinea griglia, con i numeri di un caso vero.
+        self.assertIn('<details class="grid-legend" id="legenda-griglia-main">', self.pagina)
+        self.assertIn("📖 Come funzionano Offset, Battute Sel., Diventa Bar N° e Allinea griglia",
+                      self.pagina)
+        # sta DOPO il pulsante del trim e FUORI dalla riga dei pulsanti (che è un
+        # flex: dentro sarebbe una colonnina stretta invece di un riquadro largo)
+        prima = self.pagina.index('id="trim-btn-main"')
+        dentro = self.pagina.index('id="legenda-griglia-main"')
+        self.assertGreater(dentro, prima, "la legenda viene dopo i controlli che spiega")
+        self.assertIn("</div>\n\n      <!-- 📖 Legenda", self.pagina,
+                      "la legenda sta dopo la </div> della riga, non dentro il flex")
+        corpo = self.pagina.split('id="legenda-griglia-main"')[1].split("</details>")[0]
+        for pezzo in ("<b>Offset</b>", "<b>Battute Sel.</b>", "<b>Diventa Bar N°</b>",
+                      "Adatta alla griglia ≠ Allinea griglia", "<b>Esempio</b>",
+                      "BPM = 60 × 4 ÷ 2 = 120", "offset = 10 − 2 × 1 = 8,0000 s"):
+            self.assertIn(pezzo, corpo, "manca %r nella legenda" % pezzo)
+        # è solo testo: si apre e si chiude da sé, senza JavaScript...
+        self.assertNotIn("toggleLegenda", self.pagina)
+        # ...e il suo CSS c'è (riquadro, corpo a scorrimento, esempi con la barretta)
+        self.assertIn(".grid-legend {", self.pagina)
+        self.assertIn(".grid-legend-body code { color:var(--accent); }", self.pagina)
+        self.assertIn(".grid-legend-body .lg-esempio {", self.pagina)
+
     def test_trova_battuta_e_stata_tolta(self):
         # Tolta il 18/09/2026 su richiesta di Alessandro: non deve restare niente,
         # né nella pagina né nel backend (rotta e funzioni).
@@ -316,3 +343,4 @@ class TestEndpointVivo(unittest.TestCase):
         stato, corpo = self.risposta("/db/stats")
         self.assertEqual(stato, 200)
         self.assertGreater(json.loads(corpo)["songs"], 0)
+

@@ -1177,3 +1177,30 @@ Da tenere presente nelle sessioni di lavoro successive:
   Guida del sampler aggiornata (riga 🔁 Battuta in §5.7 e il «perché» in §13) e
   mappa del codice §12 ricalcolata dal file vero.
 
+
+- **LEGENDA DEI CONTROLLI DELLA GRIGLIA NEL SAMPLER (18/09/2026).** Alessandro:
+  «puoi aggiungere una legenda nel sampler? qualcosa che spieghi quello che hai
+  appena detto [come funzionano **Offset**, **Battute Sel.**, **Diventa Bar N°** e
+  **Allinea griglia**], magari con un esempio di utilizzo». Fatto: sotto la riga di
+  quei controlli c'è un riquadro che si apre con un clic —
+  **📖 Come funzionano Offset, Battute Sel., Diventa Bar N° e Allinea griglia (con un
+  esempio)** — e spiega: il significato di ognuno con la formula vera
+  (`offset + k × passo`, `BPM = 60 × Battute Sel. ÷ (OUT − IN)`,
+  `offset = IN − (N − 1) × (240 ÷ BPM)`), la differenza fra **Adatta** e **Allinea**,
+  l'**esempio** numerico (selezione `10,0 → 12,0 s`: con `4` → 120 BPM e offset = IN;
+  con `8` e Bar N° `3` → 240 BPM e offset = 8 s) e cosa fare «se qualcosa non torna»
+  (metronomo che cade con la cassa, scivolamento = BPM sbagliato di poco, «gira» =
+  multiplo da correggere con **Moltiplica**). È un `<details>` come la 📖 Legenda del
+  pannello SQL: si apre e si chiude da sé, **senza JavaScript**, e non tocca niente
+  nel brano. Corretta anche una frase stantia della guida (§8, punto 2): diceva che
+  la selezione riempie «sempre `Battute Sel./4` celle, che siano quarti o battute»,
+  mentre il `/4` vale solo con l'unità a `1 bar` (le celle hanno la larghezza
+  dell'unità: `celle = Battute Sel. ÷ (4 × unità)`).
+  Verifiche del 18/09/2026: **1 test nuovo** (`test_sampler_trim.py`, 14 in tutto:
+  presenza della legenda, contenuto con l'esempio, e il controllo che sia **fuori**
+  dalla riga dei pulsanti — dentro al flex sarebbe una colonnina stretta) e **197
+  test di suite**; in **Chrome vero** la legenda è chiusa all'apertura, si apre al
+  clic (contenuto visibile, `offsetHeight` > 0), si richiude al secondo clic e il
+  riquadro resta largo quanto la riga dei controlli; mappa del codice §12 ricalcolata
+  dal file vero (il documento del sampler ora finisce a riga **3143**).
+

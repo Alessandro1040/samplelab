@@ -994,6 +994,29 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
 }
 .btn-align-grid:hover { background:#8a6ebf; border-color:#8a6ebf; }
 .btn-align-grid:active { transform:scale(0.95); }
+/* 📖 Legenda dei controlli della griglia: si apre con un clic (è un <details>,
+   quindi niente JavaScript) e spiega Offset, Battute Sel., Diventa Bar N° e
+   Allinea griglia con un esempio pratico. */
+.grid-legend {
+  margin:0 12px 8px; padding:6px 10px;
+  background:var(--surface2); border:1px solid var(--border2); border-radius:6px;
+}
+.grid-legend summary {
+  font-family:'Space Mono', monospace; font-size:10px; color:var(--muted);
+  cursor:pointer; letter-spacing:.02em;
+}
+.grid-legend[open] summary { color:var(--accent); margin-bottom:6px; }
+.grid-legend-body {
+  font-family:'Space Mono', monospace; font-size:10px; color:var(--muted);
+  line-height:1.75; max-height:280px; overflow:auto;
+}
+.grid-legend-body p { margin:6px 0; }
+.grid-legend-body b { color:var(--text); }
+.grid-legend-body code { color:var(--accent); }
+.grid-legend-body .lg-esempio {
+  border-left:2px solid var(--accent2); padding-left:8px;
+}
+
 
 .btn-snap-grid {
   background:var(--surface2); border:1px solid var(--border2); color:var(--text);
@@ -1385,6 +1408,52 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
         <button class="btn-align-grid" onclick="alignGridToSelection('main')">Allinea griglia</button>
         <button class="grid-btn active" id="trim-btn-main" onclick="toggleTrimGiallo('main')" title="Trim giallo visibile (selezione IN/OUT del sample) — clic per nasconderlo del tutto">✂ Trim giallo on</button>
       </div>
+
+      <!-- 📖 Legenda dei controlli della griglia (richiesta del 18/09/2026): spiega
+           Offset, Battute Sel., Diventa Bar N° e Allinea griglia con un esempio.
+           È un <details>: si apre e si chiude da sé, senza JavaScript, e non
+           tocca niente (è solo testo). -->
+      <details class="grid-legend" id="legenda-griglia-main">
+        <summary>📖 Come funzionano Offset, Battute Sel., Diventa Bar N° e Allinea griglia (con un esempio)</summary>
+        <div class="grid-legend-body">
+          <p><b>Offset</b> (secondi) — è lo <b>zero della griglia</b>: le linee cadono a
+          <code>offset + k × passo</code>, dove il passo è l'unità scelta (<code>1 bar</code> =
+          <code>240 ÷ BPM</code> secondi). Con <code>0</code> la prima linea è a 0,000 s, con
+          <code>0,5</code> a mezzo secondo; accetta anche i negativi (<code>-0,13</code>).
+          Sposta anche <b>dove si aggancia</b> la selezione — <code>offset + round((t − offset) ÷ passo) × passo</code>
+          (è la formula di <b>Adatta alla griglia</b>) — e <b>dove batte il metronomo</b>, che
+          conta dall'offset con l'accento sul primo colpo di battuta.</p>
+
+          <p><b>Battute Sel.</b> — non sono battute ma <b>quarti</b>: dice <b>quanti quarti di musica
+          ci sono fra IN e OUT</b> (<code>4</code> = una battuta 4/4, <code>8</code> = due battute,
+          <code>6</code> = una e mezza; ammette i mezzi, <code>0,5</code>). La usa <b>Allinea griglia</b>
+          per il BPM: <code>BPM = 60 × Battute Sel. ÷ (OUT − IN)</code>. Da sola non muove niente.</p>
+
+          <p><b>Diventa Bar N°</b> — che <b>numero deve avere la battuta in cui cade IN</b>
+          (predefinito <code>1</code>). La usa <b>Allinea griglia</b>, che di conseguenza sposta lo
+          zero della griglia: <code>offset = IN − (N − 1) × (240 ÷ BPM)</code>. Serve a far
+          combaciare i numeri del righello con quelli del DAW o dello spartito.</p>
+
+          <p><b>Adatta alla griglia ≠ Allinea griglia</b> — <b>Adatta</b> prende IN e OUT e li porta
+          sul punto più vicino della griglia <i>che hai già</i> (non tocca BPM e offset; con la
+          griglia spenta o BPM 0 non fa niente). <b>Allinea</b> invece <i>rifà</i> la griglia:
+          riscrive BPM e offset dai conti su Battute Sel. + Diventa Bar N°, poi aggancia. Se il
+          BPM che esce è fuori da 1–1000 avvisa e non cambia nulla.</p>
+
+          <p class="lg-esempio"><b>Esempio</b> — selezione <code>10,0 → 12,0 s</code> (2,000 s di musica)
+          con <b>Battute Sel. 4</b>: <code>BPM = 60 × 4 ÷ 2 = 120</code> e
+          <code>offset = IN = 10,0000 s</code>. Se invece la selezione è <b>due</b> battute
+          (<b>Battute Sel. 8</b>) e nel brano è la <b>terza</b> (<b>Diventa Bar N° 3</b>):
+          <code>BPM = 60 × 8 ÷ 2 = 240</code> e <code>offset = 10 − 2 × 1 = 8,0000 s</code>
+          (a 240 BPM una battuta dura 1 s), così il righello numera la selezione come battuta 3.</p>
+
+          <p class="lg-esempio"><b>Se qualcosa non torna</b> — premi <b>Allinea griglia</b> e ascolta il
+          metronomo a <code>ogni 1/4</code>: se i colpi <b>cadono con la cassa</b> il BPM è giusto. Se
+          «scivola» sempre nella stessa direzione è sbagliato di poco; se «gira» è un multiplo
+          (riprova con <b>Moltiplica</b> ×2 o ×0,5). Se invece tiene ma è tutto spostato, non è il
+          BPM: è l'<b>offset</b>.</p>
+        </div>
+      </details>
 
       <div class="grid-row">
         <button class="tap-btn" id="tap-btn-main" onclick="tapTempo('main')">🎵 TAP</button>
