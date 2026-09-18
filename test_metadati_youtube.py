@@ -422,6 +422,9 @@ class TestGiroDellaPlaylist(unittest.TestCase):
         self.assertEqual(job["registered"], 2)
         self.assertEqual(job["con_metadati"], 2)
         self.assertEqual(job["con_anno"], 2)
+        self.assertEqual(job["nuovi"], 2)              # due righe nuove
+        self.assertEqual(job["gia_in_libreria"], 0)
+        self.assertEqual(job["file_non_agganciati"], [])
         with APP.get_db() as conn:
             righe = {r["title"]: r for r in conn.execute("SELECT * FROM songs")}
         uno, due = righe["Brano Uno"], righe["Brano Due"]
@@ -433,9 +436,39 @@ class TestGiroDellaPlaylist(unittest.TestCase):
         self.assertEqual(uno["yt_channel"], "Canale Uno")
         self.assertEqual(uno["yt_description"], "descrizione uno")
         self.assertEqual(uno["yt_views"], 10)
+        # la playlist di provenienza resta scritta nella riga (si ritrovano
+        # cercandone il nome nel tab Database)
+        self.assertEqual(uno["yt_playlist"], "Playlist di prova")
+        self.assertEqual(due["yt_playlist"], "Playlist di prova")
         self.assertEqual(due["year"], 2001)
         self.assertEqual(due["yt_channel"], "Canale Due")   # ripiego sull'uploader
         self.assertEqual(due["yt_description"], "descrizione due")
+
+    def test_la_riga_che_c_era_gia_col_suo_file_viene_detta(self):
+        # Il caso vero del 18/09/2026: «7 brani scaricati, 7 registrati nel
+        # database» e Alessandro non li trovava. Due di quei brani erano GIÀ in
+        # libreria con un loro file: il file nuovo non si aggancia (un file scelto
+        # a mano non si sovrascrive) e la riga non diceva da quale playlist
+        # veniva. Ora il job lo dice e la playlist resta scritta.
+        with APP.get_db() as conn:
+            conn.execute("INSERT INTO songs(id,title,artist,local_file) VALUES(?,?,?,?)",
+                         ("song_gia", "Brano Uno", "Artista Uno", "il-mio-file-vecchio.mp3"))
+        job = self.lancia()
+        self.assertEqual(job["status"], "done")
+        self.assertEqual(job["registered"], 2)
+        self.assertEqual(job["nuovi"], 1)                 # solo «Brano Due» è nuovo
+        self.assertEqual(job["gia_in_libreria"], 1)
+        self.assertEqual(len(job["file_non_agganciati"]), 1)
+        voce = job["file_non_agganciati"][0]
+        self.assertEqual(voce["song_id"], "song_gia")
+        self.assertEqual(voce["titolo"], "Artista Uno - Brano Uno")
+        self.assertEqual(voce["file"], "Artista Uno - Brano Uno [aaaaaaaaaaa].mp3")
+        self.assertEqual(voce["file_in_tabella"], "il-mio-file-vecchio.mp3")
+        with APP.get_db() as conn:
+            riga = conn.execute("SELECT * FROM songs WHERE id='song_gia'").fetchone()
+        self.assertEqual(riga["local_file"], "il-mio-file-vecchio.mp3")   # non toccato
+        self.assertEqual(riga["yt_playlist"], "Playlist di prova")        # ma si sa da dove viene
+        self.assertEqual(riga["yt_video_id"], "aaaaaaaaaaa")              # e i metadati arrivano
 
     def test_playlist_senza_data_niente_anno_ma_la_riga_si_crea(self):
         # yt-dlp può restituire voci senza `upload_date`/descrizione: le righe si
@@ -468,6 +501,7 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn('("anteprima_file", "TEXT")', src)
         self.assertIn(") + CAMPI_YOUTUBE + (", src)
         self.assertIn('("video_file", "TEXT"),', src)
+        self.assertIn('("yt_playlist", "TEXT"),', src)
 
     def test_ogni_colonna_e_documentata_nella_legenda(self):
         for nome, _ in APP.CAMPI_YOUTUBE:
@@ -479,9 +513,19 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("per_id = mappa_metadati_playlist(", src)
         self.assertIn("vid = id_video_dal_nome_file(f)", src)
         self.assertIn("campi = per_id.get(vid) or {}", src)
-        self.assertIn("register_local_file(f, campi, video=video_per_id.get(vid))", src)
+        self.assertIn("register_local_file(f, campi, video=video_per_id.get(vid),", src)
+        self.assertIn("playlist=nome_playlist)", src)
         self.assertIn('jobs[job_id]["con_metadati"] = con_metadati', src)
         self.assertIn('jobs[job_id]["con_anno"] = con_anno', src)
+        self.assertIn('jobs[job_id]["nuovi"] = nuovi', src)
+        self.assertIn('jobs[job_id]["file_non_agganciati"] = file_non_agganciati', src)
+
+    def test_la_ricerca_della_pagina_cerca_anche_la_playlist(self):
+        html = leggi(PAGINA_PATH)
+        self.assertIn("(s.yt_playlist||'').toLowerCase().includes(qq)", html)
+        self.assertIn("gia_in_libreria", html)
+        self.assertIn("file_non_agganciati", html)
+        self.assertTrue(APP.COLUMN_DOCS["songs"].get("yt_playlist", "").strip())
 
     def test_la_pagina_lo_dice(self):
         html = leggi(PAGINA_PATH)

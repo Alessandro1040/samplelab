@@ -415,6 +415,11 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               # o caricato dal computer): non è un metadata del video,
                               # è il file che la riga ha, come `local_file` per l'audio.
                               ("video_file", "TEXT"),
+                              # ── PLAYLIST DI PROVENIENZA (18/09/2026) ──
+                              # Il titolo della playlist da cui è arrivata la riga
+                              # («Remixes Collection Vol. 2»): serve a RITROVARLE
+                              # (la ricerca del tab Database cerca anche questo).
+                              ("yt_playlist", "TEXT"),
                               ):
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
@@ -631,7 +636,7 @@ def find_existing_song(conn, title, artist, youtube_url="", exclude_id=""):
 
 
 def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", duration=None,
-                           extra=None, video_file=None):
+                           extra=None, video_file=None, playlist=None):
     """La riga di questa canzone, creandola solo se non c'è davvero. Ritorna
     `(song_id, creata, come)`: `come` è la prova del riconoscimento.
 
@@ -644,6 +649,10 @@ def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", d
     `video_file` è il nome del file video in `videos/` (18/09/2026): come
     `local_file` si aggancia a QUESTA riga e **solo se è vuoto** — un video
     scelto a mano non viene sostituito da un download della playlist.
+
+    `playlist` è il titolo della playlist da cui è arrivato il file: si scrive in
+    `yt_playlist` **solo se è vuoto** (la prima playlist da cui viene la canzone),
+    così le righe di una playlist si ritrovano cercandone il nome.
     """
     extra = dict(extra or {})
     anno_yt = extra.pop("year", None) or None
@@ -668,6 +677,10 @@ def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", d
             conn.execute("UPDATE songs SET video_file=?, updated_at=datetime('now') "
                          "WHERE id=? AND (video_file IS NULL OR video_file='')",
                          (video_file, sid))
+        if playlist:
+            conn.execute("UPDATE songs SET yt_playlist=?, updated_at=datetime('now') "
+                         "WHERE id=? AND (yt_playlist IS NULL OR yt_playlist='')",
+                         (playlist, sid))
         if extra:
             # I dati del video si riscrivono a ogni download riuscito: sono fatti
             # letti da YouTube, non scelte fatte a mano.
@@ -690,6 +703,9 @@ def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", d
     if video_file:
         colonne.append("video_file")
         valori.append(video_file)
+    if playlist:
+        colonne.append("yt_playlist")
+        valori.append(playlist)
     conn.execute("INSERT INTO songs(" + ", ".join(colonne) + ") VALUES(" +
                  ", ".join(["?"] * len(colonne)) + ")", valori)
     return sid, True, "nuova riga"
@@ -735,7 +751,7 @@ def check_pair_exists_loose(data,song_x_meta,song_yi_meta,category):
 
 # ── SONG HELPERS (SQLite) ────────────────────────────────────────────────────
 def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", duration=None,
-                          extra=None, video_file=None):
+                          extra=None, video_file=None, playlist=None):
     """La riga di questa canzone (id), creandola **solo se manca davvero**.
 
     Dal 19/09/2026 passa da `resolve_or_create_song`, cioè dal confronto
@@ -748,7 +764,7 @@ def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", du
     `title` a NULL e `None.lower()` faceva fallire ogni chiamata con 500.
     """
     sid, _, _ = resolve_or_create_song(conn, title, artist, youtube_url, local_file, duration,
-                                       extra, video_file)
+                                       extra, video_file, playlist)
     return sid
 
 # ── AUDIO ANALYSIS ────────────────────────────────────────────────────────────
@@ -2217,7 +2233,7 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         jobs[job_id]["error"] = str(e)
 
 # ── PLAYLIST DOWNLOAD ─────────────────────────────────────────────────────────
-def register_local_file(filename, campi=None, video=None, local_file=None):
+def register_local_file(filename, campi=None, video=None, local_file=None, playlist=None):
     """Registra un file scaricato nella tabella songs (parsing artista - titolo).
 
     `campi` sono i metadati del video YouTube (vedi `campi_youtube`): la riga
@@ -2228,6 +2244,9 @@ def register_local_file(filename, campi=None, video=None, local_file=None):
     (18/09/2026), e `local_file` è il file audio da scrivere in tabella: si passa
     `""` quando il file registrato è SOLO un video (l'audio non c'è — la riga
     esiste lo stesso, con la sua scheda e il suo video).
+
+    `playlist` è il titolo della playlist di provenienza: si scrive in
+    `yt_playlist` solo se quella riga non ne ha già una (18/09/2026).
     """
     raw = clean_filename(filename)
     # Rimuove il suffisso ' [idYouTube]' aggiunto da yt-dlp nel template
@@ -2238,7 +2257,7 @@ def register_local_file(filename, campi=None, video=None, local_file=None):
     audio = filename if local_file is None else local_file
     with get_db() as conn:
         sid = get_or_create_song_db(conn, title, artist, local_file=audio, extra=campi,
-                                    video_file=video)
+                                    video_file=video, playlist=playlist)
     return sid
 
 # ── DOWNLOAD AUTOMATICO DI UNA RIGA DEL DATABASE ─────────────────────────────
@@ -2571,20 +2590,52 @@ def do_download_playlist(job_id, url, fmt="mp3", video=False):
         # Registra ogni brano nel database. Con i metadati del video, quando ci
         # sono: la riga nasce già con data di caricamento, anno, canale,
         # descrizione, viste, tag, categoria, miniatura e durata (campi `yt_*`).
+        #
+        # Prima si guarda com'era la libreria (id → file locale): serve a dire la
+        # VERITÀ nel messaggio finale. Il 18/09/2026 Alessandro ha visto «7 brani
+        # scaricati, 7 registrati nel database» e non li trovava: due di quelle
+        # canzoni erano già in libreria CON un loro file, quindi il file appena
+        # scaricato non è stato agganciato a niente (resta in `downloads/`) e la
+        # riga non diceva da quale playlist veniva.
+        nome_playlist = (info or {}).get("title", "") if info else ""
+        with get_db() as conn:
+            prima = {r["id"]: (r["local_file"] or "")
+                     for r in conn.execute("SELECT id, local_file FROM songs")}
         registered = 0
         con_metadati = 0
         con_anno = 0
+        nuovi = 0
+        gia_in_libreria = 0
+        file_non_agganciati = []
         id_con_audio = set()
         for f in new_files:
             vid = id_video_dal_nome_file(f)
             campi = per_id.get(vid) or {}
             if campi:
                 con_metadati += 1
-            if register_local_file(f, campi, video=video_per_id.get(vid)):
+            sid = register_local_file(f, campi, video=video_per_id.get(vid),
+                                      playlist=nome_playlist)
+            if sid:
                 registered += 1
                 id_con_audio.add(vid)
                 if campi.get("year"):
                     con_anno += 1
+                if sid in prima:
+                    gia_in_libreria += 1
+                    if prima[sid]:
+                        # La riga ha GIÀ un file suo: il nuovo non si aggancia (un
+                        # file scelto a mano non si sovrascrive) — ma va detto, con
+                        # il nome del file, altrimenti sembra che sia andato perso.
+                        file_non_agganciati.append({"song_id": sid, "titolo": "",
+                                                    "file": f, "file_in_tabella": prima[sid]})
+                else:
+                    nuovi += 1
+        for voce in file_non_agganciati:
+            with get_db() as conn:
+                r = conn.execute("SELECT title, artist FROM songs WHERE id=?",
+                                 (voce["song_id"],)).fetchone()
+            if r:
+                voce["titolo"] = " - ".join(x for x in [r["artist"] or "", r["title"] or ""] if x)
         # I video che sono rimasti senza file audio (la conversione in mp3 non è
         # riuscita): la riga nasce lo stesso, col video e la sua scheda — senza
         # `local_file`, perché l'audio non c'è.
@@ -2592,17 +2643,20 @@ def do_download_playlist(job_id, url, fmt="mp3", video=False):
             if vid in id_con_audio:
                 continue
             register_local_file(nome_video, per_id.get(vid) or {}, video=nome_video,
-                                local_file="")
+                                local_file="", playlist=nome_playlist)
             print(f"[playlist {job_id}] riga registrata col solo video: {nome_video}")
 
         jobs[job_id]["status"] = "done"
         jobs[job_id]["files"] = new_files
         jobs[job_id]["count"] = len(new_files)
         jobs[job_id]["registered"] = registered
+        jobs[job_id]["nuovi"] = nuovi
+        jobs[job_id]["gia_in_libreria"] = gia_in_libreria
+        jobs[job_id]["file_non_agganciati"] = file_non_agganciati
         jobs[job_id]["con_metadati"] = con_metadati
         jobs[job_id]["con_anno"] = con_anno
         jobs[job_id]["con_video"] = len(video_per_id)
-        jobs[job_id]["playlist_title"] = info.get("title", "") if info else ""
+        jobs[job_id]["playlist_title"] = nome_playlist
 
     except Exception as e:
         print(f"[playlist {job_id}] Errore: {e}")
@@ -6213,6 +6267,7 @@ COLUMN_DOCS = {"songs": {
     "testo_audio_riferimento": "l'audio di riferimento confrontato (anteprima ufficiale), relativo a 'anteprime/'",
     "anteprima_file": "l'anteprima ufficiale di iTunes usata dal controllo audio (in 'anteprime/', cartella non versionata)",
     "video_file": "il VIDEO della canzone: nome del file in 'videos/' (MP4 scaricato da YouTube o caricato dal computer); vuoto = la canzone non ha un video",
+    "yt_playlist": "la PLAYLIST YouTube da cui è arrivata la canzone (es. 'Remixes Collection Vol. 2'): la ricerca del tab Database cerca anche qui, così le righe di una playlist si ritrovano",
     "yt_video_id": "l'id del video YouTube (è l'`[id]` nel nome del file in downloads/)",
     "yt_upload_date": "data di CARICAMENTO del video su YouTube ('YYYY-MM-DD'; è quella che dà l'anno della riga)",
     "yt_release_date": "data di uscita dichiarata dal video, quando c'è ('YYYY-MM-DD'; non è l'anno del brano: «Who Knew» è caricato nel 2018 ma è del 2000)",

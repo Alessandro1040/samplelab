@@ -563,7 +563,7 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
 <div class="db-section">
   <div class="db-header">
     <h2>🗄️ Database Canzoni</h2>
-    <input class="db-search" id="db-search" placeholder="Cerca per nome, artista, album…" oninput="filterDb(this.value)">
+    <input class="db-search" id="db-search" placeholder="Cerca per nome, artista, album, playlist…" oninput="filterDb(this.value)">
     <button class="btn-sm" onclick="document.getElementById('db-relations-panel').style.display=document.getElementById('db-relations-panel').style.display==='none'?'block':'none'">🔗 Campionamenti</button>
     <button class="db-verify-all-btn" id="verify-all-btn" onclick="verifyAllTracks()">🔍 Verifica tutto</button>
     <button class="db-cancel-btn" id="verify-all-cancel-btn" onclick="cancelVerifyAll()">⏹ Annulla</button>
@@ -711,7 +711,7 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
       </label>
       <button class="btn-db-add" id="db-playlist-btn" onclick="dbDownloadPlaylist()">📥 Scarica Playlist</button>
     </div>
-    <div id="db-playlist-status" style="margin-top:8px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)"></div>
+    <div id="db-playlist-status" style="margin-top:8px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);white-space:pre-line"></div>
   </div>
 
   <div class="db-table-wrap" style="margin-top:20px">
@@ -5022,9 +5022,13 @@ async function autoLoadDb(){
 
 function filterDb(q){
   const qq=q.toLowerCase();
+  // Si cerca anche nella PLAYLIST di provenienza (`yt_playlist`): chi ha appena
+  // scaricato «Remixes Collection Vol. 2» ritrova quei brani scrivendolo qui
+  // (prima il nome della playlist non era salvato da nessuna parte).
   const filtered=allDbSongs.filter(s=>
     (s.title||'').toLowerCase().includes(qq)||(s.artist||'').toLowerCase().includes(qq)||
-    (s.album||'').toLowerCase().includes(qq)||(s.local_file||'').toLowerCase().includes(qq));
+    (s.album||'').toLowerCase().includes(qq)||(s.local_file||'').toLowerCase().includes(qq)||
+    (s.yt_playlist||'').toLowerCase().includes(qq));
   renderDbTable(filtered);
 }
 
@@ -6035,7 +6039,13 @@ async function dbDownloadPlaylist(){
         if(j.status==='done'){
           clearInterval(poll);
           const meta=[j.con_anno?`anno da YouTube per ${j.con_anno}`:'',j.con_metadati?`metadati del video su ${j.con_metadati}`:'',j.con_video?`video MP4 per ${j.con_video}`:''].filter(Boolean).join(' · ');
-          status.textContent=`✅ ${j.playlist_title?`"${j.playlist_title}" · `:''}${j.count||0} brani scaricati, ${j.registered||0} registrati nel database${meta?` · ${meta}`:''}`;
+          // Il conteggio dice la VERITÀ: «registrati» da solo faceva credere che
+          // fossero canzoni nuove (18/09/2026: 7 registrati, ma 2 erano già in
+          // libreria con un loro file — il file nuovo non è stato agganciato).
+          const conta=(j.nuovi!=null)?`${j.nuovi} nuovi in libreria, ${j.gia_in_libreria||0} già c'erano`:`${j.registered||0} registrati nel database`;
+          const nonAgg=(j.file_non_agganciati||[]);
+          status.textContent=`✅ ${j.playlist_title?`"${j.playlist_title}" · `:''}${j.count||0} brani scaricati, ${conta}${meta?` · ${meta}`:''}`
+            + (nonAgg.length?`\n⚠️ ${nonAgg.length} file NON agganciati (la riga ha già un suo file): `+nonAgg.map(x=>`${x.titolo||x.song_id} → ${x.file}`).join(' · ')+' — restano in downloads/ e si scelgono con ✏️ Edit → File locale':'');
           urlEl.value='';
           loadDb();
           refreshDbFileSelect();

@@ -545,6 +545,23 @@ non due. La riga che nasce porta quindi sia `local_file` (l'mp3) sia `video_file
 Senza la casella non cambia niente: un `.mp4` scaricato è un file audio come gli
 altri e viene convertito in mp3 come prima (c'è un test apposta).
 
+### Il nome della playlist resta scritto nella riga (`yt_playlist`)
+
+Ogni riga che arriva da una playlist porta con sé **il titolo della playlist**
+(colonna `yt_playlist`, scritta solo se la riga non ne ha già una) e la **ricerca
+del tab Database cerca anche lì**: scrivendo «Remixes Collection Vol. 2» si
+ritrovano tutti i suoi brani. Prima quel nome non era salvato da nessuna parte.
+
+⚠️ **Il messaggio finale ora dice la verità** (18/09/2026, caso vero: Alessandro ha
+letto *«7 brani scaricati, 7 registrati nel database»* e non li trovava). «7
+registrati» contava anche le canzoni che erano **già in libreria**: due di quei
+brani avevano già un loro file, quindi il file appena scaricato **non è stato
+agganciato a niente** (un file scelto a mano non si sovrascrive) ed è rimasto in
+`downloads/`. Ora l'esito dice **quanti sono nuovi e quanti c'erano già**, e se
+qualche file non è stato agganciato lo **elenca col nome del file** e con la riga
+a cui apparteneva, dicendo dove sono finiti e come sceglierli (✏️ Edit → *File
+locale*).
+
 ### Su ogni canzone: il pulsante 🎬 Video
 
 Nella tabella del 🗄️ Database ogni riga ha **🎬 Video**, che apre un modale con:
@@ -672,6 +689,15 @@ Da tenere presente nelle sessioni di lavoro successive:
   (`DL_OUTTMPL`), non dal titolo. ⚠️ L'anno che viene dal caricamento può non essere
   quello del brano («Who Knew»: caricato il 31/07/2018, il disco è del 2000). Dettagli
   nella sezione «Playlist YouTube: ogni riga porta i dati del video».
+- **⚠️ Il messaggio della playlist dice anche quante canzoni c'erano già
+  (18/09/2026).** «N brani scaricati, N registrati nel database» faceva credere che
+  fossero tutte righe nuove: in realtà `register_local_file` conta anche i brani
+  riconosciuti in libreria, e per una riga che ha **già** un suo file il nuovo non
+  viene agganciato (resta in `downloads/`). Ora l'esito dice *«N nuovi in libreria,
+  M già c'erano»* e **elenca i file non agganciati** con la riga a cui
+  appartengono. Il titolo della playlist di provenienza si salva in `yt_playlist` e
+  **la ricerca del tab Database cerca anche lì** (prima non c'era modo di
+  ritrovare i brani di una playlist).
 - **🎬 Il video di ogni canzone, in `videos/` (18/09/2026).** Oltre all'audio, la
   riga può avere il suo **video**: la casella «🎬 Anche il video (MP4)» della
   playlist lo scarica per ogni brano (e ne ricava l'mp3, un download solo), il
