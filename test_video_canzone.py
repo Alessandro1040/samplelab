@@ -156,8 +156,13 @@ class BaseVideo(unittest.TestCase):
         """yt-dlp finto: scrive lui il file (nella cartella dell'outtmpl) e torna l'info.
 
         Il formato chiesto dice se è un video o un audio, così si prova la strada
-        vera di `_do_download` senza toccare la rete.
+        vera di `_do_download` senza toccare la rete. `chiamate` registra gli URL
+        chiesti (per verificare DA DOVE arriva il video) e `fallisci_url` gli URL
+        diretti che devono fallire (per provare che NON si prende un altro video).
         """
+
+        chiamate = []
+        fallisci_url = ()
 
         def __init__(self, opts):
             self.opts = opts
@@ -175,6 +180,7 @@ class BaseVideo(unittest.TestCase):
             return ""
 
         def extract_info(self, url, download=True):
+            type(self).chiamate.append(str(url))
             # La RICERCA YouTube (ytsearch) non ha `outtmpl`: si risponde con una
             # voce sola, come fa yt-dlp, così si prova anche la strada vera
             # «artista + titolo → video → file».
@@ -182,6 +188,8 @@ class BaseVideo(unittest.TestCase):
                 return {"entries": [{"title": "Artista Di Prova - Brano Di Prova",
                                      "webpage_url": "https://www.youtube.com/watch?v=idtst123456",
                                      "id": "idtst123456", "duration": 200}]}
+            if str(url) in tuple(type(self).fallisci_url):
+                raise Exception("This video is unavailable (prova)")
             video = "bestvideo" in str(self.opts.get("format") or "")
             nome = ("Brano Di Prova [idtst123456].mp4" if video
                     else "Brano Di Prova [idtst123456].mp3")
@@ -203,6 +211,8 @@ class BaseVideo(unittest.TestCase):
         for cartella in (APP.DL_DIR, APP.VID_DIR, APP.TRASH_DIR):
             os.makedirs(cartella, exist_ok=True)
         APP.init_db()
+        self.FakeYDL.chiamate = []
+        self.FakeYDL.fallisci_url = ()
         APP.yt_dlp = types.SimpleNamespace(YoutubeDL=self.FakeYDL)
         self.client = APP.app.test_client()
 
@@ -233,7 +243,13 @@ class BaseVideo(unittest.TestCase):
 
 
 class TestDownloadVideoDellaRiga(BaseVideo):
-    """Il video scaricato da YouTube per una riga (`avvia_download_video_canzone`)."""
+    """Il video scaricato da YouTube per una riga (`avvia_download_video_canzone`).
+
+    Regola del 18/09/2026: il video è QUELLO della canzone — si prende dal link
+    YouTube della riga, o dall'id del video salvato col download; solo se non c'è
+    né l'uno né l'altro si cerca per artista + titolo (e se il link c'è ma quel
+    video non è scaricabile, il job lo dice: non prende un video diverso).
+    """
 
     def test_il_video_finisce_in_videos_e_si_aggancia_alla_riga(self):
         sid = self.crea_riga()
@@ -270,6 +286,62 @@ class TestDownloadVideoDellaRiga(BaseVideo):
         job, motivo = APP.avvia_download_video_canzone(sid)
         self.assertEqual(job, "")
         self.assertIn("niente da cercare", motivo)
+
+    def test_il_video_viene_dal_LINK_della_riga(self):
+        # Il caso vero del 18/09/2026: la riga aveva il link YouTube, ma il video
+        # veniva CERCATO per artista+titolo e scaricava un altro video («Public
+        # Enemy» è finita con «Public Enemy #1»). Ora si usa il link e non si cerca.
+        sid = self.crea_riga(youtube_url="https://www.youtube.com/watch?v=GmCU1u-g7LI")
+        job, motivo = APP.avvia_download_video_canzone(sid)
+        self.assertTrue(job, motivo)
+        self.assertTrue(self.aspetta(lambda: APP.jobs.get(job, {}).get("status") == "done"))
+        self.assertEqual(APP.jobs[job]["da_link"], True)
+        self.assertEqual(self.FakeYDL.chiamate,
+                         ["https://www.youtube.com/watch?v=GmCU1u-g7LI"])
+        self.assertFalse([u for u in self.FakeYDL.chiamate if "ytsearch" in u],
+                         "con un link non si deve cercare")
+
+    def test_il_video_viene_dall_id_salvato_col_download(self):
+        # Le righe arrivate da una playlist hanno l'id del video (`yt_video_id`):
+        # il link si ricostruisce da lì e RESTA scritto nella riga (per le volte
+        # dopo, e per il pulsante 🎬 dei giorni successivi).
+        sid = self.crea_riga(yt_video_id="GmCU1u-g7LI")
+        job, motivo = APP.avvia_download_video_canzone(sid)
+        self.assertTrue(job, motivo)
+        self.assertTrue(self.aspetta(lambda: APP.jobs.get(job, {}).get("status") == "done"))
+        self.assertEqual(APP.jobs[job]["da_link"], True)
+        self.assertEqual(self.FakeYDL.chiamate,
+                         ["https://www.youtube.com/watch?v=GmCU1u-g7LI"])
+        self.assertEqual(self.riga(sid)["youtube_url"],
+                         "https://www.youtube.com/watch?v=GmCU1u-g7LI")
+
+    def test_senza_link_ne_id_si_cerca_per_artista_e_titolo(self):
+        sid = self.crea_riga()
+        job, motivo = APP.avvia_download_video_canzone(sid)
+        self.assertTrue(job, motivo)
+        self.assertTrue(self.aspetta(lambda: APP.jobs.get(job, {}).get("status") == "done"))
+        self.assertEqual(APP.jobs[job]["da_link"], False)
+        self.assertTrue(any("ytsearch" in u for u in self.FakeYDL.chiamate))
+
+    def test_se_il_link_non_e_scaricabile_non_si_prende_un_altro_video(self):
+        # Il video del link non è disponibile: il job lo DICE e non scarica quello
+        # che troverebbe cercando (sarebbe un altro brano).
+        sid = self.crea_riga(youtube_url="https://www.youtube.com/watch?v=GmCU1u-g7LI")
+        self.FakeYDL.fallisci_url = ("https://www.youtube.com/watch?v=GmCU1u-g7LI",)
+        vero_sleep = APP.time.sleep
+        APP.time.sleep = lambda *a, **k: None      # niente 3+3 s fra i tentativi
+        try:
+            job, motivo = APP.avvia_download_video_canzone(sid)
+            self.assertTrue(job, motivo)
+            self.assertTrue(self.aspetta(lambda: APP.jobs.get(job, {}).get("status") == "error"))
+        finally:
+            APP.time.sleep = vero_sleep
+        self.assertIn("non è scaricabile", APP.jobs[job]["error"])
+        self.assertFalse([u for u in self.FakeYDL.chiamate if "ytsearch" in u],
+                         "non si deve cercare un altro video")
+        self.assertIsNone(self.riga(sid)["video_file"])
+        self.assertEqual(self.riga(sid)["youtube_url"],
+                         "https://www.youtube.com/watch?v=GmCU1u-g7LI")
 
 
 class TestFotoDelleCartelle(unittest.TestCase):

@@ -440,6 +440,10 @@ class TestGiroDellaPlaylist(unittest.TestCase):
         # cercandone il nome nel tab Database)
         self.assertEqual(uno["yt_playlist"], "Playlist di prova")
         self.assertEqual(due["yt_playlist"], "Playlist di prova")
+        # e il LINK YouTube del video resta scritto: è da lì che il pulsante 🎬
+        # Video riprende ESATTAMENTE quel video (18/09/2026)
+        self.assertEqual(uno["youtube_url"], "https://www.youtube.com/watch?v=aaaaaaaaaaa")
+        self.assertEqual(due["youtube_url"], "https://www.youtube.com/watch?v=bbbbbbbbbbb")
         self.assertEqual(due["year"], 2001)
         self.assertEqual(due["yt_channel"], "Canale Due")   # ripiego sull'uploader
         self.assertEqual(due["yt_description"], "descrizione due")
@@ -469,6 +473,39 @@ class TestGiroDellaPlaylist(unittest.TestCase):
         self.assertEqual(riga["local_file"], "il-mio-file-vecchio.mp3")   # non toccato
         self.assertEqual(riga["yt_playlist"], "Playlist di prova")        # ma si sa da dove viene
         self.assertEqual(riga["yt_video_id"], "aaaaaaaaaaa")              # e i metadati arrivano
+        self.assertEqual(riga["youtube_url"],                             # col link del video
+                         "https://www.youtube.com/watch?v=aaaaaaaaaaa")
+
+    def test_un_link_che_c_e_gia_non_si_tocca(self):
+        # Una riga che ha già il SUO link YouTube non si fa riscrivere dalla playlist:
+        # il pulsante 🎬 Video deve continuare a usare quello.
+        with APP.get_db() as conn:
+            conn.execute("INSERT INTO songs(id,title,artist,local_file,youtube_url) "
+                         "VALUES(?,?,?,?,?)",
+                         ("song_link", "Brano Uno", "Artista Uno", "mio.mp3",
+                          "https://www.youtube.com/watch?v=LINKMIO1234"))
+        self.lancia()
+        with APP.get_db() as conn:
+            riga = conn.execute("SELECT * FROM songs WHERE id='song_link'").fetchone()
+        self.assertEqual(riga["youtube_url"], "https://www.youtube.com/watch?v=LINKMIO1234")
+        self.assertEqual(riga["yt_video_id"], "aaaaaaaaaaa")   # i metadati sì
+
+    def test_riscaricare_la_playlist_non_segnala_file_fantasma(self):
+        # La stessa playlist riscaricata (stesso video → stesso nome file): la riga
+        # ha già QUEL file, quindi non c'è nessun «file non agganciato» da elencare
+        # (18/09/2026: un giro con la casella 🎬 avrebbe altrimenti avvisato per
+        # ogni brano, essendo «già in libreria»).
+        with APP.get_db() as conn:
+            conn.execute("INSERT INTO songs(id,title,artist,local_file) VALUES(?,?,?,?)",
+                         ("song_uguale", "Brano Uno", "Artista Uno",
+                          "Artista Uno - Brano Uno [aaaaaaaaaaa].mp3"))
+        job = self.lancia()
+        self.assertEqual(job["status"], "done")
+        self.assertEqual(job["gia_in_libreria"], 1)
+        self.assertEqual(job["file_non_agganciati"], [])
+        with APP.get_db() as conn:
+            riga = conn.execute("SELECT local_file FROM songs WHERE id='song_uguale'").fetchone()
+        self.assertEqual(riga["local_file"], "Artista Uno - Brano Uno [aaaaaaaaaaa].mp3")
 
     def test_playlist_senza_data_niente_anno_ma_la_riga_si_crea(self):
         # yt-dlp può restituire voci senza `upload_date`/descrizione: le righe si
@@ -514,7 +551,7 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("vid = id_video_dal_nome_file(f)", src)
         self.assertIn("campi = per_id.get(vid) or {}", src)
         self.assertIn("register_local_file(f, campi, video=video_per_id.get(vid),", src)
-        self.assertIn("playlist=nome_playlist)", src)
+        self.assertIn("playlist=nome_playlist, youtube_url=url_video(vid))", src)
         self.assertIn('jobs[job_id]["con_metadati"] = con_metadati', src)
         self.assertIn('jobs[job_id]["con_anno"] = con_anno', src)
         self.assertIn('jobs[job_id]["nuovi"] = nuovi', src)

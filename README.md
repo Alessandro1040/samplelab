@@ -582,17 +582,42 @@ Nella tabella del 🗄️ Database ogni riga ha **🎬 Video**, che apre un moda
 Il campo `video_file` è anche nell'editor ✏️ Edit e nella 📖 Legenda dello schema
 (e nelle tre liste dei modali, che `test_onyx_modifica_db.py` confronta).
 
-**Verifiche (18/09/2026):** `test_video_canzone.py` — 31 test OK (funzioni pure dei
-nomi, download video con yt-dlp finto, **playlist col video** con un MP4 vero fatto
-con ffmpeg, rotte del modale su database temporaneo, `.trash/`, cablaggio,
-app viva); **prova su YouTube vero**: «Me at the zoo» scaricato con la funzione
-dell'app in una cartella temporanea → MP4 da 0,51 MB in `videos/` (ffprobe: flusso
-**av1** + **aac**), `downloads/` vuota e mp3 ricavato DAL video; **Chrome vero
-headless** sulla pagina: le 8 funzioni del modale ci sono, il pulsante 🎬 su tutte
-le 897 righe, il modale si apre su una canzone vera («Nessun video agganciato a
-questa canzone»), la casella della playlist c'è, nessun errore JS (solo il favicon
-404 di sempre); app riavviata sulla 5070, `/videos` 200, `/video/…` e
-`/video-file/…` 404 sul file inesistente, `/db/schema` documenta `video_file`.
+### ⚠️ Da dove viene il video: il LINK della canzone, mai una ricerca a caso
+
+Il video deve essere **quello della canzone**, non uno qualsiasi con lo stesso
+titolo. Per questo `avvia_download_video_canzone` guarda, in quest'ordine:
+
+1. **`youtube_url` della riga** — la colonna «URL YouTube» delle informazioni della
+   canzone: è il video da cui è arrivato l'audio (ed è quello che si vede in
+   ✏️ Edit). La **playlist adesso la scrive** a ogni riga che crea (`register_local_file`
+   riceve `youtube_url` costruita dall'id del video, e non tocca un link che c'è già);
+2. **`yt_video_id`** — l'id del video salvato coi metadati della playlist: il link si
+   ricostruisce da lì e **resta scritto** nella riga;
+3. **solo se non c'è né link né id**: ricerca YouTube per «artista - titolo».
+
+⚠️ **Con un link (o un id) non si cerca niente**: se quel video non è scaricabile il
+job lo dice (*«Il video del link non è scaricabile (…): nessun altro video è stato
+preso al posto suo»*) invece di scaricare un altro video. Il caso vero del
+18/09/2026: la riga di *Public Enemy* (Eminem) riceveva il video di **«Public Enemy
+#1»**, perché senza link il codice cercava per artista+titolo; il modale adesso
+**scrive sempre da dove prende il video** («Il video viene ripreso dal link YouTube
+di questa canzone: …» / «…dall'id salvato col download: …» / «⚠️ …verrà CERCATO per
+«artista - titolo»»).
+
+**Verifiche (18/09/2026):** `test_video_canzone.py` — 35 test OK (funzioni pure dei
+nomi, download video con yt-dlp finto che registra gli URL chiesti, **provenienza del
+video** — dal link della riga, dall'id salvato, ricerca solo se non c'è né l'uno né
+l'altro, e col link non si prende un altro video se il download fallisce —,
+**playlist col video** con un MP4 vero fatto con ffmpeg, rotte del modale su database
+temporaneo, `.trash/`, cablaggio, app viva); `test_metadati_youtube.py` — 40 test OK
+(compreso che la playlist scrive `youtube_url` e non riscrive un link che c'è già);
+**prova su YouTube vero**: «Me at the zoo» scaricato con la funzione dell'app in una
+cartella temporanea → MP4 da 0,51 MB in `videos/` (ffprobe: flusso **av1** + **aac**),
+`downloads/` vuota e mp3 ricavato DAL video; **Chrome vero headless** sulla pagina:
+le 8 funzioni del modale ci sono, il pulsante 🎬 su tutte le 897 righe, il modale si
+apre su una canzone vera e **dice da dove prende il video**; app riavviata sulla
+5070, `/videos` 200, `/video/…` e `/video-file/…` 404 sul file inesistente,
+`/db/schema` documenta `video_file`.
 
 ⚠️ Solo il pulsante 🎬 prende il video di UNA canzone: per il download video non si
 salvano i metadati `yt_*` (data di caricamento, descrizione…), che arrivano con la
@@ -706,6 +731,14 @@ Da tenere presente nelle sessioni di lavoro successive:
   toglie (il file va in `.trash/`). Il nome sta in `songs.video_file`; la cartella
   `videos/` **non è versionata**. Dettagli e verifiche nella sezione «Video di ogni
   canzone: MP4 da YouTube o dal computer».
+- **⚠️ Il video si prende dal LINK della canzone, non da una ricerca (18/09/2026).**
+  `avvia_download_video_canzone` usa, in ordine: `youtube_url` della riga (la
+  colonna «URL YouTube» — **la playlist ora la scrive** a ogni riga, prima non lo
+  faceva), poi `yt_video_id` (il link si ricostruisce e resta scritto), e **solo se
+  non c'è né l'uno né l'altro** cerca per artista + titolo. Con un link/ID **non si
+  cerca**: se quel video non è scaricabile il job lo dice, invece di prendere un
+  altro video (caso vero: *Public Enemy* di Eminem aveva ricevuto il video di
+  *Public Enemy #1*). Il modale 🎬 scrive sempre **da dove** prende il video.
 - **⚠️ La suite completa, con l'app attiva, scrive sul database VERO.** Il 18/09/2026
   `python3 -m unittest discover -p 'test_*.py'` ha dato **436 test `OK`** ma ha anche
   aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`

@@ -819,7 +819,8 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
       </div>
     </div>
     <div style="padding:16px 20px;overflow-y:auto">
-      <div id="vm-stato" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:12px"></div>
+      <div id="vm-stato" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:8px"></div>
+      <div id="vm-fonte" style="font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:12px;word-break:break-all"></div>
       <div id="vm-player" style="display:none;margin-bottom:12px">
         <video id="vm-video-el" controls preload="metadata" style="width:100%;max-height:340px;background:#000;border-radius:8px"></video>
       </div>
@@ -6578,6 +6579,15 @@ async function aggiornaVideoModale(){
   const s=await fetch(`/db/songs/${videoSongId}`).then(r=>r.json()).catch(()=>({}));
   const nome=(s&&s.video_file)||'';
   document.getElementById('vm-title').textContent=`🎬 ${(s&&(s.title||s.local_file))||videoSongId}`;
+  // DA DOVE si prende il video (è il punto: il video deve essere QUELLO scaricato,
+  // non uno trovato cercando artista e titolo).
+  const link=(s&&s.youtube_url)||'', vid=(s&&s.yt_video_id)||'';
+  const fonte=document.getElementById('vm-fonte');
+  if(fonte){
+    if(link){ fonte.innerHTML=`🎬 Il video viene ripreso dal link YouTube di questa canzone: <a href="${escA(link)}" target="_blank" style="color:var(--accent2)">${esc(link)}</a>`; }
+    else if(vid){ fonte.textContent=`🎬 Il video viene ripreso dall'id salvato col download: https://www.youtube.com/watch?v=${vid}`; }
+    else { fonte.textContent='⚠️ Questa canzone non ha né link YouTube né id del video: il video verrà CERCATO per «artista - titolo» e potrebbe essere un video diverso (per sicurezza aggiungi il link con ✏️ Edit → URL YouTube).'; }
+  }
   const player=document.getElementById('vm-player');
   const el=document.getElementById('vm-video-el');
   const btnTogli=document.getElementById('vm-btn-togli');

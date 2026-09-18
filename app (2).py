@@ -2054,13 +2054,20 @@ def _converti_in_mp3(src_path, out_path, timeout=300):
         print(f"[mp3] conversione non riuscita ({os.path.basename(src_path)}): {e}")
         return False
 
-def do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="", min_duration=0):
+def do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="",
+                min_duration=0, solo_url=False):
     with DL_SEM:
-        _do_download(job_id, query, fmt, quality, expected_title, expected_artist, min_duration)
+        _do_download(job_id, query, fmt, quality, expected_title, expected_artist, min_duration,
+                     solo_url)
 
-def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="", min_duration=0):
+def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="",
+                 min_duration=0, solo_url=False):
     # `fmt == "mp4"` (o "video"): si scarica il VIDEO del brano — che va in
     # `videos/` e non in `downloads/` — invece dell'audio (18/09/2026).
+    # `solo_url=True`: la query È il video preciso che serve (il link della riga o
+    # il suo id YouTube) e **non si cerca niente**: se quel video non è scaricabile
+    # il job lo dice, invece di prendere un ALTRO video (18/09/2026: il video di
+    # «Public Enemy» è finito con «Public Enemy #1», trovato per artista+titolo).
     video = str(fmt or "").lower() in ("mp4", "video")
     cartella = VID_DIR if video else DL_DIR
     estensioni = VIDEO_EXTS if video else AUDIO_EXTS
@@ -2182,7 +2189,7 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         # serve il sample (min_duration) si preferisce un video abbastanza lungo
         # da contenerlo (altrimenti il timestamp cadrebbe oltre la fine
         # dell'audio: IN > OUT, durata negativa in pagina).
-        if not filename and expected_title:
+        if not filename and expected_title and not solo_url:
             alt_url, alt_title = yt_search_first(
                 f"{expected_artist} {expected_title}".strip(),
                 expected_title=expected_title, expected_artist=expected_artist,
@@ -2210,6 +2217,9 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         if not filename:
             jobs[job_id]["status"] = "error"
             jobs[job_id]["error"] = (
+                (f"Il video del link non è scaricabile ({query}): nessun altro video è "
+                 f"stato preso al posto suo")
+                if solo_url else
                 f"Download non riuscito: nessun file {'video' if video else 'audio'} per "
                 f"'{expected_title or query}' ({'video' if video else 'audio'} NON sostituito)")
             print(f"[download {job_id}] ERRORE: questo job non ha prodotto file "
@@ -2233,7 +2243,8 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         jobs[job_id]["error"] = str(e)
 
 # ── PLAYLIST DOWNLOAD ─────────────────────────────────────────────────────────
-def register_local_file(filename, campi=None, video=None, local_file=None, playlist=None):
+def register_local_file(filename, campi=None, video=None, local_file=None, playlist=None,
+                        youtube_url=None):
     """Registra un file scaricato nella tabella songs (parsing artista - titolo).
 
     `campi` sono i metadati del video YouTube (vedi `campi_youtube`): la riga
@@ -2245,8 +2256,13 @@ def register_local_file(filename, campi=None, video=None, local_file=None, playl
     `""` quando il file registrato è SOLO un video (l'audio non c'è — la riga
     esiste lo stesso, con la sua scheda e il suo video).
 
-    `playlist` è il titolo della playlist di provenienza: si scrive in
-    `yt_playlist` solo se quella riga non ne ha già una (18/09/2026).
+    `playlist` è il titolo della playlist di provenienza (colonna `yt_playlist`,
+    scritta solo se la riga non ne ha già una).
+
+    `youtube_url` è il LINK del video da cui è arrivato il file: si scrive in
+    `youtube_url` solo se la riga non ce l'ha già, ed è da lì che il pulsante 🎬
+    Video riprende il video (18/09/2026: prima la playlist non lo salvava e il
+    video veniva cercato per artista+titolo, scaricando un video sbagliato).
     """
     raw = clean_filename(filename)
     # Rimuove il suffisso ' [idYouTube]' aggiunto da yt-dlp nel template
@@ -2256,8 +2272,8 @@ def register_local_file(filename, campi=None, video=None, local_file=None, playl
     title = parts[1].strip() if len(parts) == 2 else base.strip()
     audio = filename if local_file is None else local_file
     with get_db() as conn:
-        sid = get_or_create_song_db(conn, title, artist, local_file=audio, extra=campi,
-                                    video_file=video, playlist=playlist)
+        sid = get_or_create_song_db(conn, title, artist, youtube_url or "", local_file=audio,
+                                    extra=campi, video_file=video, playlist=playlist)
     return sid
 
 # ── DOWNLOAD AUTOMATICO DI UNA RIGA DEL DATABASE ─────────────────────────────
@@ -2384,10 +2400,15 @@ def nome_video_sicuro(nome):
     return base
 
 def avvia_download_video_canzone(song_id, forzato=False):
-    """Scarica in `videos/` il VIDEO (MP4) del brano di una riga del database.
+    """Scarica in `videos/` il VIDEO (MP4) **del video che è stato scaricato**: quello
+    del LINK YouTube della riga (o, se il link non c'è, dell'id del video salvato coi
+    metadati della playlist); solo se non c'è né link né id si cerca per artista +
+    titolo. Il file va in `videos/` e si scrive in `video_file`.
 
-    La ricerca è quella degli altri download (il link YouTube della riga, o
-    artista + titolo); il file però va in `videos/` e si scrive in `video_file`.
+    ⚠️ Con un link/ID **non si cerca niente**: se quel video non è scaricabile il job
+    lo dice, invece di prendere un altro video (18/09/2026: il video di «Public
+    Enemy» è finito con «Public Enemy #1», trovato per artista+titolo).
+
     Ritorna `(job_id, motivo)`; `("", motivo)` quando non parte.
     """
     with get_db() as conn:
@@ -2396,8 +2417,17 @@ def avvia_download_video_canzone(song_id, forzato=False):
         return "", "riga non trovata"
     if not forzato and file_video_valido(s.get("video_file")):
         return "", "il video c'è già"
+    # 1) il link della riga (il video da cui è arrivato l'audio)
     query = (s.get("youtube_url") or "").strip()
-    if not query:
+    da_link = bool(query) and is_youtube_url(query)
+    # 2) l'id del video, se la riga è arrivata da una playlist
+    if not da_link:
+        vid = (s.get("yt_video_id") or "").strip()
+        if vid:
+            query = f"https://www.youtube.com/watch?v={vid}"
+            da_link = True
+    # 3) solo se non c'è né link né id: ricerca per artista + titolo
+    if not da_link:
         query = " ".join(x for x in [(s.get("artist") or "").strip(),
                                      (s.get("title") or "").strip()] if x)
     if not query:
@@ -2409,13 +2439,15 @@ def avvia_download_video_canzone(song_id, forzato=False):
         jid = str(uuid.uuid4())[:8]
         jobs[jid] = {"status": "pending", "progress": {}, "files": [], "filename": None,
                      "yt_title": "", "error": "", "song_id": song_id, "video": True,
-                     "expected_title": s.get("title") or ""}
+                     "expected_title": s.get("title") or "",
+                     # si vede in /status da DOVE si sta prendendo il video
+                     "da_link": da_link, "fonte": query}
         _dl_video[song_id] = jid
 
     def run():
         try:
             do_download(jid, query, "mp4", "192", s.get("title") or "",
-                        s.get("artist") or "", 0)
+                        s.get("artist") or "", 0, solo_url=da_link)
             nome = (jobs.get(jid) or {}).get("filename")
             if nome:
                 # Il video va su QUESTA riga: nessuna riga nuova, nessun doppione.
@@ -2425,7 +2457,7 @@ def avvia_download_video_canzone(song_id, forzato=False):
                         "youtube_url=CASE WHEN youtube_url IS NULL OR youtube_url='' THEN ? "
                         "                 ELSE youtube_url END, updated_at=datetime('now') "
                         "WHERE id=?",
-                        (nome, query if is_youtube_url(query) else "", song_id))
+                        (nome, query if da_link else "", song_id))
                 print(f"[db {song_id}] video agganciato alla riga: {nome}")
             else:
                 print(f"[db {song_id}] download video non riuscito: "
@@ -2598,6 +2630,11 @@ def do_download_playlist(job_id, url, fmt="mp3", video=False):
         # scaricato non è stato agganciato a niente (resta in `downloads/`) e la
         # riga non diceva da quale playlist veniva.
         nome_playlist = (info or {}).get("title", "") if info else ""
+
+        def url_video(vid):
+            """Il LINK YouTube del video (per la colonna `youtube_url` della riga)."""
+            return f"https://www.youtube.com/watch?v={vid}" if vid else ""
+
         with get_db() as conn:
             prima = {r["id"]: (r["local_file"] or "")
                      for r in conn.execute("SELECT id, local_file FROM songs")}
@@ -2614,7 +2651,7 @@ def do_download_playlist(job_id, url, fmt="mp3", video=False):
             if campi:
                 con_metadati += 1
             sid = register_local_file(f, campi, video=video_per_id.get(vid),
-                                      playlist=nome_playlist)
+                                      playlist=nome_playlist, youtube_url=url_video(vid))
             if sid:
                 registered += 1
                 id_con_audio.add(vid)
@@ -2622,10 +2659,12 @@ def do_download_playlist(job_id, url, fmt="mp3", video=False):
                     con_anno += 1
                 if sid in prima:
                     gia_in_libreria += 1
-                    if prima[sid]:
-                        # La riga ha GIÀ un file suo: il nuovo non si aggancia (un
-                        # file scelto a mano non si sovrascrive) — ma va detto, con
-                        # il nome del file, altrimenti sembra che sia andato perso.
+                    if prima[sid] and prima[sid] != f:
+                        # La riga ha GIÀ un file DIVERSO: il nuovo non si aggancia (un
+                        # file scelto a mano non si sovrascrive) — ma va detto, col
+                        # nome del file, altrimenti sembra che sia andato perso. Se il
+                        # nome è lo STESSO (playlist riscaricata, stesso video) il file
+                        # è già quello della riga: non c'è niente da segnalare.
                         file_non_agganciati.append({"song_id": sid, "titolo": "",
                                                     "file": f, "file_in_tabella": prima[sid]})
                 else:
@@ -2643,7 +2682,7 @@ def do_download_playlist(job_id, url, fmt="mp3", video=False):
             if vid in id_con_audio:
                 continue
             register_local_file(nome_video, per_id.get(vid) or {}, video=nome_video,
-                                local_file="", playlist=nome_playlist)
+                                local_file="", playlist=nome_playlist, youtube_url=url_video(vid))
             print(f"[playlist {job_id}] riga registrata col solo video: {nome_video}")
 
         jobs[job_id]["status"] = "done"
