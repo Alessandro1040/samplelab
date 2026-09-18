@@ -421,6 +421,13 @@ body.album-view .track-row.trovato{--flash:45,212,191;}
 .sample-edit-row button:hover { color:#f44; }
 #editTrackModal .modal { width:600px; max-height:85vh; display:flex; flex-direction:column; }
 #editTrackModal .modal-scroll { overflow-y:auto; flex:1; padding-right:4px; }
+/* 🗄️ I campi del database nello stesso modale (18/09/2026): sono gli stessi
+   dell'editor ✏️ Edit del tab Database e si generano da `campiDbHTML()`. */
+.edit-db-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.edit-db-grid .modal-input { margin-bottom:0; font-size:12px; padding:7px 10px; }
+.edit-db-grid textarea.modal-input { grid-column:1/-1; min-height:56px; resize:vertical; }
+.edit-db-grid select.modal-input { cursor:pointer; }
+.edit-db-note { font-size:11px; font-weight:400; color:var(--text3); }
 .edit-section-label { margin:12px 0 6px; font-size:12px; font-weight:600; color:var(--text3); display:flex; justify-content:space-between; align-items:center; }
 .edit-add-btn { background:var(--surface3); border:1px solid var(--border); color:var(--text2); padding:3px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-family:inherit; transition:all .2s; }
 .edit-add-btn:hover { color:var(--text); border-color:var(--text2); }
@@ -688,6 +695,12 @@ body.album-view .track-row.trovato{--flash:45,212,191;}
       </div>
       <input class="modal-input" id="editTrackAlbum" placeholder="Album">
       <input class="modal-input" id="editTrackYear" placeholder="Anno (es. 2022)">
+      <div class="edit-section-label">
+        <span>🗄️ CAMPI DEL DATABASE <span class="edit-db-note">— gli stessi di ✏️ Edit nel tab Database</span></span>
+      </div>
+      <div class="edit-db-grid" id="editTrackDbFields"></div>
+
+
       
       <div class="edit-section-label">TESTO CANZONE</div>
       <textarea class="modal-input" id="editTrackLyrics" placeholder="Incolla il testo della canzone..." style="min-height:120px; resize:vertical; font-family:inherit;"></textarea>
@@ -2181,6 +2194,91 @@ function producersText(p){
   return t.trim();
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+//  🗄️ MODIFICA INFO AVANZATA — GLI STESSI CAMPI DELL'EDITOR DEL DATABASE
+//  Richiesta di Alessandro (18/09/2026): «in modifica info avanzate dovrebbero
+//  comparire tutte le opzioni del database, lo stesso che compare su "edit" in
+//  database». L'elenco qui sotto è la COPIA di quello di `dbEditFormHTML` in
+//  index (2).html: il test `test_onyx_modifica_db.py` confronta le due liste (e
+//  la lista dei campi accettati dal PUT), così se una cambia le altre non
+//  restano indietro.
+//  Titolo, artista, album, anno e testo restano i campi principali del modale
+//  (id `editTrack*`); qui ci sono TUTTI GLI ALTRI, con id `editdb-<campo>`.
+// ═══════════════════════════════════════════════════════════════════════
+const CAMPI_DB_INFO = [
+  ['album_artist', 'Artista album', 'text'],
+  ['composer', 'Compositore', 'text'],
+  ['producers', 'Produttori (separati da virgola)', 'text'],
+  ['genre', 'Genere', 'text'],
+  ['release_date', 'Data rilascio', 'text'],
+  ['track_number', 'N° traccia', 'number'],
+  ['disc_number', 'N° disco', 'number'],
+  ['compilation', 'Compilation', 'siNo'],
+  ['rating', 'Rating', 'number'],
+  ['bpm', 'BPM', 'number'],
+  ['musical_key', 'Chiave', 'text'],
+  ['play_count', 'Play count', 'number'],
+  ['duration', 'Durata (s)', 'number'],
+  ['analyzed_status', 'Stato analisi', ['none', 'analyzing', 'done', 'error']],
+  ['youtube_url', 'URL YouTube', 'text'],
+  ['genius_url', 'URL Genius', 'text'],
+  ['whosampled_url', 'URL WhoSampled', 'text'],
+  ['tunebat_url', 'URL Tunebat', 'text'],
+  ['cover_art_path', 'Cover (nome del file)', 'text'],
+  ['local_file', 'File locale', 'text'],
+  ['comment', 'Commento', 'area'],
+  ['title_verified', 'Titolo verificato', 'siNo'],
+  ['artist_verified', 'Artista verificato', 'siNo'],
+  ['bpm_verified', 'BPM verificato', 'siNo'],
+  ['key_verified', 'Chiave verificata', 'siNo'],
+  ['lyrics_verified', 'Testo verificato', 'siNo'],
+];
+// I campi che il modale scrive nel database (usati anche dal messaggio al parent)
+let _editDbLetto = false;      // true solo se la riga è stata letta dal database
+
+// Funzione PURA (provata in JavaScriptCore da test_onyx_modifica_db.py): l'HTML
+// dei campi del database, riempito con la riga letta dal DB.
+function campiDbHTML(song) {
+  const v = (f) => (song && song[f] !== null && song[f] !== undefined && song[f] !== '') ? String(song[f]) : '';
+  return CAMPI_DB_INFO.map(([f, etichetta, tipo]) => {
+    if (tipo === 'area') {
+      return `<textarea class="modal-input" id="editdb-${f}" placeholder="${etichetta}" rows="3">${escHtml(v(f))}</textarea>`;
+    }
+    if (tipo === 'siNo') {
+      return `<select class="modal-input" id="editdb-${f}" title="${etichetta}">` +
+        `<option value="0"${v(f) === '0' ? ' selected' : ''}>${etichetta}: No</option>` +
+        `<option value="1"${v(f) === '1' ? ' selected' : ''}>${etichetta}: Sì</option></select>`;
+    }
+    if (Array.isArray(tipo)) {
+      const vuoto = `<option value=""${v(f) === '' ? ' selected' : ''}>${etichetta}: —</option>`;
+      return `<select class="modal-input" id="editdb-${f}" title="${etichetta}">${vuoto}` +
+        tipo.map(o => `<option value="${o}"${v(f) === o ? ' selected' : ''}>${etichetta}: ${o}</option>`).join('') +
+        `</select>`;
+    }
+    return `<input class="modal-input" type="${tipo || 'text'}" id="editdb-${f}" ` +
+      `placeholder="${etichetta}" value="${escHtml(v(f))}">`;
+  }).join('');
+}
+
+// Funzione PURA con `doc` iniettabile (il test le passa un DOM finto): legge i
+// valori scritti nel modale — sono il corpo del PUT /db/songs/<id>.
+function leggiCampiDbDalModale(doc) {
+  const d = doc || document;
+  const out = {};
+  CAMPI_DB_INFO.forEach(([f]) => {
+    const el = d.getElementById('editdb-' + f);
+    if (el) out[f] = el.value;
+  });
+  return out;
+}
+
+// Disegna i campi del database nel modale (chiamata all'apertura e, se il brano è
+// nel database, di nuovo quando arriva la riga fresca).
+function renderCampiDb(song) {
+  const box = document.getElementById('editTrackDbFields');
+  if (box) box.innerHTML = campiDbHTML(song || {});
+}
+
 function openEditTrackModal(trackId) {
   editTrackId = trackId;
   const track = tracks.find(t => t.id === trackId);
@@ -2211,6 +2309,10 @@ function openEditTrackModal(trackId) {
     return h + (credits || "");
   };
   fill(track);
+  // i campi del database si disegnano subito (coi valori che il player ha già) e
+  // si riempiono per bene quando arriva la riga fresca dal database
+  renderCampiDb(track.db_fields || {});
+  _editDbLetto = false;
   
   _tempSamples.sources = JSON.parse(JSON.stringify(track.sampleSources || []));
   _tempSamples.usages = JSON.parse(JSON.stringify(track.sampleUsages || []));
@@ -2245,6 +2347,9 @@ function openEditTrackModal(trackId) {
         audioMatchMotivo: row.audio_match_motivo || '',
       };
       fill(fresh);
+      // 🗄️ i campi del database del modale: la riga appena letta è la verità
+      renderCampiDb(row);
+      _editDbLetto = true;
       let credits = "";
       const prod = producersText(row.producers);
       if (prod) credits += `<div>🎛 Produttori: <span style="color:var(--text2);">${escHtml(prod)}</span></div>`;
@@ -2276,6 +2381,10 @@ async function confirmEditTrack() {
   track.lyrics = document.getElementById("editTrackLyrics").value;
   track.sampleSources = JSON.parse(JSON.stringify(_tempSamples.sources)).filter(s => s.artist.trim() || s.title.trim());
   track.sampleUsages = JSON.parse(JSON.stringify(_tempSamples.usages)).filter(s => s.artist.trim() || s.title.trim());
+  // 🗄️ I campi del database del modale (album artist, composer, genere, BPM,
+  // chiave, URL, copertina, stato, verdetti…): si mandano SOLO se sono stati
+  // letti dal database — un modale mai riempito non deve svuotare la riga.
+  track.db_fields = _editDbLetto ? leggiCampiDbDalModale() : (track.db_fields || null);
   await dbPut("tracks", track);
   closeModal("editTrackModal");
   if (currentTrackId === editTrackId) renderNowBar(track);
@@ -3537,7 +3646,11 @@ function notifyDbTrackUpdated(t, prevName, prevArtist){
       musical_key: t.musical_key || '',
       comment: t.comment || '',
       lyrics: t.lyrics || '',
-      duration: t.dur || 0
+      duration: t.dur || 0,
+      // 🗄️ I campi del database scritti nel modale «Modifica info avanzata»
+      // (id editdb-*): il parent li mette nel PUT /db/songs/<id>
+      // (vedi payloadDaBranoPlayer in index (2).html).
+      db_fields: t.db_fields || {}
     }}, '*');
   }catch(_){}
 }

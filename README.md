@@ -493,6 +493,17 @@ Da tenere presente nelle sessioni di lavoro successive:
   «📄 Scheda completa» dentro il modale. Chi tocca il protocollo `load` del sampler
   ricordi `endSec` (fine dell'intervallo) e `grid:false` (niente aggancio alla griglia
   BPM, altrimenti il giallo si sposta).
+- **✏️ Modifica info avanzata = tutti i campi del Database (18/09/2026).** Il modale
+  del player (`/onyx`, menu contestuale di un brano) ha la sezione **🗄️ CAMPI DEL
+  DATABASE** con gli STESSI campi dell'editor ✏️ Edit: le tre liste —
+  `CAMPI_DB_INFO` in `onyx_whosampled.html`, `CAMPI_DB_MODALE` in `index (2).html` e
+  `allowed` del PUT in `app (2).py` — le confronta `test_onyx_modifica_db.py`, così
+  aggiungendo un campo da una parte il test dice quale è rimasta indietro. I campi
+  si mandano al database solo se il modale è stato riempito dalla riga letta da
+  `/db/songs/<id>` (`_editDbLetto`): un modale mai letto non può svuotare la riga,
+  mentre svuotare un campo a mano continua a svuotarlo. ⚠️ `duration` era fuori
+  dalla lista `allowed` del PUT: la «Durata (s)» dell'editor del Database non si
+  salvava (silenziosamente) — corretto il 18/09/2026.
 - **⚠️ La suite completa, con l'app attiva, scrive sul database VERO.** Il 18/09/2026
   `python3 -m unittest discover -p 'test_*.py'` ha dato **436 test `OK`** ma ha anche
   aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`
@@ -2560,6 +2571,46 @@ Da tenere presente nelle sessioni di lavoro successive:
     «Baby by Me» e il campionamento salvato. I verdetti che la suite scrive sul DB
     vero sono stati scartati rimettendo a posto il backup post-unione prima del
     commit.
+
+- **IL MODALE DEL PLAYER («✏️ MODIFICA INFO AVANZATA») HA TUTTI I CAMPI DEL DATABASE
+  — E «DURATA (S)» NON SI SALVAVA (18/09/2026).** Richiesta di Alessandro: «in
+  modifica info avanzate dovrebbero comparire tutte le opzioni del database, lo
+  stesso che compare su "edit" in database».
+  - Nel modale del player (menu contestuale di un brano → ✏️ Modifica info avanzata,
+    `openEditTrackModal` in `onyx_whosampled.html`) c'erano solo titolo, artista,
+    album, anno e testo. Ora c'è la sezione **🗄️ CAMPI DEL DATABASE** con TUTTI gli
+    altri campi dell'editor ✏️ Edit (`dbEditFormHTML`): album artist, compositore,
+    produttori, genere, data di rilascio, n° traccia/disco, compilation, rating, BPM,
+    chiave, play count, durata, stato analisi, i quattro URL (YouTube/Genius/
+    WhoSampled/Tunebat), cover, file locale, commento e i cinque verdetti ✓. Si
+    generano da `CAMPI_DB_INFO` con `campiDbHTML()` (id `editdb-<campo>`), si
+    riempiono con la riga che il modale già chiedeva a `/db/songs/<id>` e si mandano
+    al database coi `db_fields` del messaggio al parent → `payloadDaBranoPlayer()` →
+    PUT /db/songs/<id> (funzione nuova in index (2).html, così il corpo del PUT è
+    puro e testabile).
+  - **Bug vero trovato dai test nuovi:** `duration` NON era nella lista `allowed` del
+    PUT, quindi il campo **«Durata (s)»** dell'editor ✏️ Edit del Database (che
+    c'era da sempre) veniva scartato **in silenzio**: si salvava tutto tranne la
+    durata. Aggiunto — e verificato in Chrome vero (111 → 333 s).
+  - **Secondo bug evitato:** il controllo «nessuna modifica reale» di
+    `applyPlayerTrackToDb` confrontava solo titolo/artista/album/anno/testo/durata:
+    una modifica di SOLO genere/BPM/chiave/URL sarebbe stata scartata come «niente da
+    salvare». Ora confronta anche i campi del modale.
+  - I campi si mandano solo se il modale è stato riempito dalla riga del database
+    (`_editDbLetto`), così un modale mai letto non può svuotare la riga; e svuotare a
+    mano un campo continua a svuotarlo.
+  - Verifiche del 18/09/2026: **13 test** nuovi in `test_onyx_modifica_db.py` — il
+    **confronto fra le tre liste** (modale /onyx ↔ editor del Database ↔ `allowed`
+    del PUT), le funzioni pure in JavaScriptCore (`campiDbHTML` coi valori della riga
+    e le virgolette scappate, `leggiCampiDbDalModale`, il messaggio al parent,
+    `payloadDaBranoPlayer` coi campi fuori lista ignorati e i valori `null` non
+    mandati) e il PUT vero su una canzone di prova (26 campi scritti e riletti, poi
+    cancellata: nessun residuo). In **Chrome vero** (selenium headless) su `/onyx`
+    dentro l'iframe: il modale rende TUTTI i 26 campi coi valori della riga e
+    salvando genere/BPM/commento i valori **arrivano nel database**. Suite completa:
+    **507 test `OK`** (erano 494). Il database è rimasto identico a `9fc248c` (i
+    verdetti che la suite scrive sul DB vero e lo stato del player sono stati
+    ripristinati prima del commit).
 
 
 

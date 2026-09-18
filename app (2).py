@@ -3563,10 +3563,14 @@ def db_get_song(song_id):
 @app.route("/db/songs/<song_id>", methods=["PUT"])
 def db_update_song(song_id):
     data = request.json or {}
+    # ⚠️ 18/09/2026: mancava «duration». Sia l'editor ✏️ Edit del Database
+    # (`saveDbEditor`, che nello `fields` la durata ce l'ha) sia il modale
+    # «Modifica info avanzata» del player la mandavano, e il PUT la buttava via
+    # senza dire niente: il campo «Durata (s)» non si salvava.
     allowed = [
         "title", "artist", "album", "album_artist", "composer", "producers", "genre", "year", "release_date",
         "track_number", "disc_number", "compilation", "rating", "bpm", "musical_key", "play_count",
-        "comment", "lyrics", "analyzed_status", "genius_url", "whosampled_url", "youtube_url",
+        "duration", "comment", "lyrics", "analyzed_status", "genius_url", "whosampled_url", "youtube_url",
         "tunebat_url", "cover_art_path", "local_file", "title_verified", "artist_verified",
         "bpm_verified", "key_verified", "lyrics_verified",
     ]

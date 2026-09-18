@@ -3657,6 +3657,47 @@ function scheduleDbReload(){
   if(dbReloadTimer) clearTimeout(dbReloadTimer);
   dbReloadTimer = setTimeout(()=>{ dbReloadTimer=null; loadDb(); }, 300);
 }
+// ── IL CORPO DEL PUT PER LE MODIFICHE CHE ARRIVANO DAL PLAYER ───────────────
+// Funzione PURA (provata in JavaScriptCore da test_onyx_modifica_db.py): prende
+// il brano come lo manda il player e costruisce il corpo del PUT
+// /db/songs/<id>. Oltre ai campi che il player conosce ci sono i `db_fields` del
+// modale «✏️ Modifica info avanzata» di /onyx — GLI STESSI campi dell'editor del
+// Database (CAMPI_DB_MODALE è la copia di CAMPI_DB_INFO in onyx_whosampled.html;
+// il test confronta le liste) — e si copiano DOPO, così quello che si legge nel
+// modale vince. Il backend accetta solo i campi della sua lista `allowed`.
+const CAMPI_DB_MODALE = ['album_artist','composer','producers','genre','release_date',
+  'track_number','disc_number','compilation','rating','bpm','musical_key','play_count',
+  'duration','analyzed_status','youtube_url','genius_url','whosampled_url','tunebat_url',
+  'cover_art_path','local_file','comment','title_verified','artist_verified',
+  'bpm_verified','key_verified','lyrics_verified'];
+
+function payloadDaBranoPlayer(t){
+  const payload={};
+  if(!t) return payload;
+  if(t.title!==undefined && t.title!==null) payload.title=t.title;
+  if(t.artist!==undefined && t.artist!==null) payload.artist=t.artist;
+  if(t.album!==undefined && t.album!==null) payload.album=t.album;
+  if(t.album_artist!==undefined && t.album_artist!==null) payload.album_artist=t.album_artist;
+  if(t.year!==undefined && t.year!==null) payload.year=(String(t.year)===''?null:t.year);
+  if(t.composer!==undefined && t.composer!==null) payload.composer=t.composer;
+  if(t.genre!==undefined && t.genre!==null) payload.genre=t.genre;
+  if(t.track_number!==undefined && t.track_number!==null) payload.track_number=t.track_number;
+  if(t.bpm!==undefined && t.bpm!==null) payload.bpm=(t.bpm===''?null:t.bpm);
+  if(t.musical_key!==undefined && t.musical_key!==null) payload.musical_key=t.musical_key;
+  if(t.comment!==undefined && t.comment!==null) payload.comment=t.comment;
+  if(t.lyrics!==undefined && t.lyrics!==null) payload.lyrics=t.lyrics;
+  if(t.duration!==undefined && t.duration!==null) payload.duration=t.duration;
+  if(t.local_file) payload.local_file=t.local_file;
+  if(t.db_fields && typeof t.db_fields==='object'){
+    CAMPI_DB_MODALE.forEach(f=>{
+      if(f in t.db_fields && t.db_fields[f]!==undefined && t.db_fields[f]!==null){
+        payload[f]=t.db_fields[f];
+      }
+    });
+  }
+  return payload;
+}
+
 async function applyPlayerTrackToDb(t){
   if(!t) return;
   let id = t.dbSongId || null;
@@ -3674,31 +3715,28 @@ async function applyPlayerTrackToDb(t){
     const s=(allDbSongs||[]).find(x=>(x.title||'')===(t.title||'')&&(x.artist||'')===(t.artist||''));
     if(s) id=s.id;
   }
-  const payload={};
-  if(t.title!==undefined && t.title!==null) payload.title=t.title;
-  if(t.artist!==undefined && t.artist!==null) payload.artist=t.artist;
-  if(t.album!==undefined && t.album!==null) payload.album=t.album;
-  if(t.album_artist!==undefined && t.album_artist!==null) payload.album_artist=t.album_artist;
-  if(t.year!==undefined && t.year!==null) payload.year=(String(t.year)===''?null:t.year);
-  if(t.composer!==undefined && t.composer!==null) payload.composer=t.composer;
-  if(t.genre!==undefined && t.genre!==null) payload.genre=t.genre;
-  if(t.track_number!==undefined && t.track_number!==null) payload.track_number=t.track_number;
-  if(t.bpm!==undefined && t.bpm!==null) payload.bpm=(t.bpm===''?null:t.bpm);
-  if(t.musical_key!==undefined && t.musical_key!==null) payload.musical_key=t.musical_key;
-  if(t.comment!==undefined && t.comment!==null) payload.comment=t.comment;
-  if(t.lyrics!==undefined && t.lyrics!==null) payload.lyrics=t.lyrics;
-  if(t.duration!==undefined && t.duration!==null) payload.duration=t.duration;
-  if(t.local_file) payload.local_file=t.local_file;
+  const payload=payloadDaBranoPlayer(t);
   if(!Object.keys(payload).length) return;
 
   const existing = id ? (allDbSongs||[]).find(x=>x.id===id) : null;
   if(existing){
-    const same = (existing.title||'')===(payload.title||'') &&
+    let same = (existing.title||'')===(payload.title||'') &&
                  (existing.artist||'')===(payload.artist||'') &&
                  (existing.album||'')===(payload.album||'') &&
                  String(existing.year||'')===String(payload.year||'') &&
                  (existing.lyrics||'')===(payload.lyrics||'') &&
                  Number(existing.duration||0)===Number(payload.duration||0);
+    // 🗄️ I campi del database del modale hanno lo stesso peso: senza questo
+    // controllo una modifica di SOLO genere/BPM/chiave/URL veniva scartata come
+    // «nessuna modifica reale» e non arrivava mai nel database.
+    if(same && t.db_fields && typeof t.db_fields==='object'){
+      CAMPI_DB_MODALE.forEach(f=>{
+        if(!(f in t.db_fields)) return;
+        const prima=existing[f]==null?'':String(existing[f]);
+        const dopo=t.db_fields[f]==null?'':String(t.db_fields[f]);
+        if(prima!==dopo) same=false;
+      });
+    }
     if(same) return; // nessuna modifica reale: evita loop
   }
   try{
