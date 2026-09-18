@@ -21,6 +21,7 @@ SampleLab · Alessandro Lo Curcio · aggiornato al **18/09/2026**
 4. [Percorso guidato: il BPM vero in 60 secondi](#4-percorso-guidato-il-bpm-vero-in-60-secondi)
 5. [I controlli, uno per uno](#5-i-controlli-uno-per-uno)
    - 5.7 [✂ Trim giallo on/off: nascondere il trim del sample](#57--trim-giallo-onoff-nascondere-il-trim-del-sample)
+   - 5.8 [La barra di scorrimento (dove sei nel brano)](#58-la-barra-di-scorrimento-dove-sei-nel-brano)
 6. [Il righello e le battute: selezionare, spostare, allungare](#6-il-righello-e-le-battute-selezionare-spostare-allungare)
 7. [La forma d'onda: IN, OUT, playhead e offset del campione](#7-la-forma-donda-in-out-playhead-e-offset-del-campione)
 8. [La matematica della griglia (con i numeri misurati)](#8-la-matematica-della-griglia-con-i-numeri-misurati)
@@ -153,7 +154,9 @@ Dall'alto verso il basso il modale è organizzato in **nove fasce**:
 8. **Forma d'onda** — l'audio (con la griglia disegnata sopra), le ombreggiature
    scure fuori dalla selezione, la selezione con le maniglie **IN** e **OUT** e il
    **playhead** bianco. Col pulsante **✂ Trim giallo** spento sparisce tutto il
-   riquadro *e* l'onda dentro la selezione torna **grigia** (§5.7).
+   riquadro *e* l'onda dentro la selezione torna **grigia** (§5.7). Subito sotto
+   c'è la **barra di scorrimento** — fascia gialla = selezione, riquadro turchese =
+   finestra visibile, lineetta bianca = playhead (§5.8).
 9. **Informazioni** — `IN ‹tempo› → OUT ‹tempo› | durata: ‹…› | sample: ±‹…›s |
    🔇/🔊` e il pulsante **⟳ Reset al sample**.
 10. **Download** — formato (MP3/WAV), **Scarica selezione**, **Scarica intero** e
@@ -214,7 +217,8 @@ DJ Shocca, BPM **60.1** nel database).
 |---|---|
 | **Zoom − / +** | saltano fra i livelli **1, 1,5, 2, 3, 4, 6, 8, 12, 16×**. Più zoom = più secondi per schermo, quindi battute larghe e clic precisi. |
 | **cursore dello zoom** | continuo, da 1× a 16× a passi di 0,5. In entrambi i casi la vista si **ricentra sul playhead**, così non perdi il punto. |
-| **rotella del mouse** | **scorre** la forma d'onda di 3 s per tacca (non è uno zoom). Funziona anche da trackpad; si ferma ai bordi del file. |
+| **touchpad: due dita a destra/sinistra** | **scorre** la vista (non è uno zoom): il contenuto **segue le dita** 1:1, come in un editor grafico — a zoom 2 si scorrono metà secondi per pixel rispetto a zoom 1. Funziona sopra la forma d'onda, sopra il righello e sulla barra di scorrimento (§5.8). |
+| **rotella del mouse** | la rotella "a scatti" scorre di **3 secondi per tacca**; i movimenti fini del touchpad (delta piccoli) sono invece proporzionali, così la vista non salta. In tutti i casi ci si ferma ai **bordi del file** e **⟳ Segui** si spegne. |
 | **⟳ Segui** | tiene il playhead **al centro** mentre l'audio suona (comodo per ascoltare un punto lontano senza perdere la vista). Si spegne da sé appena clicchi sulla forma d'onda, trascini il playhead o usi la rotella. |
 
 ### 5.3 La griglia: mostrarla, adattarla, sceglierne l'unità
@@ -284,6 +288,31 @@ batteria, o per misurare il tempo col solo metronomo.
 > restano quelli. Per rivedere il riquadro basta riaccenderlo (il pulsante dice
 > sempre lo stato: `✂ Trim giallo on` / `off`).
 
+### 5.8 La barra di scorrimento (dove sei nel brano)
+
+Sotto la forma d'onda c'è una riga alta 18 px che è la **mappa del brano**: serve a
+capire in un colpo d'occhio **dove sei** quando si è ingrandito (a zoom alti la
+vista mostra pochi secondi e ci si perde).
+
+| Cosa | Cosa dice / cosa fa |
+|---|---|
+| tutta la barra | è il **brano intero**, dallo 0:00 alla fine |
+| **fascia gialla** | la **selezione** IN/OUT: si allunga e si sposta quando trascini IN/OUT (o usi *Adatta*/*Allinea griglia*) |
+| **riquadro turchese** | la **finestra visibile**: si **trascina** per scorrere. La larghezza è `1 / zoom` — a zoom 1 riempie tutta la barra e il tooltip lo dice (*«Tutto il brano è visibile: ingrandisci con lo Zoom per scorrere»*) |
+| **lineetta bianca** | il **playhead**: si muove da sola mentre l'audio suona (60 fps) |
+| clic fuori dal riquadro | **centra** la vista su quel punto (e da lì puoi continuare a trascinare) |
+
+Tre numeri utili, misurati (§13). La **corsa massima** è `(1 − 1/zoom) × durata`: su
+un brano di 146,4 s a zoom 4 il riquadro corre per i tre quarti della barra
+(**109,84 s** di scorrimento possibile). Un **trascinamento del riquadro** di 60 px
+su una barra di 955 px scorre di 60 px equivalenti (**6,9 s** a zoom 4 su 146,4 s).
+Il **clic a metà barra** porta la vista a `durata/2 − (durata/2)/zoom` (**54,92 s**
+sempre a zoom 4).
+
+> 💡 La barra è anche il modo più comodo per **saltare al ritornello**: ingrandisci,
+> guarda dove sta (ti aiuta la fascia gialla della selezione) e clicca lì — la vista
+> ci si centra sopra senza trascinare a vuoto.
+
 ## 6. Il righello e le battute: selezionare, spostare, allungare
 
 Il righello in alto non è decorativo: è **la griglia stessa, numerata**.
@@ -332,7 +361,8 @@ ritagliare e per misurare:
   trascinare) sulla selezione o fuori sposta invece il **playhead** in quel punto.
 - **Il playhead** è la barretta bianca con la punta in alto: si trascina con il
   mouse (o col dito) e durante la riproduzione si muove da solo a 60 fps. Con
-  **✂ Sel** attivo non esce dalla selezione.
+  **✂ Sel** attivo non esce dalla selezione. La stessa posizione si legge sulla
+  **barra di scorrimento**, dove il playhead è la lineetta bianca (§5.8).
 - **Bordi turchesi**: compaiono solo con una cella selezionata sul righello e
   fanno quello che fa il righello — **sinistra** = offset della griglia (trasla
   tutto), **destra** = BPM (allunga/accorcia la cella e **l'inizio resta fermo**, §6).
@@ -466,38 +496,40 @@ volo e lo monta in un iframe quando apri il modale. I numeri di riga qui sotto
 sono quelli **del documento del sampler** (1 = prima riga dentro la textarea) per
 le sue funzioni interne — così restano validi anche quando la pagina intorno
 cresce — e quelli del **file** per le cose che stanno fuori. La textarea apre a
-`index (2).html` riga **830** (il documento finisce a riga **3176**): una funzione
+`index (2).html` riga **830** (il documento finisce a riga **3413**): una funzione
 alla riga *N* del documento sta nel file alla riga *N + 830*.
 
 | Cosa | Dove |
 |---|---|
 | Modale del sampler (`#audio-editor-modal` + `iframe#audio-editor-iframe`) | `index (2).html` righe **820–828** |
-| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **830–3176** (`<textarea id="audio-editor-src">`) |
-| Apertura del modale | `index (2).html` riga **5633**: `openAudioEditor(url, filename, startSec, bpm, etichetta)` — `filename` è il file in `downloads/`, `etichetta` è il nome da mostrare |
-| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5662**: `openInSampler(songIdOFile, opts)` |
-| Pulsante nella riga del database | dentro `renderDbTable` (riga **4534**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit / 📄 Scheda) |
-| Ricezione dal player (`openSampler`) | `index (2).html` riga **3277** · link diretti `?tab=` / `?sampler=` / `?sampler_file=` riga **3313** |
+| Documento del sampler (markup + tutto il JS) | `index (2).html` righe **830–3413** (`<textarea id="audio-editor-src">`) |
+| Apertura del modale | `index (2).html` riga **5874**: `openAudioEditor(url, filename, startSec, bpm, etichetta)` — `filename` è il file in `downloads/`, `etichetta` è il nome da mostrare |
+| "Apri nel sampler" (risolve id o file, toast col BPM) | `index (2).html` riga **5903**: `openInSampler(songIdOFile, opts)` |
+| Pulsante nella riga del database | dentro `renderDbTable` (riga **4775**), cella azioni (🎛 Sampler accanto a ✂️ Stem / ✏️ Edit / 📄 Scheda) |
+| Ricezione dal player (`openSampler`) | `index (2).html` riga **3514** · link diretti `?tab=` / `?sampler=` / `?sampler_file=` riga **3550** |
 | Legenda dei controlli della griglia | `index (2).html` riga **1416**: `<details class="grid-legend" id="legenda-griglia-main">` (si apre da sé, nessun JavaScript; spiega Offset, Battute Sel., Diventa Bar N° e Allinea griglia con un esempio) |
 | Voce di menu nel player | `onyx_whosampled.html` (🎛 Apri nel sampler) |
 | Handshake col documento (`{action:'load', origin, url, filename, etichetta, startSec, bpm}`) | mittente `openAudioEditor` (e `embedAudioEditorX` per l'editor embedded); ricezione in coda al documento del sampler (imposta `p.filename` e `baseBackend`, e mostra `etichetta` — o il file — in testa) |
 | Salvataggio del BPM nel database | dalla pagina: `updateSongField(id,'bpm',v)` (lo usano ✏️ Edit e i pannelli del database); il sampler **non scrive più nulla** da solo |
-| Griglia: passo, snap, unità, etichetta on/off | `getGridStep` **1558** · `snapToGrid` **1563** · `snapTrimToGrid` **1600** · `setBpm` **1570** · `setGridOffset` **1582** · `setGridSubdivision` **1592** · `etichettaGriglia` **1051** · `toggleGridVisibility` **1055** |
-| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1101** · `alignGridToSelection` **1109** |
-| ✂ **Trim giallo on/off**, onda grigia e URL assoluta | `etichettaTrimGiallo` **1075** (pura) · `aggiornaPulsantiTrim` **1079** · `toggleTrimGiallo` **1093** · l'onda dentro la selezione col trim spento: `drawWaveform` **1199** · URL del backend (il documento vive in un iframe `blob:`): `origineHttp` **2264** (pura), `urlBackend` **2269** (pura) |
-| BPM dai battiti e dal fattore | `bpmDaTap` **1618** (media pura) · `tapTempo` **1639** · `updateTapLabel` **1632** · `multiplyBpm` **1661** |
-| Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **1690** (pura) · `accentoBattuta` **1700** (pura) · `etichettaUnita` **1709** (pura) · `getMetroStep` **1719** · `updateMetroStatus` **1725** · `setMetroSubdivision` **1732** · `toggleMetronome` **1740** · `checkMetronome` **1757** · `flashMetronome` **1785** |
-| Disegno della griglia e del righello | `updateGridUI` **1798** · `updateRuler` **1824** |
-| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **1893** · `deselectBar` **1911** · `updateBarSelectionUI` **1926** · `_startCellBorderDrag` **1966** · `_moveCellBorderDrag` **1994** · **bordo destro ancorato all'inizio** (l'offset si ricalcola): `offsetPerBattutaAncorata` **2292** (pura) · player inline delle card: `applyBarTimeChange` **4281** (`index (2).html`, fuori dal documento) |
-| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2082** · `onAudioLayerMouseDown` **2091** · `startPlayheadDrag` **2182** · `applyHandleDrag` **1469** · `startSelDrag` **1482** · `resetTrimStart` **2216** |
-| Zoom, scorrimento, trasporto | `setZoom` **1272** · `adjustZoom` **1290** · `onTrimWheel` **1314** · `togglePlay` **1327** · `toggleFollow` **1145** |
-| Loop (✂ Sel · ⟳ Tutto) | `setLoopMode` **1351** · il ritorno all'inizio sta nel ciclo a 60 fps (`startAnimationLoop` **912**), con l'anticipo per non sfondare il punto di OUT: `anticipoRitorno` **874** (pura), `anticipoLoop` **882** (pura), `aggiornaLatenzaUscita` **890**, `leggiLatenzaUscita` **904** |
-| Storico (Undo/Redo) | `pushHistory` **746** · `applyHistoryState` **779** · `undoAction` **802** · `redoAction` **809** |
-| Caricamento del brano | `initPlayer` **958** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
+| Griglia: passo, snap, unità, etichetta on/off | `getGridStep` **1795** · `snapToGrid` **1800** · `snapTrimToGrid` **1837** · `setBpm` **1807** · `setGridOffset` **1819** · `setGridSubdivision` **1829** · `etichettaGriglia` **1109** · `toggleGridVisibility` **1113** |
+| **Adatta** e **Allinea griglia** | `snapSelectionToGrid` **1159** · `alignGridToSelection` **1167** |
+| ✂ **Trim giallo on/off**, onda grigia e URL assoluta | `etichettaTrimGiallo` **1133** (pura) · `aggiornaPulsantiTrim` **1137** · `toggleTrimGiallo` **1151** · l'onda dentro la selezione col trim spento: `drawWaveform` **1257** · URL del backend (il documento vive in un iframe `blob:`): `origineHttp` **2501** (pura), `urlBackend` **2506** (pura) |
+| BPM dai battiti e dal fattore | `bpmDaTap` **1855** (media pura) · `tapTempo` **1876** · `updateTapLabel` **1869** · `multiplyBpm` **1898** |
+| Metronomo e sua unità (menu `#metro-sel-main`) | `stepMetronomo` **1927** (pura) · `accentoBattuta` **1937** (pura) · `etichettaUnita` **1946** (pura) · `getMetroStep` **1956** · `updateMetroStatus` **1962** · `setMetroSubdivision` **1969** · `toggleMetronome` **1977** · `checkMetronome` **1994** · `flashMetronome` **2022** |
+| Disegno della griglia e del righello | `updateGridUI` **2035** · `updateRuler` **2061** |
+| Selezione di una cella e bordi trascinabili | `selectBarByNumber` **2130** · `deselectBar` **2148** · `updateBarSelectionUI` **2163** · `_startCellBorderDrag` **2203** · `_moveCellBorderDrag` **2231** · **bordo destro ancorato all'inizio** (l'offset si ricalcola): `offsetPerBattutaAncorata` **2529** (pura) · player inline delle card: `applyBarTimeChange` **4522** (`index (2).html`, fuori dal documento) |
+| Modalità sposta, playhead, IN/OUT | `toggleMoveMode` **2319** · `onAudioLayerMouseDown` **2328** · `startPlayheadDrag` **2419** · `applyHandleDrag` **1706** · `startSelDrag` **1719** · `resetTrimStart` **2453** |
+| Zoom, scorrimento, trasporto | `setZoom` **1330** · `adjustZoom` **1348** · `onTrimWheel` **1374** · `togglePlay` **1562** · `toggleFollow` **1203** |
+| **Barra di scorrimento** e scorrimento col **touchpad** | funzioni PURE: `secondiDaScorrimento` **1417** (1:1 col dito) · `clampScrollOffset` **1422** (fin dove si scorre) · `timbroScorrimento` **1429** (larghezza e posizione del riquadro) · `offsetPerCentratura` **1437** · `secondiDaCorsa` **1443** · `frazionePosizione` **1449** (la lineetta) · in interfaccia: `updateScrollBar` **1456** · `aggiornaIndicatorePosizione` **1486** (playhead, chiamata a 60 fps) · trascinamento: `startScrollDrag` **1497** (+ `startScrollDragTouch` **1505**) · `_startScrollDrag` **1513** · `_moveScrollDrag` **1537** · `_endScrollDrag` **1555** · agganci: `applyScroll` **1356** (scroll), `updateTrimUI` **1597** (fascia della selezione), `updatePlayhead` **1633** (lineetta) · nel player delle card (fuori dal documento): `onTrimWheel` e `maxScrollSec` con la stessa regola per il `deltaX` |
+| Loop (✂ Sel · ⟳ Tutto) | `setLoopMode` **1586** · il ritorno all'inizio sta nel ciclo a 60 fps (`startAnimationLoop` **969**), con l'anticipo per non sfondare il punto di OUT: `anticipoRitorno` **931** (pura), `anticipoLoop` **939** (pura), `aggiornaLatenzaUscita` **947**, `leggiLatenzaUscita` **961** |
+| Storico (Undo/Redo) | `pushHistory` **803** · `applyHistoryState` **836** · `undoAction` **859** · `redoAction` **866** |
+| Caricamento del brano | `initPlayer` **1015** (+ `loadedmetadata`: finestra di 30 s, storico, disegno) |
 | Taglio reale (player delle card) | `index (2).html` `downloadTrim` → `POST /trim` → `GET /status/<job_id>` → `GET /download-file/<nome>` (in `app (2).py`: righe **2528**, **2395**, **2308**) |
 | Test della stima TAP | `test_sampler_tap.py` (`python3 -m unittest -v test_sampler_tap`): esegue `bpmDaTap` con JavaScriptCore su 11 casi |
 | Test del metronomo | `test_sampler_metronomo.py` (`python3 -m unittest -v test_sampler_metronomo`): 8 test su `stepMetronomo`, `accentoBattuta` ed `etichettaUnita` (JavaScriptCore) |
 | Test del trim e del loop | `test_sampler_trim.py` (`python3 -m unittest -v test_sampler_trim`): 13 test — il pulsante del trim giallo con gli elementi che spariscono, l'onda grigia col trim spento, l'anticipo del loop (`anticipoRitorno` su 6 casi e `anticipoLoop` su 5, in JavaScriptCore), `urlBackend`/`origineHttp` coi 9 casi di risoluzione, e il controllo che «Trova la battuta» non resti né nella pagina né nel backend (la rotta risponde 404) |
 | Test del bordo destro della cella (l'inizio che non si muove) | `test_sampler_cella.py` (`python3 -m unittest -v test_sampler_cella`): 12 test — `offsetPerBattutaAncorata` in JavaScriptCore su **12 casi** (battuta 1, battute in mezzo, passo nullo, numeri arrivati come stringhe) con la prova che l'ancoraggio torni sempre, il caso vero del trascinamento (battuta 2 da 10 s, bordo destro a 13 s → 80 BPM, passo 3, offset 7 *contro l'11 della formula vecchia*) e i controlli sui sorgenti: bordo destro che riscrive l'offset, bordo sinistro che trasla tutto, tooltip delle maniglie, stessa formula nel player inline delle card |
+| Test dello scorrimento e della barra | `test_sampler_scroll.py` (`python3 -m unittest -v test_sampler_scroll`): **15 test** — le sei funzioni pure in JavaScriptCore (scorrimento 1:1 col dito anche a zoom 2, fin dove si scorrere a zoom 1/2/4, geometria del riquadro e del suo fondo corsa, clic che centra, trascinamento del riquadro, lineetta del playhead) e i controlli dei sorgenti: markup e CSS della barra, i tre agganci (`applyScroll`/`updateTrimUI`/`updatePlayhead`), il wheel che legge `deltaX`, e la stessa gestione del touchpad nel player delle card |
 | Streaming del file | `app (2).py` riga **2265**: `/stream/<path:filename>` (regge anche le richieste Range) |
 
 ## 13. Note, limiti e piccoli trucchi
@@ -607,4 +639,30 @@ trascinato col mouse vero → BPM **18,62** (passo 12,8873 s), offset **−18,34
 **48,606 px** (fermo, larghezza da 24,3 a 84,3 px); bordo sinistro trascinato →
 inizio **13,5451 s** e offset **−12,2295** (tutto traslato). 12 test nuovi
 (`test_sampler_cella.py`).
+
+**Lo scorrimento col touchpad e la barra di scorrimento (18/09/2026).** Richiesta
+di Alessandro: «puoi fare in modo che se scorro col touchpad a destra o sinistra
+sopra le barre nel player … va a destra oppure a sinistra? cioè che si sposta
+scorrendo? oltre a questo magari aggiungi un indicatore di posizione sotto, una
+sorta di barra di scorrimento». Prima il sampler guardava **solo** `deltaY`: due
+dita a destra/sinistra non facevano niente, e ogni evento verticale spostava di 3 s
+secchi (col touchpad, dove gli eventi sono tanti e piccoli, la vista saltava). Ora
+`onTrimWheel` guarda **`deltaX`** per primo: la vista **segue le dita** 1:1
+(`secondiDaScorrimento` = `px ÷ W × durata`), e vale sopra l'onda, sopra il righello
+e sulla barra; la rotella "a scatti" (delta ≥ 40 px) resta a **3 s per tacca**,
+mentre un delta fine è proporzionale. Sotto la forma d'onda c'è la **barra di
+scorrimento**: fascia gialla = selezione, riquadro turchese = finestra visibile
+(larghezza `1/zoom`, si trascina per scorrere), lineetta bianca = playhead; il clic
+fuori dal riquadro **centra** la vista lì.
+Misurato in **Chrome vero** con eventi di rotella veri (CDP, `deltaX` come li manda
+il touchpad) su *IDGAF (with blackbear)* — 146,448254 s, onda 955 px, finestra
+955 px: a zoom 4 il riquadro è al **25%** della barra e la corsa è **109,84 s**;
+`deltaX = 120 px` sopra l'onda → **+4,586062 s** (= 120/3820 × 146,448254) con
+`translateX(-120px)`, cioè il contenuto segue il dito; sopra il righello → altri
++4,586062 s; due dita a sinistra → si torna indietro (e ci si ferma a 0); la rotella
+verticale → **+3 s** esatti; riquadro trascinato di 60 px → **+6,893485 s**; clic a
+metà barra → offset **54,918095 s** (il valore calcolato, `durata/2 − mezzo
+schermo`); lineetta del playhead al **25%**; a zoom 1 il riquadro torna al **100%**
+col tooltip *«Tutto il brano è visibile: ingrandisci con lo Zoom per scorrere»*.
+15 test nuovi (`test_sampler_scroll.py`).
 

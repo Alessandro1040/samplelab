@@ -1180,6 +1180,48 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
   border-left:5px solid transparent; border-right:5px solid transparent;
   border-top:7px solid #fff;
 }
+
+/* ── Barra di scorrimento: la mappa del brano sotto la forma d'onda ───────── */
+/* Tre cose in una riga alta 18 px: la fascia gialla è la selezione IN/OUT, il
+   riquadro turchese è la FINESTRA VISIBILE (si trascina per scorrere) e la
+   lineetta bianca è il playhead. A zoom 1 il riquadro riempie tutta la barra
+   (non c'è niente da scorrere) e resta solo l'indicatore di posizione. */
+.scroll-bar {
+  position:relative;
+  height:18px;
+  margin-top:8px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--surface2);
+  overflow:hidden;
+  user-select:none;
+}
+.scroll-track { position:absolute; inset:0; cursor:pointer; }
+.scroll-sel {
+  position:absolute; top:0; bottom:0;
+  background:rgba(200,240,0,.15);
+  border-left:1px solid rgba(200,240,0,.45);
+  border-right:1px solid rgba(200,240,0,.45);
+  pointer-events:none;
+}
+.scroll-window {
+  position:absolute; top:0; bottom:0;
+  background:rgba(45,212,191,.28);
+  border-left:1px solid var(--accent3);
+  border-right:1px solid var(--accent3);
+  border-radius:6px;
+  cursor:grab;
+  will-change:left,width;
+}
+.scroll-window.dragging { cursor:grabbing; background:rgba(45,212,191,.45); }
+.scroll-playhead {
+  position:absolute; top:0; bottom:0;
+  width:2px; margin-left:-1px;
+  background:#fff;
+  box-shadow:0 0 6px rgba(255,255,255,.6);
+  pointer-events:none;
+  will-change:left;
+}
 .metronome-layer {
   position:absolute; inset:0; pointer-events:none; z-index:4;
 }
@@ -1477,7 +1519,7 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
         <button class="move-mode-btn" id="deselect-btn-main" onclick="deselectBar('main')" style="display:none">✕ Deseleziona</button>
       </div>
 
-      <div class="ruler-scroll-container" id="ruler-scroll-main">
+      <div class="ruler-scroll-container" id="ruler-scroll-main" onwheel="onTrimWheel(event,'main')">
         <div class="ruler" id="ruler-main"></div>
       </div>
 
@@ -1502,6 +1544,21 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
                  onmousedown="startCellBorderDrag(event,'main','right')" ontouchstart="startCellBorderDragTouch(event,'main','right')"></div>
           </div>
           <div class="playhead" id="tph-main" style="left:0px" onmousedown="startPlayheadDrag(event,'main')" ontouchstart="startPlayheadDragTouch(event,'main')"></div>
+        </div>
+      </div>
+
+      <!-- Barra di scorrimento: la finestra visibile (riquadro turchese) si
+           trascina, il clic centra la vista lì, la lineetta bianca è il playhead
+           e la fascia gialla è la selezione IN/OUT — così si vede in un colpo
+           dove si è nel brano. Fa la stessa cosa del touchpad sopra l'onda:
+           due dita a destra o a sinistra spostano la vista. -->
+      <div class="scroll-bar" id="sb-main" title="Dove sei nel brano: trascina il riquadro per scorrere, clic per centrare lì">
+        <div class="scroll-track" id="sbt-main"
+             onmousedown="startScrollDrag(event,'main')" ontouchstart="startScrollDragTouch(event,'main')"
+             onwheel="onTrimWheel(event,'main')">
+          <div class="scroll-sel" id="sbs-main"></div>
+          <div class="scroll-window" id="sbw-main"></div>
+          <div class="scroll-playhead" id="sbp-main"></div>
         </div>
       </div>
 
@@ -1799,6 +1856,7 @@ function initPlayer(key, url, startSec) {
     dragSelAnchor: null,
     zoom: 1,
     scrollOffset: 0,
+    scrollDrag: null,   // trascinamento in corso sulla barra di scorrimento
     gridEnabled: true,
     gridSubdivision: 1,
     bpm: 120,
@@ -2139,18 +2197,195 @@ function applyScroll(key) {
 
   const ruler = document.getElementById(`ruler-${key}`);
   if (ruler) ruler.style.transform = `translateX(-${scrollPx}px)`;
+
+  updateScrollBar(key);   // la barra dice dove ci si è spostati
 }
 
 function onTrimWheel(e, key) {
   e.preventDefault();
   const p = players[key];
-  if (!p) return;
+  if (!p || !p.audio.duration) return;
   if (p.followEnabled) {
     p.followEnabled = false;
     document.getElementById(`follow-btn-${key}`)?.classList.remove('active');
   }
-  p.scrollOffset = clamp(p.scrollOffset + (e.deltaY > 0 ? 3 : -3), 0, p.audio.duration || 0);
+  const dur = p.audio.duration;
+  const W = getTrimAreaWidth(key);
+  const vw = getViewportWidth(key);
+  const dx = e.deltaX || 0;
+  const dy = e.deltaY || 0;
+  const TACCA_S = 3;    // rotella del mouse: 3 secondi a scatto (come prima)
+  const TACCA_PX = 40;  // sopra questa soglia il delta è una rotella, non un dito
+  // Touchpad (due dita): lo scorrimento ORIZZONTALE sposta la vista — il
+  // contenuto segue le dita — e anche quello verticale "fine" è proporzionale;
+  // la rotella del mouse manda delta a scatti (≥ 40 px), quindi restano i 3 s
+  // per tacca di sempre. Vale sopra l'onda, sopra il righello e sulla barra.
+  let dSec;
+  if (Math.abs(dx) > Math.abs(dy)) dSec = secondiDaScorrimento(dx, dur, W);
+  else if (!dy) return;
+  else if (Math.abs(dy) >= TACCA_PX) dSec = dy > 0 ? TACCA_S : -TACCA_S;
+  else dSec = secondiDaScorrimento(dy, dur, W);
+  p.scrollOffset = clampScrollOffset(p.scrollOffset + dSec, dur, W, vw);
   applyScroll(key);
+}
+
+// ─── BARRA DI SCORRIMENTO (dove sono nel brano) ──────────────────
+// La barra sotto la forma d'onda è la mappa del brano: fascia gialla = selezione
+// IN/OUT, riquadro turchese = finestra VISIBILE (si trascina per scorrere),
+// lineetta bianca = playhead. Le funzioni qui sotto sono PURE (provate in
+// test_sampler_scroll.py senza browser) e valgono anche per il touchpad:
+// * `secondiDaScorrimento` — quanti secondi vale un movimento di N pixel: 1:1 col
+//   dito, perché un editor grafico si sente giusto quando il contenuto segue le
+//   dita (a zoom 2, 100 px sono la metà dei secondi che sono a zoom 1);
+// * `clampScrollOffset` — fin dove si può scorrere (da 0 all'ultima schermata);
+// * `timbroScorrimento` — la geometria del riquadro: larghezza = finestra/brano
+//   (a zoom 1 riempie tutto: non c'è niente da scorrere), posizione = quanto si è
+//   scorso, in frazione della corsa disponibile;
+// * `offsetPerCentratura` — dove va l'offset perché un istante finisca al centro;
+// * `secondiDaCorsa` — dal trascinamento del riquadro (0..1 della corsa) ai secondi;
+// * `frazionePosizione` — dove sta un istante nella barra (per l'indicatore).
+function secondiDaScorrimento(deltaXpx, durata, W) {
+  const dur = Number(durata) || 0;
+  if (!W || W <= 0 || dur <= 0) return 0;
+  return (Number(deltaXpx) || 0) / W * dur;
+}
+function clampScrollOffset(offset, durata, W, vw) {
+  const dur = Number(durata) || 0;
+  const w = Number(W) || 0;
+  const corsa = Math.max(0, w - (Number(vw) || 0));
+  const max = w > 0 ? (corsa / w) * dur : 0;
+  return clamp(Number(offset) || 0, 0, max);
+}
+function timbroScorrimento(offset, durata, W, vw) {
+  const w = Number(W) || 0;
+  const larghezza = w > 0 ? clamp((Number(vw) || 0) / w, 0, 1) : 1;
+  const corsa = Math.max(0, w - (Number(vw) || 0));
+  const scorso = w > 0 ? ((Number(offset) || 0) / (Number(durata) || 1)) * w : 0;
+  const frazione = corsa > 0 ? clamp(scorso / corsa, 0, 1) : 0;
+  return { larghezza: larghezza, sinistra: frazione * (1 - larghezza) };
+}
+function offsetPerCentratura(sec, durata, W, vw) {
+  const w = Number(W) || 0;
+  if (w <= 0) return 0;
+  return clampScrollOffset((Number(sec) || 0) - ((Number(vw) || 0) / 2 / w) * (Number(durata) || 0),
+                           durata, W, vw);
+}
+function secondiDaCorsa(frazione, durata, W, vw) {
+  const w = Number(W) || 0;
+  if (w <= 0) return 0;
+  const corsa = Math.max(0, w - (Number(vw) || 0));
+  return clamp(Number(frazione) || 0, 0, 1) * (corsa / w) * (Number(durata) || 0);
+}
+function frazionePosizione(sec, durata) {
+  const dur = Number(durata) || 0;
+  if (dur <= 0) return 0;
+  return clamp((Number(sec) || 0) / dur, 0, 1);
+}
+
+// ── La barra in interfaccia ─────────────────────────────────────────────────
+function updateScrollBar(key) {
+  const p = players[key];
+  if (!p || !p.audio.duration) return;
+  const dur = p.audio.duration;
+  const W = getTrimAreaWidth(key);
+  const vw = getViewportWidth(key);
+
+  const riquadro = document.getElementById(`sbw-${key}`);
+  if (riquadro) {
+    const t = timbroScorrimento(p.scrollOffset, dur, W, vw);
+    riquadro.style.left = (t.sinistra * 100).toFixed(3) + '%';
+    riquadro.style.width = (t.larghezza * 100).toFixed(3) + '%';
+    riquadro.title = t.larghezza >= 0.999
+      ? 'Tutto il brano è visibile: ingrandisci con lo Zoom per scorrere'
+      : 'Trascina per scorrere (oppure due dita sul touchpad sopra l\'onda)';
+  }
+
+  const fascia = document.getElementById(`sbs-${key}`);
+  if (fascia) {
+    const a = frazionePosizione(p.trimStart, dur);
+    const b = frazionePosizione(p.trimEnd, dur);
+    fascia.style.left = (a * 100).toFixed(3) + '%';
+    fascia.style.width = ((b - a) * 100).toFixed(3) + '%';
+  }
+
+  aggiornaIndicatorePosizione(key);
+}
+
+// Solo la lineetta del playhead: la chiama il ciclo a 60 fps, quindi fa due conti
+// e uno style — non ridisegna niente.
+function aggiornaIndicatorePosizione(key) {
+  const p = players[key];
+  if (!p || !p.audio.duration) return;
+  const segno = document.getElementById(`sbp-${key}`);
+  if (segno) segno.style.left = (frazionePosizione(p.timelineTime, p.audio.duration) * 100).toFixed(3) + '%';
+}
+
+// ── Trascinare il riquadro (o cliccare sulla barra) ─────────────────────────
+// Sul riquadro si trascina 1:1 col mouse; fuori dal riquadro il clic (e il
+// trascinamento) CENTRANO la vista su quel punto: è il gesto più comodo per
+// saltare in un'altra parte del brano senza toccare lo Zoom.
+function startScrollDrag(e, key) {
+  e.preventDefault(); e.stopPropagation();
+  _startScrollDrag(key, e.clientX);
+  const om = ev => _moveScrollDrag(key, ev.clientX);
+  const ou = () => { _endScrollDrag(key); document.removeEventListener('mousemove', om); document.removeEventListener('mouseup', ou); };
+  document.addEventListener('mousemove', om);
+  document.addEventListener('mouseup', ou);
+}
+function startScrollDragTouch(e, key) {
+  e.preventDefault(); e.stopPropagation();
+  _startScrollDrag(key, e.touches[0].clientX);
+  const om = ev => _moveScrollDrag(key, ev.touches[0].clientX);
+  const oe = () => { _endScrollDrag(key); document.removeEventListener('touchmove', om); document.removeEventListener('touchend', oe); };
+  document.addEventListener('touchmove', om, { passive: false });
+  document.addEventListener('touchend', oe);
+}
+function _startScrollDrag(key, clientX) {
+  const p = players[key];
+  if (!p || !p.audio.duration) return;
+  const track = document.getElementById(`sbt-${key}`);
+  if (!track) return;
+  const rect = track.getBoundingClientRect();
+  const larghezzaTrack = Math.max(1, rect.width);
+  const t = timbroScorrimento(p.scrollOffset, p.audio.duration, getTrimAreaWidth(key), getViewportWidth(key));
+  const dove = (clientX - rect.left) / larghezzaTrack;
+  const sulRiquadro = t.larghezza < 0.999 && dove >= t.sinistra && dove <= t.sinistra + t.larghezza;
+
+  if (p.followEnabled) {   // scorrere a mano vuol dire «non seguire più il playhead»
+    p.followEnabled = false;
+    document.getElementById(`follow-btn-${key}`)?.classList.remove('active');
+  }
+  if (sulRiquadro) {
+    const corsa = 1 - t.larghezza;
+    p.scrollDrag = { modo: 'riquadro', x0: clientX, corsa0: corsa > 0 ? t.sinistra / corsa : 0, larghezzaTrack };
+    document.getElementById(`sbw-${key}`)?.classList.add('dragging');
+  } else {
+    p.scrollDrag = { modo: 'centra', x0: clientX, corsa0: 0, larghezzaTrack };
+    _moveScrollDrag(key, clientX);   // il clic centra subito
+  }
+}
+function _moveScrollDrag(key, clientX) {
+  const p = players[key];
+  if (!p || !p.scrollDrag || !p.audio.duration) return;
+  const track = document.getElementById(`sbt-${key}`);
+  const rect = track ? track.getBoundingClientRect() : null;
+  const larghezzaTrack = Math.max(1, rect ? rect.width : p.scrollDrag.larghezzaTrack);
+  const dur = p.audio.duration;
+  const W = getTrimAreaWidth(key);
+  const vw = getViewportWidth(key);
+  if (p.scrollDrag.modo === 'centra') {
+    const dove = clamp((clientX - (rect ? rect.left : 0)) / larghezzaTrack, 0, 1);
+    p.scrollOffset = offsetPerCentratura(dove * dur, dur, W, vw);
+  } else {
+    const corsa = clamp(p.scrollDrag.corsa0 + (clientX - p.scrollDrag.x0) / larghezzaTrack, 0, 1);
+    p.scrollOffset = secondiDaCorsa(corsa, dur, W, vw);
+  }
+  applyScroll(key);
+}
+function _endScrollDrag(key) {
+  const p = players[key];
+  if (p) p.scrollDrag = null;
+  document.getElementById(`sbw-${key}`)?.classList.remove('dragging');
 }
 
 // ─── PLAYBACK ──────────────────────────────────────────────────
@@ -2222,6 +2457,7 @@ function updateTrimUI(key) {
   document.getElementById(`tt-end-${key}`).textContent = fmtTime(p.trimEnd);
   document.getElementById(`tt-dur-${key}`).textContent = fmtTime(p.trimEnd - p.trimStart);
   document.getElementById(`tt-offset-${key}`).textContent = (p.sampleOffset >= 0 ? '+' : '') + p.sampleOffset.toFixed(2) + 's';
+  updateScrollBar(key);   // la fascia gialla della barra segue la selezione
 }
 
 function updatePlayhead(key) {
@@ -2230,6 +2466,7 @@ function updatePlayhead(key) {
   const px = secToPx(key, p.timelineTime);
   const ph = document.getElementById(`tph-${key}`);
   if (ph) ph.style.left = px + 'px';
+  aggiornaIndicatorePosizione(key);   // la lineetta sulla barra di scorrimento
 }
 
 function updateTimecode(key) {
@@ -3942,7 +4179,7 @@ function buildPlayerHTML(key,label,filename){
     <button class="move-mode-btn" id="move-btn-${key}" onclick="toggleMoveMode('${key}')">↔ Sposta</button>
     <button class="move-mode-btn" id="deselect-btn-${key}" onclick="deselectBar('${key}')" style="background:var(--surface3);border-color:var(--border2);color:var(--muted)">✕ Deseleziona barra</button>
   </div>
-  <div class="ruler" id="ruler-${key}"><div class="ruler-inner" id="ri-${key}"></div></div>
+  <div class="ruler" id="ruler-${key}" onwheel="onTrimWheel(event,'${key}')"><div class="ruler-inner" id="ri-${key}"></div></div>
   <div class="trim-viewport" id="tv-${key}" onwheel="onTrimWheel(event,'${key}')">
     <div class="trim-area" id="ta-${key}" onmousedown="onTrimMouseDown(event,'${key}')" ontouchstart="onTrimTouchStart(event,'${key}')">
       <div class="grid-layer" id="gl-${key}"></div>
@@ -4051,7 +4288,11 @@ function setZoom(key,z){
 }
 function adjustZoom(key,delta){const p=players[key];if(!p)return;const steps=[1,1.5,2,3,4,6,8,12,16];const cur=steps.findIndex(s=>s>=p.zoom-0.01);setZoom(key,steps[Math.max(0,Math.min(steps.length-1,cur+delta))])}
 function applyScroll(key){const p=players[key];if(!p)return;const dur=p.audio.duration||1,W=getTrimAreaWidth(key),vw=getViewportWidth(key),maxScroll=Math.max(0,W-vw),scrollPx=Math.min(maxScroll,Math.max(0,(p.scrollOffset/dur)*W));const ta=document.getElementById(`ta-${key}`);if(ta)ta.style.transform=`translateX(-${scrollPx}px)`;const ri=document.getElementById(`ri-${key}`);if(ri)ri.style.transform=`translateX(-${scrollPx}px)`}
-function onTrimWheel(e,key){e.preventDefault();const p=players[key];if(!p)return;p.scrollOffset=Math.max(0,Math.min(p.audio.duration||0,p.scrollOffset+(e.deltaY>0?3:-3)));applyScroll(key)}
+function maxScrollSec(key){const p=players[key],dur=p.audio.duration||1,W=getTrimAreaWidth(key),vw=getViewportWidth(key);return Math.max(0,(W-vw)/W*dur)}
+// Touchpad: lo scorrimento ORIZZONTALE (deltaX) sposta la vista 1:1 col dito e
+// anche il verticale "fine" è proporzionale; la rotella a scatti (delta >= 40 px)
+// resta a 3 s per tacca. Vale sopra l'onda, sopra il righello e sulla barra.
+function onTrimWheel(e,key){e.preventDefault();const p=players[key];if(!p||!p.audio.duration)return;const dur=p.audio.duration,W=getTrimAreaWidth(key),vw=getViewportWidth(key),dx=e.deltaX||0,dy=e.deltaY||0,secDaPx=v=>v/W*dur;let d;if(Math.abs(dx)>Math.abs(dy))d=secDaPx(dx);else if(!dy)return;else d=Math.abs(dy)>=40?(dy>0?3:-3):secDaPx(dy);p.scrollOffset=Math.min(maxScrollSec(key),Math.max(0,p.scrollOffset+d));applyScroll(key)}
 function updateTrimUI(key){
   const p=players[key];if(!p||!p.audio.duration)return;
   const startPx=secToPx(key,p.trimStart),endPx=secToPx(key,p.trimEnd),W=getTrimAreaWidth(key);

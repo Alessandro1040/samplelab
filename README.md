@@ -57,6 +57,13 @@ con `(2)` nella cartella locale:
   sinistro che invece **trasla tutto**, i tooltip delle maniglie e la stessa
   regola nel player inline delle card di 🔍 Trova Campioni:
   `python3 -m unittest -v test_sampler_cella`
+- `test_sampler_scroll.py` — test dello **scorrimento col touchpad** (due dita a
+  destra/sinistra sopra l'onda, il righello o la barra: la vista segue le dita 1:1)
+  e della **barra di scorrimento** sotto la forma d'onda (finestra visibile
+  trascinabile, fascia della selezione, lineetta del playhead): funzioni pure
+  `secondiDaScorrimento`, `clampScrollOffset`, `timbroScorrimento`,
+  `offsetPerCentratura`, `secondiDaCorsa`, `frazionePosizione` in JavaScriptCore,
+  più cablaggio e app viva: `python3 -m unittest -v test_sampler_scroll`
 - `fortissimo_compare_v3.py` — modello **Fortissimo Compare v3**: confronto tra
   due output `AudioAnalysis` (MIDI + one-shot), score [0,1]
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
@@ -1273,4 +1280,44 @@ Da tenere presente nelle sessioni di lavoro successive:
   (nessun riavvio: le pagine si servono dal disco a ogni richiesta); mappa del codice
   in `README_sampler.md` §12 ricalcolata dal file vero (documento del sampler ora
   830–**3176**).
+
+- **SCORRIMENTO COL TOUCHPAD E BARRA DI SCORRIMENTO (18/09/2026).** Richiesta di
+  Alessandro, guardando *Hustler's Ambition* nel player: «puoi fare in modo che se
+  scorro col touchpad a destra o sinistra sopra le barre nel player … va a destra
+  oppure a sinistra? cioè che si sposta scorrendo? oltre a questo magari aggiungi
+  un indicatore di posizione sotto, una sorta di barra di scorrimento». Prima il
+  sampler leggeva **solo `deltaY`**: due dita a destra/sinistra non facevano
+  niente, e ogni evento verticale spostava di 3 s **secchi** — col touchpad, dove
+  gli eventi sono tanti e piccoli, la vista saltava invece di scorrere. Ora
+  `onTrimWheel` guarda **`deltaX`** per primo e la vista **segue le dita** 1:1
+  (`secondiDaScorrimento` = `px ÷ W × durata`): vale sopra la forma d'onda, sopra
+  il righello e sulla barra; la rotella del mouse manda delta "a scatti" (≥ 40 px)
+  e resta a **3 s per tacca**, mentre un delta fine è proporzionale. Sotto la forma
+  d'onda c'è la nuova **barra di scorrimento** (la mappa del brano): fascia gialla =
+  selezione IN/OUT, **riquadro turchese** = finestra visibile (larghezza `1/zoom`, si
+  trascina per scorrere, 1:1 col mouse), **lineetta bianca** = playhead (aggiornata a
+  60 fps dal ciclo di disegno), e il **clic fuori dal riquadro centra** la vista lì;
+  a zoom 1 il riquadro riempie la barra e il tooltip lo dice. Le funzioni sono
+  **pure**: `secondiDaScorrimento`, `clampScrollOffset`, `timbroScorrimento`,
+  `offsetPerCentratura`, `secondiDaCorsa`, `frazionePosizione`.
+  Verifiche del 18/09/2026: in **Chrome vero** con eventi di rotella veri (CDP,
+  `deltaX` come li manda il touchpad) su *IDGAF (with blackbear)* — 146,448254 s,
+  onda 955 px — a zoom 4 il riquadro è al **25%** della barra (corsa **109,84 s**);
+  `deltaX = 120 px` sopra l'onda → **+4,586062 s** (= 120/3820 × 146,448254), cioè
+  il contenuto segue il dito, con `translateX(-120px)`; la stessa rotella sopra il
+  righello → altri +4,586062 s; due dita a sinistra → si torna indietro (fino a 0);
+  la rotella verticale → **+3 s** esatti; riquadro trascinato di 60 px → **+6,893485
+  s**; clic a metà barra → offset **54,918095 s** (il valore calcolato `durata/2 −
+  mezzo schermo`); lineetta al **25%** dopo aver spostato il playhead lì; a zoom 1
+  riquadro al **100%** — 10/10 verdetti. **15 test nuovi**
+  (`test_sampler_scroll.py`) e **228 test di suite** (erano 213); pagine `/`
+  `/browse` `/onyx` `/scheda` → 200 (nessun riavvio: il documento del sampler si
+  legge dal disco a ogni richiesta); guida aggiornata (§3, §5.2, nuova **§5.8** "La
+  barra di scorrimento", §7, §13) e mappa del codice §12 ricalcolata dal file vero
+  (documento del sampler **830–3413**, `onTrimWheel` 1374, `applyScroll` 1356,
+  `updateScrollBar` 1456, `openAudioEditor` 5874, `openInSampler` 5903,
+  `renderDbTable` 4775, ricezione `openSampler` 3514, link diretti 3550).
+  La barra c'è nel sampler del modale (e negli editor incorporati delle card, che
+  montano lo stesso documento); il player *inline* delle card ha lo stesso
+  scorrimento col touchpad ma non la barra (è la versione compatta).
 
