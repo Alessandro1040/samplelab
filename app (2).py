@@ -7,7 +7,7 @@ Fonde: YT Downloader (index-5), WhoSampled Scraper (scraper_app), Mass Renamer, 
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp, os, threading, uuid, ssl, socket, json, time, re
-import urllib.parse, subprocess, hashlib, sqlite3, struct, math
+import urllib.parse, subprocess, hashlib, sqlite3, struct, math, select
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
@@ -3522,16 +3522,77 @@ METADATI_MODIFICABILI = ("title", "artist", "album", "album_artist", "composer",
                          "musical_key", "comment", "lyrics", "youtube_url",
                          "genius_url", "whosampled_url", "cover_art_path")
 
-def _set_verify_status(song_id, step, total, status):
-    verify_progress[song_id] = {"step": step, "total": total, "status": status, "ts": time.time()}
+# ── PROGRESSO TOTALE DELLA VERIFICA (0-100%) ────────────────────────────────
+# La pagina mostrava «Passo 4/7» e una barra che saltava di 1/7 in 1/7: dentro il
+# passo più lungo (la trascrizione, 60-85 s) sembrava ferma. Qui si tiene il conto
+# del lavoro TOTALE: `VERIFY_PESI` è quanto pesa ogni passo in secondi (misurati sul
+# Mac di origine il 18/09/2026 — il 7, la trascrizione Whisper, è di gran lunga il
+# più lungo) e il passo corrente ci mette dentro la sua frazione: quella VERA quando
+# il pezzo la sa dire (Whisper dai segmenti già trascritti, demucs dal suo
+# avanzamento), altrimenti una stima dal tempo trascorso.
+VERIFY_PESI = {1: 3.0,     # ricerca su Genius
+               2: 6.0,     # testo e copertina da Genius
+               3: 8.0,     # ricerca URL YouTube
+               4: 20.0,    # WhoSampled (col browser pilotato)
+               5: 4.0,     # BPM/Key su Tunebat
+               6: 12.0,    # impronta acustica sull'anteprima iTunes
+               7: 90.0}    # trascrizione Whisper (e demucs, se a cappella)
+VERIFY_PESO_TOTALE = sum(VERIFY_PESI.values())
+
+
+def _set_verify_status(song_id, step, total, status, frazione=None):
+    """Segna il passo corrente e il testo da mostrare. `frazione` (0-1) è quanto è
+    già stato fatto DENTRO il passo (None = non si sa ancora)."""
+    verify_progress[song_id] = {"step": step, "total": total, "status": status,
+                                "ts": time.time(), "iniziato": time.time(),
+                                "frazione": frazione}
+
+
+def _avanza_verify(song_id, frazione):
+    """Il passo corrente dice a che punto è (0-1). Si tiene il MASSIMO: se una misura
+    arriva dopo un'altra la barra non torna indietro."""
+    st = verify_progress.get(song_id)
+    if not st:
+        return
+    try:
+        f = max(0.0, min(1.0, float(frazione)))
+    except (TypeError, ValueError):
+        return
+    st["frazione"] = max(st.get("frazione") or 0.0, f)
+
+
+def _verify_percento(passo, frazione=None, secondi=0.0):
+    """Funzione PURA. Quanto lavoro è stato fatto, da 0 a 100, sul TOTALE dei passi.
+
+    I passi già passati contano per intero; il passo corrente conta per la sua
+    `frazione` — quella vera se il pezzo la sa dire, altrimenti stimata dal tempo
+    trascorso rispetto al peso del passo, **mai oltre il 90%**: la barra non deve
+    arrivare a 100 prima che la verifica sia finita.
+    """
+    peso = VERIFY_PESI.get(passo, 5.0)
+    fatto_prima = sum(p for k, p in VERIFY_PESI.items() if k < passo)
+    if frazione is None:
+        frazione = 0.9 * min(1.0, max(0.0, (secondi or 0.0) / peso)) if peso else 0.0
+    fattezza = peso * max(0.0, min(1.0, frazione))
+    return int(round(100.0 * (fatto_prima + fattezza) / VERIFY_PESO_TOTALE))
+
 
 @app.route("/db/songs/<song_id>/verify_status", methods=["GET"])
 def verify_status_endpoint(song_id):
+    """A che punto è la verifica: passo, testo, e il **progresso totale 0-100%**.
+
+    `percento` è calcolato qui a ogni richiesta (la pagina interroga ogni 1,5 s) e
+    usa `secondi` per far avanzare la stima dentro il passo corrente.
+    """
     st = verify_progress.get(song_id)
     if not st:
         return jsonify({"active": False, "song_id": song_id})
+    secondi = max(0.0, time.time() - st.get("iniziato", st["ts"]))
     return jsonify({"active": True, "song_id": song_id, "step": st["step"],
-                    "total": st["total"], "status": st["status"]})
+                    "total": st["total"], "status": st["status"],
+                    "secondi": round(secondi, 1),
+                    "frazione": st.get("frazione"),
+                    "percento": _verify_percento(st["step"], st.get("frazione"), secondi)})
 
 @app.route("/db/songs/<song_id>/verify", methods=["POST"])
 def verify_song(song_id):
@@ -4085,7 +4146,7 @@ def verify_song(song_id):
                 risultato_testo = verifica_testo_riferimento(
                     percorso_locale, liriche_rif, tipo="liriche", sorgente=sorgente_testo,
                     status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo),
-                    soglie=soglie_testo)
+                    soglie=soglie_testo, avanza=lambda f: _avanza_verify(song_id, f))
             else:
                 _set_verify_status(song_id, 7, VERIFY_TOTALE, "🗣 Cerco un audio di riferimento…")
                 info_rif = cerca_anteprima_itunes(search_artist, search_title)
@@ -4093,7 +4154,7 @@ def verify_song(song_id):
                 risultato_testo = verifica_testo_riferimento(
                     percorso_locale, audio_rif or "", tipo="audio", sorgente=sorgente_testo,
                     status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo),
-                    soglie=soglie_testo)
+                    soglie=soglie_testo, avanza=lambda f: _avanza_verify(song_id, f))
             updates.update(campi_dal_risultato_testo(risultato_testo))
             messages.append(risultato_testo["messaggio"])
         except Exception as e:
@@ -5659,24 +5720,66 @@ def modello_whisper(nome=None):
     return _whisper_cache[nome]
 
 
-def a_cappella(percorso, timeout=900):
+def a_cappella(percorso, timeout=900, avanza=None):
     """Estrae la VOCE con demucs (`--two-stems=vocals`: 1-3 minuti per brano) e
     restituisce il percorso dell'a cappella, oppure None. Si usa quando si vuole
     trascrivere SOLO la voce: sul mix la trascrizione funziona già (68-78% nel
-    brano giusto) ma con la musica sotto sbaglia più parole."""
+    brano giusto) ma con la musica sotto sbaglia più parole.
+
+    `avanza` riceve la frazione di lavoro fatta (0-1) leggendo l'avanzamento che
+    demucs stampa da sé (le percentuali del suo tqdm su stderr): è una misura vera,
+    non una stima — demucs sa quanti pezzi ha finito. Se supera `timeout` il
+    processo viene ucciso e si restituisce None (come prima).
+    """
     if not percorso or not os.path.exists(percorso):
         return None
     import tempfile
     cartella = tempfile.mkdtemp(prefix="acapella_", dir=ANTEPRIME_DIR)
+    p = None
     try:
-        p = subprocess.run(["python3", "-m", "demucs", "--two-stems=vocals", "--mp3",
-                            "--mp3-bitrate", "320", "-o", cartella, percorso],
-                           capture_output=True, text=True, timeout=timeout)
+        p = subprocess.Popen(["python3", "-m", "demucs", "--two-stems=vocals", "--mp3",
+                              "--mp3-bitrate", "320", "-o", cartella, percorso],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     except Exception as e:
         print(f"[demucs] {e}")
         return None
+    # Si legge stderr pezzo per pezzo (demucs scrive il progresso con `\r`, quindi
+    # niente `readline`): `select` con un secondo di pazienza serve a rispettare il
+    # timeout anche se il processo resta muto.
+    scadenza = time.time() + timeout
+    coda = ""
+    try:
+        fd = p.stderr.fileno()
+        while True:
+            pronto, _, _ = select.select([fd], [], [], 1.0)
+            if not pronto:
+                if time.time() > scadenza:
+                    p.kill()
+                    print("[demucs] timeout")
+                    return None
+                continue
+            blocco = os.read(fd, 512)
+            if not blocco:
+                break
+            coda = (coda + blocco.decode("utf-8", "replace"))[-400:]
+            if avanza:
+                percentuali = re.findall(r"(\d{1,3})%", coda)
+                if percentuali:
+                    avanza(min(0.98, int(percentuali[-1]) / 100.0))
+            if time.time() > scadenza:
+                p.kill()
+                print("[demucs] timeout")
+                return None
+        p.wait(timeout=30)
+    except Exception as e:
+        print(f"[demucs] {e}")
+        try:
+            p.kill()
+        except Exception:
+            pass
+        return None
     if p.returncode != 0:
-        print(f"[demucs] errore: {(p.stderr or '')[-200:]}")
+        print(f"[demucs] errore: uscita {p.returncode}")
         return None
     for radice, _, files in os.walk(cartella):
         for f in sorted(files):
@@ -5685,22 +5788,38 @@ def a_cappella(percorso, timeout=900):
     return None
 
 
-def trascrivi(percorso, sorgente="mix", modello=None):
+def trascrivi(percorso, sorgente="mix", modello=None, avanza=None):
     """Trascrive un file e restituisce {"testo", "parole", "durata", "lingua",
-    "fonte"} oppure None. `sorgente` = 'mix' (veloce) | 'a cappella' (demucs)."""
+    "fonte"} oppure None. `sorgente` = 'mix' (veloce) | 'a cappella' (demucs).
+
+    `avanza` è una callback opzionale che riceve la frazione di lavoro fatta (0-1),
+    per la barra di avanzamento della pagina: con l'a cappella la prima metà è demucs
+    (col suo avanzamento vero) e la seconda è Whisper.
+    """
     m = modello_whisper(modello)
     if m is None or not percorso or not os.path.exists(percorso):
         return None
     da_trascrivere, nota = percorso, "mix"
+    avanza_whisper = avanza
     if sorgente == "a cappella":
-        voce = a_cappella(percorso)
+        voce = a_cappella(percorso, avanza=(lambda f: avanza(0.5 * f)) if avanza else None)
         if voce:
             da_trascrivere, nota = voce, "a cappella"
+            avanza_whisper = (lambda f: avanza(0.5 + 0.5 * f)) if avanza else None
     try:
         segmenti, info = m.transcribe(da_trascrivere, vad_filter=False,
                                       no_speech_threshold=None, log_prob_threshold=None,
                                       condition_on_previous_text=False)
-        testo = " ".join(s.text.strip() for s in segmenti)
+        durata = getattr(info, "duration", None) or 0
+        pezzi = []
+        for seg in segmenti:
+            pezzi.append(getattr(seg, "text", "").strip())
+            # Il progresso VERO del passo più lungo: Whisper restituisce i segmenti in
+            # ordine e ognuno sa dove finisce dentro l'audio, quindi la frazione già
+            # trascritta è una misura e non una stima (brano di 4:18 → ~60-85 s).
+            if avanza_whisper and durata:
+                avanza_whisper(min(0.98, (getattr(seg, "end", 0) or 0) / durata))
+        testo = " ".join(p for p in pezzi if p)
     except Exception as e:
         print(f"[whisper] trascrizione fallita: {e}")
         return None
@@ -5714,7 +5833,8 @@ def trascrivi(percorso, sorgente="mix", modello=None):
 
 
 def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="mix",
-                               status=None, soglie=None, min_parole=TESTI_MIN_PAROLE):
+                               status=None, soglie=None, min_parole=TESTI_MIN_PAROLE,
+                               avanza=None):
     """Conferma dal PARLATO: quello che si sente è il testo che ci si aspetta?
 
     `riferimento` è il TESTO delle liriche (`tipo='liriche'`) oppure il percorso di
@@ -5756,7 +5876,10 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
         return senza_confronto("file", "conferma dal parlato non possibile: manca il file locale")
 
     segnala("🗣 Trascrivo il file locale" + (" (a cappella)" if sorgente == "a cappella" else "") + "…")
-    nostro = trascrivi(percorso, sorgente=sorgente)
+    # La barra: il nostro file occupa i primi 70% del passo (demucs incluso se serve),
+    # l'eventuale audio di riferimento il resto.
+    nostro = trascrivi(percorso, sorgente=sorgente,
+                       avanza=(lambda f: avanza(0.7 * f)) if avanza else None)
     if not nostro:
         return senza_confronto("trascrizione", "trascrizione del file locale non riuscita")
     nota_sorgente = f"trascrizione {nostro['fonte']}"
@@ -5766,7 +5889,8 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
         if not riferimento or not os.path.exists(riferimento):
             return senza_confronto("riferimento", "nessun audio di riferimento da trascrivere")
         segnala("🗣 Trascrivo l'audio di riferimento…")
-        altro = trascrivi(riferimento, sorgente=sorgente)
+        altro = trascrivi(riferimento, sorgente=sorgente,
+                          avanza=(lambda f: avanza(0.7 + 0.3 * f)) if avanza else None)
         if not altro:
             return senza_confronto("trascrizione", "trascrizione dell'audio di riferimento non riuscita")
         parole_rif = set(altro["parole"])

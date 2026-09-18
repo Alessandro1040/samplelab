@@ -44,8 +44,19 @@ button.go:hover{opacity:.9}
 button.go:disabled{opacity:.45;cursor:not-allowed}
 .progress{display:none;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:16px}
 .progress.on{display:block}
+/* ── Progresso TOTALE 0-100% (18/09/2026) ─────────────────────────────────── */
+/* Prima la barra faceva 7 salti (1/7 alla volta) e dentro la trascrizione (60-85 s)
+   sembrava ferma: ora c'è il lavoro totale con la percentuale grande e la rotella. */
+.totale{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.rotella{width:20px;height:20px;flex:none;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:gira .8s linear infinite}
+.rotella.ferma{animation:none;border-top-color:var(--border2)}
+@keyframes gira{to{transform:rotate(360deg)}}
+.pct{font-family:'Space Mono',monospace;font-size:26px;font-weight:700;color:var(--accent);line-height:1;min-width:78px}
+.pct small{font-size:13px;color:var(--muted);margin-left:2px;font-weight:400}
+.avanzamento{flex:1;min-width:0}
+.secondi{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-top:3px}
 .bar{height:8px;background:var(--surface3);border-radius:20px;overflow:hidden;margin:12px 0}
-.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .4s}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .9s linear}
 .step{font-family:'Space Mono',monospace;font-size:13px;color:var(--accent)}
 .status{color:var(--text2);font-size:13px;margin-top:4px}
 .msgs{margin-top:14px;display:none}
@@ -164,9 +175,16 @@ button.confronta:hover{background:var(--accent);color:#080808}
   <div class="hint" id="avvisoTesto"></div>
 
   <div class="progress" id="progress">
-    <div class="step" id="passo">Passo 1/7</div>
-    <div class="status" id="stato">Avvio…</div>
+    <div class="totale">
+      <div class="rotella" id="rotella" aria-hidden="true"></div>
+      <div class="pct"><span id="percento">0</span><small>%</small></div>
+      <div class="avanzamento">
+        <div class="step" id="passo">Passo 1/7</div>
+        <div class="secondi" id="secondi"></div>
+      </div>
+    </div>
     <div class="bar"><i id="barra"></i></div>
+    <div class="status" id="stato">Avvio…</div>
     <div class="msgs" id="msgs"></div>
     <div class="verdicts" id="verdicts"></div>
   </div>
@@ -413,21 +431,36 @@ async function avviaVerifica() {
   box.classList.remove("on"); box.innerHTML = "";
   document.getElementById("verdicts").innerHTML = "";
   const inizio = Date.now();
-  // Il progresso viene dal server: /verify_status dice passo e testo corrente
-  // («Passo 4/7 · Ricerca WhoSampled…»), come chiesto.
+  // Si riparte da zero: percentuale, barra, secondi del passo e rotella che gira.
+  document.getElementById("barra").style.width = "0%";
+  document.getElementById("percento").textContent = "0";
+  document.getElementById("secondi").textContent = "";
+  document.getElementById("rotella").classList.remove("ferma");
+  // Il progresso viene dal server: /verify_status dice passo, testo corrente e il
+  // **progresso totale 0-100%** (dentro i passi lunghi c'è la frazione VERA: Whisper
+  // sa quanto audio ha già trascritto, demucs quanto ha separato; per gli altri il
+  // server stima dal tempo trascorso). Si interroga ogni 1,2 s e la barra ha una
+  // transizione lunga, così il movimento è continuo e non a scatti.
   const poll = setInterval(async () => {
     try {
       const st = await fetch(`/db/songs/${encodeURIComponent(idCanzone)}/verify_status`).then(r => r.json());
       if (st && st.active) {
         document.getElementById("passo").textContent = `Passo ${st.step}/${st.total}`;
         document.getElementById("stato").textContent = st.status || "";
-        document.getElementById("barra").style.width = Math.round((st.step / Math.max(st.total, 1)) * 100) + "%";
+        const pct = (st.percento != null)
+          ? st.percento
+          : Math.round((st.step / Math.max(st.total, 1)) * 100);
+        document.getElementById("percento").textContent = pct;
+        document.getElementById("barra").style.width = pct + "%";
+        document.getElementById("secondi").textContent =
+          (st.secondi != null ? st.secondi + " s in questo passo" : "");
+        document.getElementById("rotella").classList.remove("ferma");
       } else {
         document.getElementById("stato").textContent =
           `in corso… ${Math.round((Date.now() - inizio) / 1000)} s`;
       }
     } catch (_) {}
-  }, 1500);
+  }, 1200);
   try {
     const corpo = payloadVerifica(metadatiDiversi(), {
       audio: document.getElementById("optAudio").checked,
@@ -445,6 +478,9 @@ async function avviaVerifica() {
     clearInterval(poll);
     document.getElementById("passo").textContent = "Verifica conclusa";
     document.getElementById("barra").style.width = "100%";
+    document.getElementById("percento").textContent = "100";
+    document.getElementById("secondi").textContent = "";
+    document.getElementById("rotella").classList.add("ferma");
     document.getElementById("stato").textContent = `in ${Math.round((Date.now() - inizio) / 1000)} s`;
     box.classList.add("on");
     box.innerHTML = (res.messages || []).map(m => {

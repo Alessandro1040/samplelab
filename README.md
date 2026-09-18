@@ -445,6 +445,17 @@ Da tenere presente nelle sessioni di lavoro successive:
   *21 Questions*; in libreria 68 righe hanno i Produttori in JSON e 6 un doppio apice
   negli artisti). Ora `esc()` scappa `"` e `'`, e i Produttori si mostrano come lista
   leggibile e si riscrivono in JSON come nell'✏️ Edit di `index (2).html`.
+- **Progresso TOTALE della verifica (0-100%, 18/09/2026).** La pagina `/verifica` non
+  mostra più solo «Passo x/7»: c'è una **percentuale grande** (con la rotella che gira)
+  su tutto il lavoro, perché i passi hanno un **peso in secondi** (`VERIFY_PESI`: la
+  trascrizione da sola pesa 90 su 143) e il passo corrente porta la sua frazione —
+  quella **vera** quando il pezzo la sa dire (`trascrivi` legge i segmenti di Whisper,
+  `a_cappella` legge le percentuali di demucs dal suo stderr), altrimenti stimata dal
+  tempo trascorso, **mai oltre il 90%** del passo. L'endpoint
+  `GET /db/songs/<id>/verify_status` restituisce `percento`, `frazione` e `secondi`, e
+  la pagina (interrogata ogni 1,2 s) ha una barra con transizione lunga, così il
+  movimento è continuo. `_verify_percento` e `_avanza_verify` sono testati a parte
+  (funzioni pure, frazione che non torna indietro).
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
   `do_download_playlist`): con yt-dlp recenti provocava "Video unavailable"/403.
 - **FORTISSIMO COMPARE (11/09/2026).** Aggiunti `fortissimo_compare_v3.py`, la
@@ -2039,6 +2050,47 @@ Da tenere presente nelle sessioni di lavoro successive:
     **13.280 pixel** disegnati, e dopo «▶ avvia i due dal punto allineato» sono a
     **1:18 / 4:18** e **0:02 / 0:30**: i due file si sentono **insieme, allineati sullo
     stesso passaggio** (Web Audio + canvas: la parte che JavaScriptCore non può provare).
+
+- **📈 LA VERIFICA MOSTRA IL PROGRESSO TOTALE, DA 0 A 100% (18/09/2026, sera).** Richiesta
+  di Alessandro: «anziché Passo 7/7 · 🗣 Trascrivo il file locale (a cappella)… o
+  quantomeno oltre a questo… potrei vedere una barra di avanzamento totale che va da 0 a
+  100? tipo una rotella o qualcosa del genere che indica progresso». Prima la barra faceva
+  **7 salti** (1/7 alla volta) e dentro la trascrizione — 60-85 s, di gran lunga il passo
+  più lungo — sembrava ferma. Ora:
+  - i passi hanno un **peso in secondi** (`VERIFY_PESI`, misurati sul Mac di origine:
+    Genius 3, testo/copertina 6, YouTube 8, WhoSampled 20, Tunebat 4, audio 12,
+    **trascrizione 90**; totale 143) e `_verify_percento(passo, frazione, secondi)`
+    (funzione pura) dice a che punto è il lavoro TOTALE;
+  - il passo corrente porta la sua **frazione vera** quando il pezzo la sa dire:
+    **Whisper** dai suoi segmenti (`trascrivi` legge `seg.end / durata`: la frazione di
+    audio già trascritto è una misura, non una stima) e **demucs** dall'avanzamento che
+    stampa da sé (le sue percentuali lette dallo stderr: `a_cappella` ora usa `Popen` +
+    `select` per non perdere né l'avanzamento né il `timeout`);
+  - per gli altri passi la frazione è **stimata dal tempo trascorso** sul peso del passo e
+    non supera mai il 90% (`_verify_percento`): la barra non arriva a 100 prima della fine;
+    `_avanza_verify` tiene il massimo, così una misura che arriva dopo un'altra non fa
+    tornare indietro la barra;
+  - in pagina: **percentuale grande** in verde, **barra** con transizione lunga (0,9 s
+    lineare) e **rotella** che gira (`@keyframes gira`), più «Passo x/7» e i secondi spesi
+    nel passo corrente; la pagina interroga `verify_status` ogni 1,2 s (prima 1,5) e a
+    fine verifica mette 100% e ferma la rotella.
+  - Verifiche del 18/09/2026: **5 test nuovi** (`TestProgressoVerifica`: il conto del
+    lavoro totale, la monotonia e i limiti 0-100, la frazione che non torna indietro, il
+    progresso vero dei due pezzi lunghi nel codice, l'endpoint e la pagina) e **411 test
+    di suite**; **misurata la curva vera** su *21 Questions* con un `POST /verify` completo
+    (136,2 s in tutto) campionando `verify_status` ogni 4 s: il passo 7 entra a **38%**, la
+    frazione sale **0,007 → 0,343** durante demucs (~85 s: è il suo avanzamento mappato
+    sulla prima metà del passo), si ferma ~12 s mentre il modello di Whisper si carica, poi
+    i segmenti portano **0,418 → 0,658** (Whisper all'88% dell'audio) e a 132 s la verifica
+    chiude con «Testo confermato: 82,6%». La barra in pagina è passata da 38% a 78% **senza
+    mai saltare a 100 prima della fine**.
+  - **In CHROME VERO** (la pagina, con 🗣 voce e 🎤 a cappella spuntati): la percentuale è
+    salita **38 → 39 → 42 → 44 → 46 → 49 → 51 → 53 → 55 → 58 → 59 → 61 → 65 → 68 → 70 →
+    75 → 78%** dentro il passo 7, con la **rotella** che girava e i «secondi in questo
+    passo» che salivano, e solo alla fine è passata a **100%** con «Verifica conclusa» e la
+    rotella ferma (193 s: la macchina era carica per i test in parallelo). Nei messaggi
+    **non compare** nessun «✏️ Metadati aggiornati» spurio: è anche la prova che il fix di
+    `esc()` sui Produttori tiene.
 
 
 

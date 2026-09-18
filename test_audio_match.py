@@ -1056,6 +1056,81 @@ class TestConfrontoVoce(unittest.TestCase):
                       estrai_funzione_py(self.app_src, "conferma_audio"))
 
 
+class TestProgressoVerifica(unittest.TestCase):
+    """Il progresso TOTALE della verifica (0-100%) — 18/09/2026.
+
+    Richiesta di Alessandro: «anziché Passo 7/7 · 🗣 Trascrivo il file locale (a
+    cappella)… o quantomeno oltre a questo… potrei vedere una barra di avanzamento
+    totale che va da 0 a 100? tipo una rotella o qualcosa del genere che indica
+    progresso». Prima la barra faceva 7 salti e dentro la trascrizione (60-85 s)
+    sembrava ferma: ora i passi hanno un PESO in secondi, il passo corrente porta la
+    sua frazione — quella VERA quando il pezzo la sa dire (Whisper dai segmenti già
+    trascritti, demucs dal suo avanzamento) — e il resto è stima dal tempo trascorso,
+    mai oltre il 90% del passo (la barra non deve arrivare a 100 prima della fine).
+    """
+
+    def setUp(self):
+        self.app_src = leggi(APP_PATH)
+        self.verifica = leggi(VERIFICA_PATH)
+
+    def test_percento_del_lavoro_totale(self):
+        self.assertEqual(APP._verify_percento(1, None, 0), 0)          # non è iniziato
+        # la frazione VERA conta subito: metà trascrizione = ~2/3 del lavoro
+        meta_trascrizione = APP._verify_percento(7, 0.5, 0)
+        self.assertGreater(meta_trascrizione, 60)
+        self.assertLess(meta_trascrizione, 75)
+        self.assertEqual(APP._verify_percento(7, 1.0, 0), 100)         # solo alla fine
+        self.assertLess(APP._verify_percento(7, None, 100000), 100)    # la stima no
+        self.assertEqual(APP._verify_percento(2, None, 0), 2)          # dopo il passo 1
+
+    def test_cresce_sempre_e_non_esce_dai_limiti(self):
+        passi = sorted(APP.VERIFY_PESI)
+        valori = [APP._verify_percento(k, None, 0) for k in passi]
+        self.assertEqual(valori, sorted(valori), "il progresso non torna indietro")
+        for passo in passi:
+            for frazione in (None, 0, 0.5, 1):
+                for secondi in (0, 10, 10000):
+                    p = APP._verify_percento(passo, frazione, secondi)
+                    self.assertGreaterEqual(p, 0)
+                    self.assertLessEqual(p, 100)
+
+    def test_la_frazione_vera_non_torna_indietro(self):
+        chiave = "song_test_progresso"
+        APP.verify_progress[chiave] = {"step": 7, "total": 7, "status": "x", "ts": 0,
+                                       "iniziato": 0, "frazione": None}
+        try:
+            APP._avanza_verify(chiave, 0.4)
+            self.assertAlmostEqual(APP.verify_progress[chiave]["frazione"], 0.4)
+            APP._avanza_verify(chiave, 0.2)         # misura più arretrata: si ignora
+            self.assertAlmostEqual(APP.verify_progress[chiave]["frazione"], 0.4)
+            APP._avanza_verify(chiave, 5)           # fuori scala: si taglia a 1
+            self.assertEqual(APP.verify_progress[chiave]["frazione"], 1.0)
+            APP._avanza_verify(chiave, "boh")       # non solleva
+            APP._avanza_verify("song_inesistente", 0.5)
+        finally:
+            APP.verify_progress.pop(chiave, None)
+
+    def test_il_progresso_vero_dei_due_pezzi_lunghi(self):
+        trascrivi = estrai_funzione_py(self.app_src, "trascrivi")
+        self.assertIn("avanza=None", trascrivi)
+        self.assertIn('getattr(seg, "end", 0)', trascrivi)      # Whisper: i segmenti
+        self.assertIn("avanza_whisper", trascrivi)
+        cappella = estrai_funzione_py(self.app_src, "a_cappella")
+        self.assertIn("avanza=None", cappella)
+        self.assertIn(r"(\d{1,3})%", cappella)                  # demucs: le sue %
+        self.assertIn("select.select", cappella)                # timeout rispettato
+        # il passo 7 della Verifica passa la sua frazione al contatore
+        corpo = estrai_funzione_py(self.app_src, "verify_song")
+        self.assertEqual(corpo.count("avanza=lambda f: _avanza_verify(song_id, f)"), 2)
+
+    def test_l_endpoint_lo_dice_alla_pagina(self):
+        self.assertIn('"percento": _verify_percento(', self.app_src)
+        self.assertIn('"secondi": round(secondi, 1)', self.app_src)
+        for pezzo in ('id="percento"', 'id="rotella"', 'id="secondi"',
+                      'st.percento', 'classList.add("ferma")', "1200"):
+            self.assertIn(pezzo, self.verifica, pezzo)
+
+
 class TestCablaggio(unittest.TestCase):
     """Il passo 🔊 è agganciato al posto giusto: dentro la Verifica (prima di
     BPM/Key), con endpoint dedicato, migrazione, legenda e interfaccia."""
