@@ -421,7 +421,13 @@ def save_dataset(data):
             json.dump(data,f,indent=2,ensure_ascii=False)
         os.replace(tmp,DATASET_PATH)
 
-def normalize_key(s): return re.sub(r"[^a-z0-9]","",s.lower())
+def normalize_key(s):
+    # 19/09/2026: NULL-safe (`str(s or "")`). In libreria ci sono righe con
+    # `title` a NULL (brani importati dal player Onyx, rinominati male) e
+    # `None.lower()` faceva fallire con 500 tutto ciò che confronta le canzoni:
+    # /db/songs, /db/from_onyx, /metadata, register_local_file e il dataset JSON.
+    # La guardia locale che c'era dentro get_or_create_song_db ora vale per tutti.
+    return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
 
 # ── MUSICAL KEY UTILITIES ─────────────────────────────────────────────────────
 _NOTE_SEMIS = {
@@ -475,6 +481,129 @@ def keys_equivalent(k1, k2):
         return (s1 - s2) % 12 == 3
     return (s2 - s1) % 12 == 3
 
+# ── IDENTITÀ DI UNA CANZONE (serve a NON creare doppioni) ────────────────────
+# Caso vero (18/09/2026): «Till I Collapse» di Eminem è finita in libreria DUE
+# volte — la riga del 13/08 (con il file locale e l'artista «Eminem / Nate Dogg»)
+# e quella del 18/09, creata salvando un campione con l'artista «Eminem» e poi
+# COMPLETATA dalla Verifica (che riscrive i crediti nel formato «A / B»).
+# Il confronto di prima (`normalize_key(title)` e `normalize_key(artist)`
+# identici) non poteva riconoscerle, perché l'artista era scritto in due modi.
+# Qui il confronto si allarga a quello che NON cambia la canzone: apostrofi,
+# punteggiatura, crediti feat./ft./with e i marcatori di servizio
+# ([Explicit], (Official Video)…). NON si toccano invece «Remix», «Live»,
+# «Cover», «Instrumental»: quelli sono brani diversi, e in `sample_relations`
+# hanno una categoria propria.
+_MARCA_SERVIZIO = re.compile(
+    r"\s*[\(\[]\s*(?:feat\.?|ft\.?|with|con|official|explicit|video|audio|lyric"
+    r"|hd|hq|prod\.?(?:\s+by)?|visualizer|clip)\b[^\)\]]*[\)\]]", re.I)
+_SEPARA_ARTISTI = re.compile(
+    r"\s*(?:/|,|;|\||\+|&|\bfeat\.?\b|\bft\.?\b|\bwith\b|\bcon\b|\bx\b)\s*", re.I)
+
+
+def titolo_confronto(s):
+    """Titolo per il CONFRONTO fra canzoni (dedup): toglie punteggiatura e i
+    marcatori di servizio («Samuel's Song [Official Video] (feat. X)» →
+    «samuelssong»), ma **NON** tocca «Remix», «Live», «Cover», «Instrumental»:
+    quelli sono brani diversi. (La `titolo_base()` più sotto, riga ~3657, fa il
+    contrario di proposito: serve a TROVARE le varianti nella scheda, non a
+    decidere se due righe sono la stessa canzone.)"""
+    return normalize_key(_MARCA_SERVIZIO.sub(" ", str(s or "")))
+
+
+def artista_principale(s):
+    """Il PRIMO artista di un elenco («A / B feat. C» → «a»), normalizzato."""
+    parti = [p for p in _SEPARA_ARTISTI.split(str(s or "").lower()) if p.strip()]
+    return normalize_key(parti[0]) if parti else ""
+
+
+def artisti_compatibili(a, b):
+    """Vero se i due campi artista indicano lo stesso artista: testo identico,
+    uno contenuto nell'altro, o stesso artista PRINCIPALE
+    («Eminem» vs «Eminem / Nate Dogg», «Eminem feat. Nate Dogg» vs «Eminem»)."""
+    na, nb = normalize_key(a), normalize_key(b)
+    if not na or not nb:
+        return False
+    if na == nb or na in nb or nb in na:
+        return True
+    pa, pb = artista_principale(a), artista_principale(b)
+    return bool(pa) and pa == pb and len(pa) >= 3
+
+
+def canzoni_equivalenti(t1, a1, t2, a2):
+    """Stessa canzone? Stesso titolo (anche scritto in modo diverso) e artista
+    compatibile: è il confronto che riconosce un doppione."""
+    if not normalize_key(t1) or not normalize_key(t2):
+        return False
+    if normalize_key(t1) != normalize_key(t2) and titolo_confronto(t1) != titolo_confronto(t2):
+        return False
+    return artisti_compatibili(a1, a2)
+
+
+def find_existing_song(conn, title, artist, youtube_url="", exclude_id=""):
+    """La riga di QUESTA canzone già in libreria, o `(None, "")`.
+
+    Prove, dalla più forte alla più debole:
+    1. stesso link YouTube;
+    2. titolo e artista identici (il confronto di sempre);
+    3. stesso titolo + artista compatibile (il caso «Till I Collapse»);
+    4. stesso titolo, artista mancante da una parte, e quel titolo è **unico** in
+       libreria (i file di yt-dlp non sempre hanno l'artista nel nome).
+    `come` dice quale prova ha riconosciuto la riga: finisce nella risposta di
+    /save_pair, così si vede che NON è stato creato un doppione.
+    """
+    yt = (youtube_url or "").strip()
+    if yt:
+        r = conn.execute("SELECT id FROM songs WHERE youtube_url=?", (yt,)).fetchone()
+        if r and r["id"] != exclude_id:
+            return r["id"], "stesso link YouTube"
+    nt, na = normalize_key(title), normalize_key(artist)
+    rows = conn.execute("SELECT id,title,artist FROM songs").fetchall()
+    # 2) titolo e artista identici (il confronto di sempre). Con `nt` vuoto non si
+    #    confronta niente: senza titolo non si può dire che sia la stessa canzone.
+    if nt:
+        for row in rows:
+            if row["id"] == exclude_id:
+                continue
+            if normalize_key(row["title"]) == nt and normalize_key(row["artist"]) == na:
+                return row["id"], "titolo e artista identici"
+    tb = titolo_confronto(title)
+    if not tb:
+        return None, ""
+    candidate = [row for row in rows
+                 if row["id"] != exclude_id and titolo_confronto(row["title"]) == tb]
+    for row in candidate:
+        if artisti_compatibili(artist, row["artist"]):
+            return row["id"], "stesso titolo, artista compatibile"
+    if len(candidate) == 1 and (not na or not normalize_key(candidate[0]["artist"])):
+        return candidate[0]["id"], "stesso titolo (unico in libreria), artista mancante"
+    return None, ""
+
+
+def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", duration=None):
+    """La riga di questa canzone, creandola solo se non c'è davvero. Ritorna
+    `(song_id, creata, come)`: `come` è la prova del riconoscimento."""
+    sid, come = find_existing_song(conn, title, artist, youtube_url)
+    if sid:
+        # Nella riga che c'è già si COMPLETANO solo i campi vuoti: quello che è
+        # stato curato a mano (artista, titolo, BPM…) non viene mai sovrascritto.
+        if youtube_url:
+            conn.execute("UPDATE songs SET youtube_url=?, updated_at=datetime('now') "
+                         "WHERE id=? AND (youtube_url IS NULL OR youtube_url='')",
+                         (youtube_url, sid))
+        if local_file:
+            conn.execute("UPDATE songs SET local_file=?, updated_at=datetime('now') "
+                         "WHERE id=? AND (local_file IS NULL OR local_file='')",
+                         (local_file, sid))
+        if duration is not None:
+            conn.execute("UPDATE songs SET duration=COALESCE(duration,?), "
+                         "updated_at=datetime('now') WHERE id=?", (duration, sid))
+        return sid, False, come
+    sid = "song_" + hashlib.sha256(f"{title}|{artist}|{time.time()}".encode()).hexdigest()[:12]
+    conn.execute("INSERT INTO songs(id,title,artist,youtube_url,local_file,duration) "
+                 "VALUES(?,?,?,?,?,?)", (sid, title, artist, youtube_url, local_file, duration))
+    return sid, True, "nuova riga"
+
+
 def song_match(s1,s2):
     return (normalize_key(s1.get("title",""))==normalize_key(s2.get("title","")) and
             normalize_key(s1.get("artist",""))==normalize_key(s2.get("artist","")))
@@ -515,23 +644,18 @@ def check_pair_exists_loose(data,song_x_meta,song_yi_meta,category):
 
 # ── SONG HELPERS (SQLite) ────────────────────────────────────────────────────
 def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", duration=None):
-    # `n()` deve reggere anche i NULL: dal 17/09/2026 in libreria ci sono righe con
-    # `title` a NULL (es. un brano rinominato male), e `None.lower()` faceva fallire
-    # OGNI chiamata a questa funzione — cioè /metadata, /db/from_onyx e
-    # /db/add_local — con 500, proprio nei casi in cui BPM/tonalità venivano trovati.
-    def n(s): return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
-    if youtube_url:
-        r = conn.execute("SELECT id FROM songs WHERE youtube_url=?",(youtube_url,)).fetchone()
-        if r: return r["id"]
-    rows = conn.execute("SELECT id,title,artist FROM songs").fetchall()
-    for row in rows:
-        if n(row["title"])==n(title) and n(row["artist"])==n(artist):
-            if youtube_url:
-                conn.execute("UPDATE songs SET youtube_url=?,updated_at=datetime('now') WHERE id=? AND (youtube_url IS NULL OR youtube_url='')",(youtube_url,row["id"]))
-            return row["id"]
-    sid="song_"+hashlib.sha256(f"{title}|{artist}|{time.time()}".encode()).hexdigest()[:12]
-    conn.execute("INSERT INTO songs(id,title,artist,youtube_url,local_file,duration) VALUES(?,?,?,?,?,?)",
-                 (sid,title,artist,youtube_url,local_file,duration))
+    """La riga di questa canzone (id), creandola **solo se manca davvero**.
+
+    Dal 19/09/2026 passa da `resolve_or_create_song`, cioè dal confronto
+    tollerante di `find_existing_song`: prima bastava un artista scritto in modo
+    diverso («Eminem» vs «Eminem / Nate Dogg») per creare una riga in più, ed è
+    così che «Till I Collapse» è finita due volte in libreria.
+    Il nome della funzione resta perché la usano /metadata, /db/from_onyx,
+    /db/add_local, /save_pair e register_local_file.
+    Nota storica: deve reggere anche i NULL — in libreria ci sono righe con
+    `title` a NULL e `None.lower()` faceva fallire ogni chiamata con 500.
+    """
+    sid, _, _ = resolve_or_create_song(conn, title, artist, youtube_url, local_file, duration)
     return sid
 
 # ── AUDIO ANALYSIS ────────────────────────────────────────────────────────────
@@ -1820,6 +1944,83 @@ def register_local_file(filename):
         sid = get_or_create_song_db(conn, title, artist, local_file=filename)
     return sid
 
+# ── DOWNLOAD AUTOMATICO DI UNA RIGA DEL DATABASE ─────────────────────────────
+# Regola del 19/09/2026 (segnalazione: «Till I Collapse non è scaricata, non si
+# sente e compare due volte»): **una canzone che entra nel database deve poter
+# essere ascoltata**. Il download riusa il percorso di /download (yt-dlp, cookie,
+# fallback) ma il file che ne esce si aggancia a QUESTA riga (`local_file`), non
+# a una riga nuova: è esattamente da lì che nascevano i doppioni, perché
+# `register_local_file` ricava artista e titolo dal NOME del file (che spesso non
+# li contiene) e creava una riga in più.
+_dl_canzone_lock = threading.Lock()
+_dl_canzone = {}          # song_id -> job_id del download in corso per quella riga
+
+_STATI_DOWNLOAD_ATTIVI = ("pending", "searching", "downloading", "retry", "converting")
+
+
+def file_locale_valido(nome):
+    """Il file locale esiste DAVVERO in downloads/ (non solo il nome in tabella)."""
+    nome = os.path.basename(str(nome or "").strip())
+    return bool(nome) and os.path.exists(os.path.join(DL_DIR, nome))
+
+
+def avvia_download_canzone(song_id, forzato=False):
+    """Scarica in `downloads/` il brano di una riga che non ha (più) un file.
+
+    Ritorna `(job_id, motivo)`: `job_id` vuoto quando non c'era niente da fare
+    (file già presente, riga inesistente, nessuna query possibile). Il job si
+    segue con `/status/<job_id>` come tutti gli altri download.
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return "", "canzone non trovata"
+    if not forzato and file_locale_valido(s.get("local_file")):
+        return "", "il file locale c'è già"
+    query = (s.get("youtube_url") or "").strip()
+    if not query:
+        query = " ".join(x for x in [(s.get("artist") or "").strip(),
+                                     (s.get("title") or "").strip()] if x)
+    if not query:
+        return "", "niente da cercare: la riga non ha né link YouTube né titolo"
+    with _dl_canzone_lock:
+        attivo = _dl_canzone.get(song_id)
+        if attivo and jobs.get(attivo, {}).get("status") in _STATI_DOWNLOAD_ATTIVI:
+            return attivo, "download già in corso"
+        jid = str(uuid.uuid4())[:8]
+        jobs[jid] = {"status": "pending", "progress": {}, "files": [], "filename": None,
+                     "yt_title": "", "error": "", "song_id": song_id,
+                     "expected_title": s.get("title") or ""}
+        _dl_canzone[song_id] = jid
+
+    def run():
+        try:
+            do_download(jid, query, "mp3", "192", s.get("title") or "",
+                        s.get("artist") or "", 0)
+            nome = (jobs.get(jid) or {}).get("filename")
+            if nome:
+                # Il file va su QUESTA riga: nessuna riga nuova, nessun doppione.
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE songs SET local_file=?, "
+                        "youtube_url=CASE WHEN youtube_url IS NULL OR youtube_url='' THEN ? "
+                        "                 ELSE youtube_url END, updated_at=datetime('now') "
+                        "WHERE id=?",
+                        (nome, query if is_youtube_url(query) else "", song_id))
+                print(f"[db {song_id}] file locale agganciato alla riga: {nome}")
+            else:
+                print(f"[db {song_id}] download non riuscito: "
+                      f"{(jobs.get(jid) or {}).get('error', '')}")
+        except Exception as e:
+            print(f"[db {song_id}] download automatico: errore {e}")
+        finally:
+            with _dl_canzone_lock:
+                _dl_canzone.pop(song_id, None)
+
+    threading.Thread(target=run, daemon=True).start()
+    return jid, ("download avviato (forzato)" if forzato else "download avviato")
+
+
 def do_download_playlist(job_id, url, fmt="mp3"):
     jobs[job_id]["status"] = "fetching"
     jobs[job_id]["progress"] = {"percent": 0, "speed": "", "eta": ""}
@@ -3047,10 +3248,19 @@ def save_pair():
         dataset_error = str(e)
     # 2) il database: è la scrittura che conta. La coppia già presente nel dataset
     #    NON impedisce più di registrare il campionamento.
+    did = sid2 = None
+    nuova_x = nuova_y = True
+    come_x = come_y = ""
     try:
         with get_db() as conn:
-            did = get_or_create_song_db(conn, song_x["title"], song_x["artist"], song_x.get("youtube_url", ""))
-            sid2 = get_or_create_song_db(conn, song_yi["title"], song_yi["artist"], song_yi.get("youtube_url", ""))
+            # `resolve_or_create_song` riconosce una canzone GIÀ in libreria anche
+            # quando l'artista è scritto in modo diverso (il caso «Eminem» vs
+            # «Eminem / Nate Dogg» che ha creato il doppione di Till I Collapse):
+            # in quel caso si usa la riga che c'è, e la risposta lo dice.
+            did, nuova_x, come_x = resolve_or_create_song(
+                conn, song_x["title"], song_x["artist"], song_x.get("youtube_url", ""))
+            sid2, nuova_y, come_y = resolve_or_create_song(
+                conn, song_yi["title"], song_yi["artist"], song_yi.get("youtube_url", ""))
             rel_id, creata = upsert_sample_relation(
                 conn, did, sid2, category, transformation,
                 trim_x, trim_yi, notes,
@@ -3061,6 +3271,17 @@ def save_pair():
         return jsonify({"error": "Database: " + str(e), "saved": False,
                         "duplicate": duplicato}), 500
 
+    # 3) «Una canzone che compare nel database deve poter essere ascoltata»
+    #    (19/09/2026): se una delle due righe non ha il file locale, il download
+    #    parte da sé e il file si aggancia a QUELLA riga (nessun doppione).
+    downloads = {}
+    for ruolo, sid_ in (("derivative", did), ("source", sid2)):
+        if not sid_:
+            continue
+        job, motivo = avvia_download_canzone(sid_)
+        if job:
+            downloads[ruolo] = {"job_id": job, "song_id": sid_, "motivo": motivo}
+
     risposta = {
         "saved": not duplicato,
         "duplicate": duplicato,
@@ -3068,8 +3289,11 @@ def save_pair():
         "relation_id": rel_id,
         "relation_created": creata,
         "relation_updated": not creata,
-        "derivative": {"id": did, "title": song_x["title"], "artist": song_x["artist"]},
-        "source": {"id": sid2, "title": song_yi["title"], "artist": song_yi["artist"]},
+        "derivative": {"id": did, "title": song_x["title"], "artist": song_x["artist"],
+                       "created": nuova_x, "matched_by": come_x},
+        "source": {"id": sid2, "title": song_yi["title"], "artist": song_yi["artist"],
+                   "created": nuova_y, "matched_by": come_y},
+        "downloads": downloads,
     }
     if dataset_error:
         risposta["dataset_error"] = dataset_error
@@ -3203,6 +3427,12 @@ def db_add_song():
             if f in data and data[f] is not None:
                 conn.execute(f"UPDATE songs SET {f}=?, updated_at=datetime('now') WHERE id=?", (data[f], sid))
         s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (sid,)).fetchone())
+    # Una riga con solo i dati (senza file locale) non si può ascoltare: il
+    # download parte da sé e il file si aggancia a QUESTA riga (19/09/2026).
+    if not (data.get("local_file") or ""):
+        job, motivo = avvia_download_canzone(sid)
+        if job:
+            s["download_job"], s["download_motivo"] = job, motivo
     return jsonify(s)
 
 @app.route("/db/songs/<song_id>", methods=["GET"])
@@ -3252,6 +3482,114 @@ def db_delete_song(song_id):
     with get_db() as conn:
         conn.execute("DELETE FROM songs WHERE id=?", (song_id,))
     return jsonify({"ok": True})
+
+@app.route("/db/songs/<song_id>/ensure_file", methods=["POST"])
+def db_song_ensure_file(song_id):
+    """Scarica in `downloads/` il file locale della riga che non ce l'ha.
+
+    È quello che fa da sé anche `/save_pair`: la riga resta la stessa e il file
+    le viene agganciato (`local_file`), senza creare doppioni. Il pulsante ⬇
+    della tabella del database chiama qui; si segue con `/status/<job_id>`.
+    """
+    forzato = bool((request.json or {}).get("forzato"))
+    job, motivo = avvia_download_canzone(song_id, forzato=forzato)
+    return jsonify({"avviato": bool(job), "job_id": job, "motivo": motivo, "song_id": song_id})
+
+
+# ── DB: UNISCI DUE RIGHE CHE SONO LA STESSA CANZONE ──────────────────────────
+@app.route("/db/songs/merge", methods=["POST"])
+def db_merge_songs():
+    """Unisce due righe che sono LA STESSA canzone (doppione) in una sola.
+
+    Body: `{"keep": "song_…", "drop": "song_…"}`.
+      * i campionamenti (e gli stem) della riga da cancellare passano a quella
+        che resta;
+      * i campi VUOTI della riga che resta si completano con quelli dell'altra
+        (liriche, link Genius/WhoSampled, copertina, verdetti, crediti…): quello
+        che c'è già non viene toccato;
+      * il `local_file` si prende solo se la riga che resta è senza file — o se
+        il suo file non esiste più in `downloads/` e quello dell'altra sì;
+      * infine la riga doppia si cancella.
+    Serve per i doppioni nati PRIMA del confronto tollerante: caso vero
+    «Till I Collapse» di Eminem (riga vecchia col file + riga nuova con le
+    liriche e i link).
+    """
+    data = request.json or {}
+    keep = (data.get("keep") or "").strip()
+    drop = (data.get("drop") or "").strip()
+    if not keep or not drop:
+        return jsonify({"error": "keep e drop richiesti"}), 400
+    if keep == drop:
+        return jsonify({"error": "keep e drop sono la stessa riga"}), 400
+    with get_db() as conn:
+        righe = {r["id"]: row2dict(r) for r in conn.execute(
+            "SELECT * FROM songs WHERE id IN (?,?)", (keep, drop)).fetchall()}
+        if keep not in righe or drop not in righe:
+            return jsonify({"error": "una delle due righe non esiste"}), 404
+        colonne = [c[1] for c in conn.execute("PRAGMA table_info(songs)").fetchall()]
+        # 1) quello che era agganciato alla riga doppia passa a quella che resta
+        spostati = {}
+        for tabella, campo in (("sample_relations", "derivative_song_id"),
+                               ("sample_relations", "source_song_id"),
+                               ("stem_sessions", "song_id"),
+                               ("audio_analyses", "song_id")):
+            cur = conn.execute(f"UPDATE {tabella} SET {campo}=? WHERE {campo}=?",
+                               (keep, drop))
+            if cur.rowcount:
+                spostati[f"{tabella}.{campo}"] = cur.rowcount
+        # 2) se dopo lo spostamento la stessa coppia+categoria compare due volte,
+        #    resta una sola riga di campionamento (la più recente)
+        rel_doppie = 0
+        for d in conn.execute(
+                "SELECT GROUP_CONCAT(id) ids FROM sample_relations "
+                "GROUP BY derivative_song_id, source_song_id, category "
+                "HAVING COUNT(*)>1").fetchall():
+            for vecchia in (d["ids"] or "").split(",")[:-1]:
+                conn.execute("DELETE FROM sample_relations WHERE id=?", (vecchia,))
+                rel_doppie += 1
+        # 3) i campi vuoti della riga che resta si completano con l'altra
+        keepv, dropv = righe[keep], righe[drop]
+        file_keep_ok = file_locale_valido(keepv.get("local_file"))
+        completati = []
+        for c in colonne:
+            if c in ("id", "created_at", "updated_at"):
+                continue
+            nuovo = dropv.get(c)
+            if nuovo in (None, ""):
+                continue
+            if c == "local_file":
+                if file_keep_ok:
+                    continue        # il file che c'è funziona: non si sostituisce
+            elif keepv.get(c) not in (None, ""):
+                continue            # non si sovrascrive quello che c'è
+            conn.execute(f"UPDATE songs SET {c}=?, updated_at=datetime('now') WHERE id=?",
+                         (nuovo, keep))
+            completati.append(c)
+        conn.execute("DELETE FROM songs WHERE id=?", (drop,))
+        # 4) se la riga che resta ora HA un file locale, i verdetti presi quando il
+        #    file mancava non valgono più: dicono «manca il file locale in
+        #    downloads/», cioè una cosa falsa. Si azzerano (col motivo del perché),
+        #    così la prossima Verifica li rifà invece di mostrare una bugia.
+        azzerati = []
+        riga_finale = conn.execute("SELECT local_file FROM songs WHERE id=?",
+                                   (keep,)).fetchone()
+        if riga_finale and file_locale_valido(riga_finale["local_file"]):
+            for prefisso in ("audio_match", "ws_audio", "testo"):
+                v = conn.execute(
+                    f"SELECT {prefisso}_esito AS esito, {prefisso}_motivo AS motivo "
+                    "FROM songs WHERE id=?", (keep,)).fetchone()
+                if v and "manca il file locale" in (v["motivo"] or ""):
+                    conn.execute(
+                        f"UPDATE songs SET {prefisso}_esito=NULL, {prefisso}_at=NULL, "
+                        f"{prefisso}_motivo=?, updated_at=datetime('now') WHERE id=?",
+                        ("verdetto azzerato: il file locale ora c'è, la Verifica lo rifarà",
+                         keep))
+                    azzerati.append(prefisso)
+        campione = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (keep,)).fetchone())
+    return jsonify({"ok": True, "keep": keep, "drop": drop, "campione": campione,
+                    "campi_completati": completati, "agganci_spostati": spostati,
+                    "campioni_doppi_rimossi": rel_doppie, "verdetti_azzerati": azzerati})
+
 
 # ── DB: RELATIONS ─────────────────────────────────────────────────────────────
 @app.route("/db/relations", methods=["GET"])
@@ -4698,6 +5036,12 @@ def db_from_onyx():
         if local_file:
             conn.execute("UPDATE songs SET local_file=?, updated_at=datetime('now') WHERE id=?", (local_file, sid))
         s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (sid,)).fetchone())
+    # Anche qui: riga nel database senza file locale → il download parte da sé e
+    # il file si aggancia a QUESTA riga (19/09/2026).
+    if not local_file:
+        job, motivo = avvia_download_canzone(sid)
+        if job:
+            s["download_job"], s["download_motivo"] = job, motivo
     return jsonify(s)
 
 # ── DB: QUERY / SCRIPT PERSONALIZZATI (con UNDO/REDO) ────────────────────────

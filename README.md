@@ -341,7 +341,79 @@ fra pacchetti e modello). Senza, la pagina funziona lo stesso e il controllo voc
 risponde "non verificabile" col motivo. Vedi la sezione «Note operative» per le
 impostazioni che contano (a cappella, VAD spento, guardia sulle parole).
 
-## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
+## Campione salvato: confronto a due canzoni e niente doppioni — 19/09/2026
+
+Come si è arrivati qui (segnalazione di Alessandro, 18/09/2026): «in database c'è un
+problema con i campionamenti … quando l'utente clicca su "scheda" dovrebbe comparire
+proprio una canzone da una parte e l'altra dall'altra, cioè la stessa tab che compare
+in trova campioni, col trim giallo per la parte campionata e salvata nel database …
+dovresti fare in modo che venga scaricata nei download una canzone una volta che
+compare nel database … e se sono già nel database evita i doppioni, accorgitene».
+
+### Il doppione vero (e perché non si riconosceva)
+
+`Eminem / Nate Dogg — Till I Collapse` era in libreria **due volte**:
+
+| | riga del 13/08/2026 | riga del 18/09/2026 19:06 |
+|---|---|---|
+| `local_file` | `onyx_t_…j9ju3.COM] Till I Collapse` | **vuoto** |
+| `youtube_url` | vuoto | `…?v=IUUfu3824QI` |
+| `duration` | 298,55 s | NULL |
+| liriche / Genius / WhoSampled / copertina | — | 5.036 caratteri, i due link, `song_b75ba02037bd.png` |
+| verdetti | — | „non verificabile — **manca il file locale in downloads/**‟ |
+
+`get_or_create_song_db()` confrontava `normalize_key(title)` e
+`normalize_key(artist)` **identici**: la riga vecchia ha l'artista «Eminem / Nate
+Dogg», il salvataggio del campione passa «Eminem» → nessun match → **riga nuova**,
+senza file locale (niente ▶, niente 🎛 Sampler, niente 🔊 Audio), e la Verifica l'ha
+poi completata a «Eminem / Nate Dogg» — cioè ora sembra identica a quella vecchia.
+
+### Le tre regole nuove (`app (2).py`)
+
+1. **Il confronto è tollerante** — `find_existing_song()` (usata da
+   `resolve_or_create_song()`, quindi da `get_or_create_song_db()`): stesso link
+   YouTube → testo identico → **stesso titolo + artista compatibile**
+   (`artisti_compatibili`: testo uguale, uno contenuto nell'altro, o stesso artista
+   PRINCIPALE) → stesso titolo con artista mancante da una parte e **titolo unico** in
+   libreria. `titolo_confronto()` toglie punteggiatura, apostrofi e marcatori di
+   servizio: `[Explicit]`, `(Official Video)`, `(Audio)`, `(feat. X)` **fra parentesi**.
+   ⚠️ **Remix, strumentale, live e cover restano brani diversi** — e la
+   `titolo_base()` della scheda canzone (che li toglie di proposito, per *trovare* le
+   varianti) **non** va usata qui: era ombreggiata dalla mia funzione omonima e univa
+   strumentali e remix (trovato e corretto in questa sessione; c'è un test apposta).
+   Sul costo delle scelte: i crediti «feat. X» **senza parentesi** nel titolo non si
+   tolgono (in libreria c'è *«Kim ft. 2Pac, Miley Cyrus - 2021 - Mashup…»*, che
+   diventerebbe *«Kim»*, un altro brano).
+2. **Chi entra nel database viene scaricato** — `avvia_download_canzone()` riusa il
+   percorso di `/download` (yt-dlp, cookie, fallback) ma il file che ne esce si
+   aggancia a **quella** riga (`local_file`), mai a una riga nuova: è lì che nascevano
+   i doppioni, perché `register_local_file()` ricava artista e titolo **dal nome del
+   file** (che spesso non li contiene). È chiamata da `/save_pair` (entrambe le
+   canzoni), `/db/songs` (POST) e `/db/from_onyx`; per farla partire a mano c'è
+   `POST /db/songs/<id>/ensure_file` (pulsante **⬇ Scarica** della tabella, e
+   «⬇ Scarica e confronta» dentro il confronto campioni).
+3. **I doppioni già in libreria si uniscono** — `POST /db/songs/merge`
+   (`{"keep": "song_…", "drop": "song_…"}`): sposta campionamenti, stem e analisi sulla
+   riga che resta, **completa solo i campi vuoti** (liriche, link, copertina, crediti…),
+   tiene il `local_file` buono, cancella la riga doppia e **azzera i verdetti presi
+   quando il file mancava** (direbbero una cosa falsa ora che il file c'è).
+
+### La vista a due canzoni (📄 Scheda)
+
+Il pulsante **📄 Scheda** della tabella del database non è più un link: apre il
+**confronto campione** (modale `#rel-compare-modal`), cioè la stessa vista a due
+editor delle card di 🔍 Trova Campioni — **chi campiona a sinistra** col trim giallo
+dell'intervallo salvato (`timestamp_derivative_start/end`), **il campionato a
+destra** (`timestamp_source_*`). Per questo il protocollo `load` del sampler accetta
+ora anche `endSec` (la fine dell'intervallo: `trimRangeFor` copia esattamente quello
+invece di una finestra di 30 s) e `grid:false` (il giallo non viene agganciato alla
+griglia BPM). Una canzone senza file locale **non finge niente**: la colonna dice che
+manca e offre **⬇ Scarica e confronta** (che poi monta l'editor da sé). Stesso
+pulsante su ogni riga di **🔗 Campionamenti** (apre solo quella coppia) e sul
+contatore **🔗 n**; **📄 Scheda completa**, in alto a destra nel modale, porta alla
+pagina `/scheda` (stem, remix e cover, analisi audio).
+
+## Note operative e stato corrente (11/09/2026, aggiornate al 19/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
 
@@ -363,6 +435,24 @@ Da tenere presente nelle sessioni di lavoro successive:
   committare mai il file completo.
 - **`samplelab (2).db` è binario** e cambia a ogni uso: committarlo solo quando
   la modifica dei dati è voluta.
+- **Una canzone per riga, e suonabile (19/09/2026).** Il confronto fra canzoni è
+  tollerante (`find_existing_song` → `titolo_confronto` + `artisti_compatibili`):
+  «Eminem» e «Eminem / Nate Dogg» sono la stessa canzone, ma **remix, strumentale,
+  live e cover NO** — per il dedup **non** si usa la `titolo_base()` della scheda
+  canzone, che quei marcatori li toglie di proposito (ombreggiare quel nome è stato il
+  bug di questa sessione). Una riga che entra nel database senza file locale **se lo
+  scarica da sé** (`avvia_download_canzone`: il file si aggancia a QUELLA riga, mai a
+  una nuova) e per i doppioni storici c'è `POST /db/songs/merge`. `/save_pair` risponde
+  con `derivative.created` / `source.created` e `downloads`, così si vede subito se ha
+  riusato una riga esistente invece di crearne una. ⚠️ `normalize_key()` è NULL-safe:
+  le righe con `title` a NULL (import dal player Onyx) facevano fallire `/db/songs`
+  con 500 se il confronto non reggeva i NULL.
+- **📄 Scheda = confronto campione (19/09/2026).** Nella tabella del database il
+  pulsante apre il modale a due canzoni col trim giallo dell'intervallo salvato in
+  `sample_relations`; la pagina `/scheda` (stem, remix, analisi) si raggiunge da
+  «📄 Scheda completa» dentro il modale. Chi tocca il protocollo `load` del sampler
+  ricordi `endSec` (fine dell'intervallo) e `grid:false` (niente aggancio alla griglia
+  BPM, altrimenti il giallo si sposta).
 - **⚠️ La suite completa, con l'app attiva, scrive sul database VERO.** Il 18/09/2026
   `python3 -m unittest discover -p 'test_*.py'` ha dato **436 test `OK`** ma ha anche
   aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`
@@ -2186,6 +2276,64 @@ Da tenere presente nelle sessioni di lavoro successive:
     `relation_id`** e `sample_relations` resta a **1 riga**; riga e brani di prova poi
     cancellati, `dataset.json` rimosso e database **identico al backup** (890 canzoni, 0
     relazioni) — nessuna riga vera della libreria toccata.
+
+- **IL CAMPIONE SALVATO COMPARIVA DUE VOLTE E NON SI SENTIVA — CORRETTO
+  (19/09/2026).** Segnalazione di Alessandro: «le canzoni vengono registrate
+  correttamente quando sono campionate ma quando l'utente clicca su "scheda" dovrebbe
+  comparire proprio una canzone da una parte e l'altra dall'altra, cioè la stessa tab
+  che compare in trova campioni, col trim giallo … attualmente c'è un errore e l'app
+  non nota che till i collapse è gia presente nel database e quindi mi ha segnato sia
+  [la riga normale] che sia quella appena aggiunta, però compare solo ✓ testo ✂️ Stem
+  ✏️ Edit 📄 Scheda 🔗 1 perché non è "scaricata", e non me la fa nemmeno mettere in
+  play». Vedi la sezione *Campione salvato: confronto a due canzoni e niente doppioni*.
+  - causa: `get_or_create_song_db()` confrontava titolo/artista **identici**; la riga
+    del 13/08 di *Till I Collapse* ha l'artista «Eminem / Nate Dogg», il salvataggio
+    del campione (19:06 del 18/09, riprodotto mentre si leggeva il codice: la coppia
+    *Till I Collapse* ← STEM_REUSE ← *We Will Rock You*, trim 56-86 / 1-31, note
+    «Ritmo Batteria») passa «Eminem» → riga nuova senza file locale. La Verifica l'ha
+    poi completata a «Eminem / Nate Dogg»: un doppione indistinguibile a occhio.
+  - fix: `find_existing_song()` / `resolve_or_create_song()` / `titolo_confronto()` /
+    `artisti_compatibili()` (confronto tollerante ma **senza** toccare remix,
+    strumentali, live e cover), `avvia_download_canzone()` + `file_locale_valido()`
+    (una riga senza file lo scarica da sé e il file si aggancia a quella riga),
+    `POST /db/songs/<id>/ensure_file`, `POST /db/songs/merge` (unione con spostamento
+    di campioni/stem/analisi, campi vuoti completati, verdetti «manca il file locale»
+    azzerati) e `normalize_key()` NULL-safe (le due righe con `title` NULL facevano
+    fallire `/db/songs` con 500). In pagina: modale **#rel-compare-modal** (le due
+    canzoni affiancate come a Trova Campioni, trim giallo = intervallo salvato,
+    `endSec` + `grid:false` nel protocollo `load` del sampler), pulsanti **📄 Scheda**
+    / **⬇ Scarica** in tabella e **📄 Scheda** su ogni riga di 🔗 Campionamenti;
+    `/save_pair` ora dice `derivative.created` / `source.created` / `downloads`.
+  - verifiche del 19/09/2026: **31 test** nuovi in `test_song_dedup.py` (`OK`) —
+    funzioni pure del confronto (compreso il caso che univa gli strumentali, trovato
+    e corretto qui), `/db/songs` e `/save_pair` che **riusano la riga esistente**
+    (`created: false`, `matched_by: "stesso titolo, artista compatibile"`), l'unione
+    di due righe, il download che si aggancia alla riga giusta (con `do_download`
+    sostituito) e `trimRangeFor` in JavaScriptCore con l'intervallo salvato; la suite
+    completa dà **467 test `OK`** (aggiornato anche il vecchio test della scheda, che
+    il pulsante lo cercava come link). Sull'**app viva**: `POST /db/songs` con
+    «Till I Collapse / Eminem» → **la riga del 13/08** (nessuna riga nuova; 892
+    canzoni prima e dopo), con «No Service» → la riga con il file, `POST
+    /db/songs/<id>/ensure_file` su una riga che ha il file → `avviato: false` («il
+    file locale c'è già»), `merge` con `keep == drop` → `400`, pagine `/`, `/browse`,
+    `/onyx`, `/verifica`, `/scheda` → `200`. **Download vero**: la riga *Queen — We
+    Will Rock You* (entrata senza file) ha ricevuto
+    `Queen - We Will Rock You (Official Video) [-tJYN-eG1zk].mp3` **sulla sua riga**
+    («[db song_e8554b6d834c] file locale agganciato alla riga»), senza creare doppioni.
+  - dati (con backup in `/tmp` prima di ogni scrittura): il doppione di *Till I
+    Collapse* è stato **unito** — resta `song_53d2d6b96a4b` (file `onyx_t_…j9ju3.COM]
+    Till I Collapse` ripristinato a mano dopo una prova, 5.036 caratteri di liriche,
+    Genius/WhoSampled, copertina, album *The Eminem Show*, anno 2002) con la relazione
+    `rel_be6bf63e1d3a` spostata sopra: **da 892 a 891 canzoni, 1 campionamento
+    intatto**; `sample_relations` e le altre tabelle non hanno perso nulla
+    (`stem_sessions` 3, `stem_tracks` 12, `audio_analyses` 0). Il confronto esteso a
+    tutto il libro segnala **5 gruppi** di righe omonime (tutte «stessa canzone scritta
+    in due modi»): oltre a *Till I Collapse*, *Dope D.O.D. - Blaow!*, *No Service*,
+    *Lights Out (feat. Justina Valentine)* e *off the wall remix* — quest'ultima con
+    «(beat)» nell'artista e la variante «(beat)» come FILE: restano come sono, perché
+    una delle due potrebbe essere il beat. I veri strumentali (*Just Don't Give a Fuck
+    - Instrumental*, *Guilty Conscience - Instrumental*, *My Name Is - Instrumental*)
+    **non** vengono uniti.
 
 
 

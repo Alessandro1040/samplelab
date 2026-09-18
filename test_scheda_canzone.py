@@ -590,13 +590,20 @@ class TestCablaggio(unittest.TestCase):
             cls.app = fh.read()
 
     def test_pulsante_su_ogni_riga_del_database(self):
-        # il link sta nella cella delle azioni, fuori da ogni condizione: c'è su
+        # il pulsante sta nella cella delle azioni, fuori da ogni condizione: c'è su
         # ogni canzone, anche su quelle senza file locale.
-        # ⚠️ Il 18/09/2026 puntava a `scheda.html?song=…`: quel file NON esiste (la
-        # pagina si serve sulla rotta `/scheda`) e il clic apriva una pagina
-        # inesistente. La rotta giusta è quella, senza estensione.
-        self.assertIn('href="/scheda?song=${encodeURIComponent(s.id)}"', self.index)
-        self.assertIn(">📄 Scheda</a>", self.index)
+        # ⚠️ 18/09/2026: puntava a `scheda.html?song=…` (file inesistente) e il clic
+        # apriva una pagina vuota; poi è diventato un LINK alla rotta `/scheda`.
+        # 19/09/2026 (richiesta di Alessandro): «quando l'utente clicca su scheda
+        # dovrebbe comparire proprio una canzone da una parte e l'altra dall'altra,
+        # cioè la stessa tab che compare in trova campioni, col trim giallo» → ora è
+        # un PULSANTE che apre il confronto a due canzoni (`apriConfrontoCampione`),
+        # e la pagina `/scheda` (stem, remix, analisi) si raggiunge dal link
+        # «📄 Scheda completa» dentro il modale.
+        self.assertIn("apriConfrontoCampione('${s.id}')", self.index)
+        self.assertIn(">📄 Scheda</button>", self.index)
+        self.assertIn('id="rcm-scheda"', self.index)
+        self.assertIn("/scheda?song=${encodeURIComponent(rcmCanzoneId)}", self.index)
         self.assertIn("a.db-stem-btn{display:inline-block;text-decoration:none}", self.index)
 
     def test_i_link_della_tabella_si_aprono_in_una_scheda_nuova(self):

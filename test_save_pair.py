@@ -277,8 +277,20 @@ class TestSalvataggioNelDatabase(unittest.TestCase):
         APP.DATASET_PATH = os.path.join(self.tmp, "dataset di prova.json")
         APP.init_db()
         self.client = APP.app.test_client()
+        # Dal 19/09/2026 `/save_pair` avvia il download del file locale per le
+        # canzoni che non ce l'hanno. Nei test NON deve uscire in rete (le coppie
+        # di prova usano URL finti): si sostituisce la funzione e si registra.
+        self._vero_avvia = APP.avvia_download_canzone
+        self.download = []
+
+        def finto(song_id, forzato=False):
+            self.download.append(song_id)
+            return "", "prova: nessun download"
+
+        APP.avvia_download_canzone = finto
 
     def tearDown(self):
+        APP.avvia_download_canzone = self._vero_avvia
         APP.DB_PATH = self.db_originale
         APP.DATASET_PATH = self.dataset_originale
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -311,6 +323,13 @@ class TestSalvataggioNelDatabase(unittest.TestCase):
         self.assertEqual(rels[0]["transformation"], "DIRECT")
         self.assertEqual(rels[0]["timestamp_derivative_start"], 5.0)
         self.assertEqual(rels[0]["timestamp_source_end"], 40.0)
+
+    def test_il_salvataggio_chiede_di_scaricare_chi_non_ha_il_file(self):
+        # 19/09/2026: «una canzone che compare nel database deve poter essere
+        # ascoltata». Delle due canzoni della coppia, quelle SENZA file locale
+        # finiscono in `avvia_download_canzone` (qui sostituita, niente rete).
+        self.salva()
+        self.assertEqual(len(self.download), 2)
 
     def test_colonna_sample_del_tab_database_e_i_conteggi(self):
         self.salva()
