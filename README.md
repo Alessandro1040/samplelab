@@ -45,11 +45,12 @@ con `(2)` nella cartella locale:
 - `test_sampler_metronomo.py` — test del **metronomo** del sampler (passo fra i
   colpi, accenti, unità: 1/4 · 2/4 · 3/4 · battuta · 2 · 4 battute):
   `python3 -m unittest -v test_sampler_metronomo`
-- `test_sampler_battuta.py` — test della **battuta** nel sampler (🎯 Trova la
-  battuta, trim celeste, 🔁 Battuta, 💾 Salva BPM): l'algoritmo su pattern 4/4
-  sintetici con intro senza batteria, le funzioni pure della pagina in
-  JavaScriptCore, il cablaggio e `POST /beat/bar` sull'app viva:
-  `python3 -m unittest -v test_sampler_battuta`
+- `test_sampler_trim.py` — test del **trim giallo** del sampler (pulsante
+  **✂ Trim giallo on/off**, gli elementi che spariscono, l'**onda grigia** col
+  trim spento) e del **loop** (anticipo del ritorno per non sfondare il punto di
+  OUT, URL assoluta per l'audio nel documento `blob:`): funzioni pure in
+  JavaScriptCore, cablaggio e app viva:
+  `python3 -m unittest -v test_sampler_trim`
 - `fortissimo_compare_v3.py` — modello **Fortissimo Compare v3**: confronto tra
   due output `AudioAnalysis` (MIDI + one-shot), score [0,1]
 - `fortissimo.html` — interfaccia di test del modello (pagina `/fortissimo`)
@@ -962,7 +963,10 @@ Da tenere presente nelle sessioni di lavoro successive:
   bufferizzato quando è rediretto su file (comportamento preesistente).
 
 
-- **BPM DALLA BATTUTA — «🎯 Trova la battuta» e trim celeste (18/09/2026).** La
+- **BPM DALLA BATTUTA — «🎯 Trova la battuta» e trim celeste (18/09/2026).** ⚠️
+  **TOLTA LO STESSO GIORNO** su richiesta di Alessandro (vedi l'ultima nota qui
+  sotto): pulsanti, trim celeste, loop `🔁 Battuta` e rotta `/beat/bar` non esistono
+  più. Questa nota resta come storia di quello che si era provato e misurato. La
   stima automatica «🔎 BPM & Key» è stata **tolta da `index (2).html`** (pulsanti e
   funzione `fetchMetadata`): sbagliava troppo spesso. Al suo posto, nel sampler:
   **🎯 Trova la battuta** chiama il nuovo `POST /beat/bar` (app (2).py) e mette il
@@ -1128,6 +1132,48 @@ Da tenere presente nelle sessioni di lavoro successive:
   salvato e taglio scaricato restano esatti — cambia solo dove torna indietro la
   testina, quindi la battuta **suonata** è ~30 ms più corta di quella disegnata
   (1,5% su una battuta di 2 s) e in cambio non si sente più musica dopo la barra.
+
+- **«TRIM GIALLO OFF» = TUTTO GRIGIO, E VIA «TROVA LA BATTUTA» (18/09/2026).** Due
+  richieste di Alessandro nella stessa sessione: «quando c'è trim giallo off dovrebbe
+  smettere anche di far comparire una parte di audio completamente gialla, dovrebbe
+  tornare tutto grigio» e «non mi piace per niente tutta sta roba di trova battuta,
+  fa un po schifo… toglila».
+  1. **L'onda torna grigia.** Col trim spento restava gialla la forma d'onda *dentro*
+     la selezione: `drawWaveform` colora le barre con `rgba(200,240,0,0.6)` quando il
+     tempo è fra IN e OUT, e non guardava lo stato del trim. Ora la condizione è
+     `p.trimVisibile !== false && …` e `toggleTrimGiallo` fa `fullRedraw` (prima
+     `updateTrimUI`, che l'onda non la ridisegna): col trim spento non resta
+     **niente** di giallo, in nessun punto della forma d'onda.
+  2. **«Trova la battuta» tolta del tutto.** Via i pulsanti **🎯 Trova la battuta**,
+     **💾 Salva BPM** e **🎯 Battuta on/off**, il **trim celeste** con le maniglie
+     BATTUTA/FINE BATTUTA e la sua riga di informazioni, la terza modalità di loop
+     **🔁 Battuta**, tutto il JS che li reggeva (`trovaBattuta`, `salvaBpm`,
+     `aggiornaBattuta`, `impostaBattuta`, `bpmDaBattuta`, `barTrimClamp`,
+     `etichettaBattuta`, `quartiBattuta`, i trascinamenti `startBarTrimDrag`…), il
+     ponte nella pagina (`salvaBpmDaSampler` e il messaggio `saveBpm`), il cablaggio
+     `songId` che serviva solo a quello, e **la rotta `/beat/bar`** in `app (2).py`
+     con le sue 14 funzioni (428 righe: autocorrelazione, periodi candidati,
+     punteggio della griglia, colpi a fuoco, inviluppo di onset, lettura del file).
+     Restano il trim giallo, la griglia, il metronomo, il TAP, **Allinea griglia** e
+     il player: il BPM si misura a orecchio come prima, e i suggerimenti in pagina ora
+     dicono «🎵 TAP o Allinea griglia» invece di mandare a 🎯. L'anteprima dell'audio
+     nel sampler usa ancora `urlBackend()` — gli ho dato quell'uso, prima lo usava solo
+     la battuta — e `origineHttp`/`urlBackend` restano con i loro test.
+  Verifiche del 18/09/2026: **`test_sampler_battuta.py` → `test_sampler_trim.py`**
+  (13 test: il pulsante, gli elementi che spariscono, l'onda grigia, l'anticipo del
+  loop, l'URL assoluta e il controllo che «Trova la battuta» non resti né nella pagina
+  né nel backend) e **196 test di suite**; in **Chrome vero** il DOM del sampler non
+  contiene più nessuno dei 13 id della battuta (`bts-main`, `bt-info-main`,
+  `bar-btn-main`, `loop-bar-main`…) e i superstiti ci sono tutti (`trim-btn-main`,
+  `loop-sel-main`, `loop-all-main`); misurati i **pixel** della forma d'onda: col trim
+  acceso la barra dentro la selezione è `(193,231,0)` (giallo) e fuori `(38,38,38)`,
+  col trim spento diventa `(86,86,86)` con **differenza fra i canali 0** (grigio puro),
+  uguale al resto dell'onda; app riavviata (backend toccato) con `/beat/bar` → **404**,
+  `/db/stats` e tutte le pagine → 200, `/metadata/estimate` ancora vivo; guida del
+  sampler aggiornata (la §5.7 è diventata «✂ Trim giallo on/off», §11 e §13 riscritte,
+  mappa §12 ricalcolata dal file vero: il documento del sampler ora finisce a riga
+  **3074**).
+
   Guida del sampler aggiornata (riga 🔁 Battuta in §5.7 e il «perché» in §13) e
   mappa del codice §12 ricalcolata dal file vero.
 

@@ -1238,49 +1238,6 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
   background:#fff;
   box-shadow:0 0 8px rgba(45,212,191,0.9);
 }
-/* ── Trim CELESTE: la BATTUTA (da qui nasce il BPM) ───────────────────────────
-   È diverso dal trim giallo del sample: il giallo è «cosa ritaglio», il celeste
-   è «quanto dura una battuta». Gli estremi sono liberi (non si agganciano alla
-   griglia): è la battuta a decidere il tempo, non il contrario. */
-.bar-trim-shade-left, .bar-trim-shade-right {
-  position:absolute; top:0; bottom:0;
-  background:rgba(0,0,0,.45);
-  pointer-events:none; z-index:5;
-}
-/* La BATTUTA cambia colore per INTERO (non solo i bordi), come il trim giallo:
-   riempimento deciso + bordo sopra e sotto. Sta sopra la selezione gialla
-   (z-index 5 contro 2), quindi si vede anche quando la battuta è dentro al
-   sample; se il giallo viene nascosto, questo resta l'unico riquadro. */
-.bar-trim-selection {
-  position:absolute; top:0; bottom:0;
-  background:rgba(45,212,191,.22);
-  border-top:2px solid #2dd4bf;
-  border-bottom:2px solid #2dd4bf;
-  pointer-events:none; z-index:5;
-}
-.bar-trim-handle {
-  position:absolute; top:0; bottom:0; width:16px;
-  z-index:7; cursor:ew-resize;
-  display:flex; align-items:center; justify-content:center;
-  pointer-events:auto;
-}
-.bar-trim-handle-bar {
-  width:4px; height:100%;
-  background:#2dd4bf; border-radius:2px; position:relative;
-}
-.bar-trim-handle-bar::before {
-  content:''; position:absolute; top:50%; left:50%;
-  transform:translate(-50%,-50%);
-  width:4px; height:26px; background:#fff; border-radius:2px; opacity:.6;
-}
-.bar-trim-handle-label {
-  position:absolute; top:-20px;
-  font-family:'Space Mono', monospace; font-size:9px;
-  color:#2dd4bf; white-space:nowrap;
-  transform:translateX(-50%); left:50%;
-}
-.bar-info { color:#2dd4bf; font-weight:700; }
-.bar-trim-handle.dragging .bar-trim-handle-bar { background:#fff; }
 
 .trim-time-row {
   display:flex; justify-content:space-between; align-items:center;
@@ -1376,7 +1333,6 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
           <div class="loop-toggle">
             <button class="loop-btn active" id="loop-sel-main" onclick="setLoopMode('main','sel')">✂ Sel</button>
             <button class="loop-btn" id="loop-all-main" onclick="setLoopMode('main','all')">⟳ Tutto</button>
-            <button class="loop-btn" id="loop-bar-main" onclick="setLoopMode('main','bar')" title="Ripeti solo la battuta del trim celeste: serve a sentire se gira fluido a tempo">🔁 Battuta</button>
           </div>
           <div class="vol-wrap">
             <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
@@ -1427,10 +1383,7 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
           <input type="number" class="start-bar-input" id="start-bar-main" value="1" step="1" min="1" title="A che numero di battuta deve corrispondere l'inizio">
         </div>
         <button class="btn-align-grid" onclick="alignGridToSelection('main')">Allinea griglia</button>
-        <button class="grid-btn" id="bar-btn-main" onclick="trovaBattuta('main')" title="Trova DOVE comincia la battuta (l'entrata della batteria o il drop) e la fine: la mette nel trim celeste e ne ricava il BPM">🎯 Trova la battuta</button>
-        <button class="grid-btn" id="save-bpm-main" onclick="salvaBpm('main')" title="Salva nel database il BPM misurato sul trim celeste (per la canzone aperta)">💾 Salva BPM</button>
         <button class="grid-btn active" id="trim-btn-main" onclick="toggleTrimGiallo('main')" title="Trim giallo visibile (selezione IN/OUT del sample) — clic per nasconderlo del tutto">✂ Trim giallo on</button>
-        <button class="grid-btn active" id="battuta-btn-main" onclick="toggleBattutaVisibile('main')" title="Riquadro celeste della battuta visibile — clic per spegnerlo">🎯 Battuta on</button>
       </div>
 
       <div class="grid-row">
@@ -1478,18 +1431,6 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
                  onmousedown="startCellBorderDrag(event,'main','left')" ontouchstart="startCellBorderDragTouch(event,'main','left')"></div>
             <div class="cell-waveform-border" id="cell-border-right-main" style="display:none"
                  onmousedown="startCellBorderDrag(event,'main','right')" ontouchstart="startCellBorderDragTouch(event,'main','right')"></div>
-            <!-- Trim CELESTE della battuta: estremi liberi, da qui nasce il BPM -->
-            <div class="bar-trim-shade-left" id="btsl-main" style="display:none"></div>
-            <div class="bar-trim-selection" id="bts-main" style="display:none"></div>
-            <div class="bar-trim-shade-right" id="btsr-main" style="display:none"></div>
-            <div class="bar-trim-handle" id="bth-start-main" style="display:none"
-                 onmousedown="startBarTrimDrag(event,'main','start')" ontouchstart="startBarTrimDragTouch(event,'main','start')">
-              <div class="bar-trim-handle-bar"><div class="bar-trim-handle-label">BATTUTA</div></div>
-            </div>
-            <div class="bar-trim-handle" id="bth-end-main" style="display:none"
-                 onmousedown="startBarTrimDrag(event,'main','end')" ontouchstart="startBarTrimDragTouch(event,'main','end')">
-              <div class="bar-trim-handle-bar"><div class="bar-trim-handle-label">FINE BATTUTA</div></div>
-            </div>
           </div>
           <div class="playhead" id="tph-main" style="left:0px" onmousedown="startPlayheadDrag(event,'main')" ontouchstart="startPlayheadDragTouch(event,'main')"></div>
         </div>
@@ -1504,12 +1445,6 @@ input[type=range].zoom-slider::-webkit-slider-thumb {
           &nbsp;|&nbsp; <span style="color:var(--metronome-active);" id="metro-status-main">🔇</span>
         </div>
         <div class="trim-time-label" style="width:100%;margin-top:2px">
-          <span class="bar-info">🎯 Battuta</span>
-          <span class="bar-info" id="bt-start-main">—</span> &nbsp;→&nbsp;
-          <span class="bar-info" id="bt-end-main">—</span>
-          &nbsp;|&nbsp; <span class="bar-info" id="bt-bpm-main">— BPM</span>
-          &nbsp;|&nbsp; <span id="bt-info-main" style="color:var(--muted)">nessuna battuta: premi 🎯 Trova la battuta (o trascina il bordo celeste)</span>
-        </div>
         <button class="btn-reset-handle" onclick="resetTrimStart('main')">⟳ Reset al sample</button>
       </div>
 
@@ -1688,12 +1623,12 @@ function unloadFile() {
 // (`AudioContext.outputLatency`: misurato 24 ms su questo Mac, 18/09/2026) e a
 // quello si aggiunge ciò che può sfuggire al controllo del loop, che gira dentro
 // il disegno (requestAnimationFrame: misurato 4-8 ms su un giro di 2 s). Il
-// ritorno si anticipa di quel tanto, così la musica finisce SULLA barra invece
-// che dopo. Non cambia barStart/barEnd: la barra disegnata, il BPM e il taglio
-// restano quelli, cambia solo DOVE si riporta indietro la testina.
+// ritorno si anticipa di quel tanto, così la musica finisce SUL punto di OUT
+// invece che dopo. Il trim non cambia (IN e OUT restano quelli): cambia solo
+// DOVE si riporta indietro la testina.
 const LATENZA_USCITA_TIPICA = 0.02;   // secondi: si usa solo se il browser non la dichiara
 const MARGINE_DISEGNO = 0.008;        // secondi: sforamento misurato del controllo nel disegno
-const ANTICIPO_MAX = 0.06;            // secondi: oltre questo si taglierebbe troppo la battuta
+const ANTICIPO_MAX = 0.06;            // secondi: oltre questo si taglierebbe troppo la selezione
 let latenzaUscita = 0;                // secondi dichiarati dal browser (aggiornati a ogni fotogramma)
 let ctxLatenza = null;                // contesto audio usato SOLO per leggere quel ritardo
 
@@ -1748,20 +1683,13 @@ function startAnimationLoop(key) {
     p.timelineTime = currentTime + p.sampleOffset;
     leggiLatenzaUscita();   // appena il browser dichiara il ritardo vero dell'uscita, si usa
     // Di quanto anticipare il ritorno: l'audio già consegnato alle casse si sente
-    // comunque, quindi si torna indietro prima della fine del trim/battuta.
-    const anticipo = anticipoLoop(latenzaUscita, p.loopMode === 'bar'
-      ? (p.barEnd - p.barStart) : (p.trimEnd - p.trimStart));
+    // comunque, quindi si torna indietro prima della fine della selezione.
+    const anticipo = anticipoLoop(latenzaUscita, p.trimEnd - p.trimStart);
     
     if (p.loopSel && p.trimEnd != null && p.timelineTime >= p.trimEnd - anticipo) {
       p.timelineTime = p.trimStart;
       p.audio.currentTime = Math.max(0, p.timelineTime - p.sampleOffset);
       p.nextMetroBeatTime = null; // Ricalcola il metronomo quando loopa indietro
-    }
-    if (p.loopMode === 'bar' && p.barStart !== null && p.barEnd !== null &&
-        p.timelineTime >= p.barEnd - anticipo) {
-      p.timelineTime = p.barStart;      // 🔁 Battuta: torna all'inizio della battuta celeste
-      p.audio.currentTime = Math.max(0, p.timelineTime - p.sampleOffset);
-      p.nextMetroBeatTime = null;
     }
     if (p.loopSel && p.timelineTime < p.trimStart) {
       p.timelineTime = p.trimStart;
@@ -1814,14 +1742,8 @@ function initPlayer(key, url, startSec) {
     waveformLoading: false,
     selectedBarNumber: null,
     selectedBarStartTime: null,
-    barStart: null,          // trim CELESTE: inizio della battuta (secondi di timeline)
-    barEnd: null,            // fine della battuta
-    barQuarti: 4,            // quarti della battuta (da «Battute Sel.»)
-    barInfo: '',             // messaggio dell'ultima ricerca della battuta
     trimVisibile: true,      // il trim GIALLO (IN/OUT del sample) si può nascondere del tutto
-    barVisibile: true,       // il riquadro CELESTE della battuta si può spegnere
-    songId: '',              // canzone del database aperta nel sampler (per 💾 Salva BPM)
-    loopMode: 'sel',         // 'sel' (trim giallo) · 'all' (tutto) · 'bar' (trim celeste)
+    loopMode: 'sel',         // 'sel' (trim giallo) · 'all' (tutto)
     tapTimes: [],
     cellBorderDrag: null,
     metronomeEnabled: false,
@@ -1879,7 +1801,7 @@ function initPlayer(key, url, startSec) {
   });
 
   updateMetroStatus(key);   // mostra subito "🔇 1/4" (unità del metronomo)
-  aggiornaPulsantiTrim(key); // etichette dei due interruttori dei trim (giallo/celeste)
+  aggiornaPulsantiTrim(key); // etichetta del pulsante del trim giallo (on/off)
   audio.load();
 }
 
@@ -1906,19 +1828,13 @@ function toggleGridVisibility(key) {
   fullRedraw(key);
 }
 
-// ─── VISIBILITÀ DEI DUE TRIM: giallo (sample) e celeste (battuta) ─────────────
-// Due interruttori separati, con l'etichetta che dice lo STATO (come il pulsante
-// della griglia). Nascondere il trim giallo toglie di mezzo riquadro,
-// ombreggiature e maniglie IN/OUT — quindi non si trascina più: serve a guardare
-// il riquadro celeste senza l'altro sopra. Sono indipendenti dal fatto che il
-// BPM nasca dal trim celeste, e 🎯 Trova la battuta riaccende il celeste se era
-// spento: un risultato che non si vede non serve a niente.
+// ─── VISIBILITÀ DEL TRIM GIALLO (il sample) ──────────────────────────────────
+// L'etichetta dice lo STATO (come il pulsante della griglia). Nascondere il trim
+// toglie di mezzo riquadro, ombreggiature e maniglie IN/OUT — quindi non si
+// trascina più — e anche l'onda dentro la selezione torna grigia: resta la musica
+// e basta, senza niente di giallo sopra.
 function etichettaTrimGiallo(visibile) {
   return visibile ? '✂ Trim giallo on' : '✂ Trim giallo off';
-}
-
-function etichettaBattutaVisibile(visibile) {
-  return visibile ? '🎯 Battuta on' : '🎯 Battuta off';
 }
 
 function aggiornaPulsantiTrim(key) {
@@ -1933,15 +1849,6 @@ function aggiornaPulsantiTrim(key) {
       ? 'Trim giallo visibile (selezione IN/OUT del sample) — clic per nasconderlo del tutto'
       : 'Trim giallo nascosto — clic per mostrarlo di nuovo';
   }
-  const mostra = p.barVisibile !== false;
-  const btnB = document.getElementById(`battuta-btn-${key}`);
-  if (btnB) {
-    btnB.classList.toggle('active', mostra);
-    btnB.textContent = etichettaBattutaVisibile(mostra);
-    btnB.title = mostra
-      ? 'Riquadro celeste della battuta visibile — clic per spegnerlo'
-      : 'Riquadro celeste della battuta spento — clic per riaccenderlo';
-  }
 }
 
 function toggleTrimGiallo(key) {
@@ -1949,15 +1856,7 @@ function toggleTrimGiallo(key) {
   if (!p) return;
   p.trimVisibile = (p.trimVisibile === false);   // spento → acceso, acceso → spento
   aggiornaPulsantiTrim(key);
-  updateTrimUI(key);
-}
-
-function toggleBattutaVisibile(key) {
-  const p = players[key];
-  if (!p) return;
-  p.barVisibile = (p.barVisibile === false);
-  aggiornaPulsantiTrim(key);
-  aggiornaBattuta(key);
+  fullRedraw(key);   // ridisegna anche la forma d'onda: col trim spento torna grigia
 }
 
 function snapSelectionToGrid(key) {
@@ -2086,7 +1985,7 @@ function drawWaveform(key) {
     const timelineT = t_audio + p.sampleOffset;
     const x = (t_audio / dur) * W;
     const h = peaks[i] * (H / 2 - 4);
-    const inSel = timelineT >= p.trimStart && timelineT <= p.trimEnd;
+    const inSel = p.trimVisibile !== false && timelineT >= p.trimStart && timelineT <= p.trimEnd;
     ctx.fillStyle = inSel ? 'rgba(200,240,0,0.6)' : 'rgba(100,100,100,0.4)';
     ctx.fillRect(x, H/2 - h, barW, h * 2);
   }
@@ -2210,234 +2109,13 @@ function setPlayBtn(key, playing) {
   const btn = document.getElementById(`pb-${key}`);
   if (btn) btn.innerHTML = playing ? PAUSE_ICON : PLAY_ICON;
 }
-// ─── BATTUTA (trim CELESTE): da qui nasce il BPM ────────────────
-// Il trim GIALLO è il sample (cosa ritaglio). Il trim CELESTE è LA BATTUTA: dove
-// comincia — l'entrata della batteria, il drop, il primo giro che tiene — e dove
-// finisce. Il BPM è 60 × quarti / durata della battuta: spostando gli estremi
-// cambia il BPM, quindi la decisione è dell'orecchio; 🎯 Trova la battuta dà solo
-// il punto di partenza (e dice quando è poco affidabile).
-
-function bpmDaBattuta(quarti, durata) {
-  const q = parseFloat(quarti), d = parseFloat(durata);
-  if (!isFinite(q) || !isFinite(d) || q <= 0 || d <= 0) return null;
-  const bpm = 60 * q / d;
-  if (bpm < 20 || bpm > 400) return null;
-  return Math.round(bpm * 10) / 10;
-}
-
-function barTrimClamp(inizio, fine, durata, minimo) {
-  const d = Math.max(0, parseFloat(durata) || 0);
-  const m = Math.max(0.02, parseFloat(minimo) || 0.05);
-  let a = Math.max(0, Math.min(d || 1e9, parseFloat(inizio) || 0));
-  let b = Math.max(0, Math.min(d || 1e9, parseFloat(fine) || 0));
-  if (b < a) { const t = a; a = b; b = t; }
-  if (b - a < m) b = Math.min(d || 1e9, a + m);
-  if (b - a < m) a = Math.max(0, b - m);
-  return { start: a, end: b };
-}
-
-function etichettaBattuta(bpm, quarti, durata) {
-  const q = parseInt(quarti, 10) || 4;
-  const d = parseFloat(durata);
-  if (!isFinite(d) || d <= 0) return 'nessuna battuta: premi 🎯 Trova la battuta (o trascina il bordo celeste)';
-  const b = (bpm === null || bpm === undefined) ? bpmDaBattuta(q, d) : bpm;
-  if (b === null || !isFinite(b)) return 'battuta di ' + d.toFixed(2) + ' s · ' + q + ' quarti (BPM fuori misura)';
-  return 'battuta di ' + d.toFixed(2) + ' s · ' + q + ' quarti · ' + String(b).replace('.', ',') + ' BPM';
-}
-
-function quartiBattuta(key) {
-  const el = document.getElementById(`beats-input-${key}`);
-  const q = parseInt(el?.value, 10);
-  return (isFinite(q) && q > 0) ? q : 4;
-}
-
-function aggiornaBattuta(key) {
-  const p = players[key];
-  if (!p) return;
-  const dur = p.audio.duration || 0;
-  const sel = document.getElementById(`bts-${key}`);
-  const sl = document.getElementById(`btsl-${key}`);
-  const sr = document.getElementById(`btsr-${key}`);
-  const hs = document.getElementById(`bth-start-${key}`);
-  const he = document.getElementById(`bth-end-${key}`);
-  const t1 = document.getElementById(`bt-start-${key}`);
-  const t2 = document.getElementById(`bt-end-${key}`);
-  const bpmEl = document.getElementById(`bt-bpm-${key}`);
-  const info = document.getElementById(`bt-info-${key}`);
-  const attiva = p.barStart !== null && p.barStart !== undefined && p.barEnd !== null && dur > 0
-                 && p.barVisibile !== false;   // 🎯 Battuta on/off spegne solo il disegno
-  for (const el of [sel, sl, sr, hs, he]) { if (el) el.style.display = attiva ? 'block' : 'none'; }
-  if (!attiva) {
-    if (t1) t1.textContent = '—';
-    if (t2) t2.textContent = '—';
-    if (bpmEl) bpmEl.textContent = '— BPM';
-    if (info) info.textContent = etichettaBattuta(null, quartiBattuta(key), 0);
-    return;
-  }
-  const W = getTrimAreaWidth(key);
-  const x1 = secToPx(key, p.barStart), x2 = secToPx(key, p.barEnd);
-  if (sel) { sel.style.left = x1 + 'px'; sel.style.width = Math.max(0, x2 - x1) + 'px'; }
-  if (sl) { sl.style.left = '0px'; sl.style.width = Math.max(0, x1) + 'px'; }
-  if (sr) { sr.style.left = x2 + 'px'; sr.style.width = Math.max(0, W - x2) + 'px'; }
-  if (hs) hs.style.left = (x1 - 8) + 'px';
-  if (he) he.style.left = (x2 - 8) + 'px';
-  const bpm = bpmDaBattuta(p.barQuarti || quartiBattuta(key), p.barEnd - p.barStart);
-  if (t1) t1.textContent = fmtTime(p.barStart);
-  if (t2) t2.textContent = fmtTime(p.barEnd);
-  if (bpmEl) bpmEl.textContent = (bpm === null ? '—' : String(bpm).replace('.', ',')) + ' BPM';
-  if (info) info.textContent = p.barInfo || etichettaBattuta(bpm, p.barQuarti || quartiBattuta(key), p.barEnd - p.barStart);
-}
-
-// Mette la battuta (in secondi di TIMELINE, come IN/OUT) e allinea la casella BPM.
-function impostaBattuta(key, inizio, fine, info, aggiornaBpm) {
-  const p = players[key];
-  if (!p) return null;
-  const dur = p.audio.duration || 0;
-  const q = quartiBattuta(key);
-  const r = barTrimClamp(inizio, fine, dur, 0.05);
-  p.barStart = r.start;
-  p.barEnd = r.end;
-  p.barQuarti = q;
-  p.barInfo = info || '';
-  const bpm = bpmDaBattuta(q, r.end - r.start);
-  if (aggiornaBpm && bpm !== null && Math.abs((p.bpm || 0) - bpm) > 0.05) setBpm(key, bpm);
-  aggiornaBattuta(key);
-  return bpm;
-}
-
-function startBarTrimDrag(e, key, which) {
-  e.preventDefault(); e.stopPropagation();
-  const p = players[key];
-  if (!p || p.barStart === null || p.barStart === undefined) return;
-  p.dragging = 'bar';
-  const el = document.getElementById(`bth-${which}-${key}`);
-  if (el) el.classList.add('dragging');
-  function om(ev) { applyBarTrimDrag(ev.clientX, key, which); }
-  function ou() {
-    p.dragging = null;
-    const h = document.getElementById(`bth-${which}-${key}`);
-    if (h) h.classList.remove('dragging');
-    p.barInfo = '';
-    aggiornaBattuta(key);
-    document.removeEventListener('mousemove', om);
-    document.removeEventListener('mouseup', ou);
-  }
-  document.addEventListener('mousemove', om);
-  document.addEventListener('mouseup', ou);
-}
-
-function startBarTrimDragTouch(e, key, which) {
-  e.preventDefault(); e.stopPropagation();
-  const p = players[key];
-  if (!p || p.barStart === null || p.barStart === undefined) return;
-  p.dragging = 'bar';
-  function om(ev) { applyBarTrimDrag(ev.touches[0].clientX, key, which); }
-  function oe() {
-    p.dragging = null;
-    p.barInfo = '';
-    aggiornaBattuta(key);
-    document.removeEventListener('touchmove', om);
-    document.removeEventListener('touchend', oe);
-  }
-  document.addEventListener('touchmove', om, { passive: false });
-  document.addEventListener('touchend', oe);
-}
-
-// Gli estremi del trim celeste sono LIBERI: niente aggancio alla griglia, perché
-// è la battuta a decidere il tempo (il BPM si aggiorna mentre trascini).
-function applyBarTrimDrag(clientX, key, which) {
-  const p = players[key];
-  if (!p || p.barStart === null || p.barStart === undefined) return;
-  const ta = document.getElementById(`ta-${key}`);
-  const t = pxToSec(key, clientX - (ta ? ta.getBoundingClientRect().left : 0));
-  if (which === 'start') impostaBattuta(key, t, p.barEnd, '', true);
-  else impostaBattuta(key, p.barStart, t, '', true);
-}
-
-// 🎯 Trova la battuta: chiede al backend dove comincia la battuta (primo colpo
-// forte dove il tempo tiene: entrata della batteria o drop), mette il trim celeste
-// lì e ne ricava il BPM. Il backend dice anche quanto è affidabile.
-async function trovaBattuta(key) {
-  const p = players[key];
-  if (!p || !p.filename || p.filename === 'audio') {
-    alert('Non so quale file analizzare: apri il sampler da una canzone del database.');
-    return;
-  }
-  const info = document.getElementById(`bt-info-${key}`);
-  const bottone = document.getElementById(`bar-btn-${key}`);
-  if (info) info.textContent = '⏳ cerco dove comincia la battuta…';
-  if (bottone) bottone.disabled = true;
-  const url = urlBackend('/beat/bar');
-  let esito = null;
-  try {
-    esito = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: p.filename, quarters: quartiBattuta(key) })
-    }).then(r => r.json());
-  } catch (e) {
-    // Senza URL assoluta Chrome si ferma prima di partire e il TypeError nudo
-    // («Failed to parse URL from /beat/bar») non dice cosa fare: lo spieghiamo.
-    if (info) info.textContent = '❌ non riesco a chiedere la battuta: ' + ((e && e.message) || e)
-      + (url.charAt(0) === '/' ? ' (il sampler è aperto fuori dalla pagina di SampleLab: riaprilo dal database)' : '');
-    return;
-  } finally {
-    if (bottone) bottone.disabled = false;
-  }
-  if (!esito || !esito.ok) {
-    if (info) info.textContent = '❌ ' + ((esito && esito.message) || 'non riesco a misurare la battuta');
-    return;
-  }
-  // Il risultato va VISTO: se il riquadro celeste era spento si riaccende.
-  p.barVisibile = true;
-  aggiornaPulsantiTrim(key);
-  const off = p.sampleOffset || 0;
-  impostaBattuta(key, esito.bar_start + off, esito.bar_end + off, esito.message, true);
-  if (info) info.textContent = esito.message;
-  setLoopMode(key, 'bar');   // la fa girare subito: si sente se è a tempo
-  if (p.timelineTime < p.barStart || p.timelineTime >= p.barEnd) {
-    p.timelineTime = p.barStart;
-    p.audio.currentTime = Math.max(0, p.barStart - off);
-    updatePlayhead(key); updateTimecode(key);
-  }
-  p.audio.play().catch(() => {});
-  setPlayBtn(key, true);
-  if (!p._animId) startAnimationLoop(key);
-}
-
-// 💾 Salva BPM: manda alla pagina (che sa qual è la canzone) il BPM misurato sul
-// trim celeste; la pagina scrive il campo bpm della canzone nel database.
-function salvaBpm(key) {
-  const p = players[key];
-  if (!p) return;
-  const info = document.getElementById(`bt-info-${key}`);
-  if (p.barStart === null || p.barStart === undefined || p.barEnd === null) {
-    if (info) info.textContent = '⚠ prima trova (o trascina) la battuta celeste, poi salva il BPM';
-    return;
-  }
-  const bpm = bpmDaBattuta(p.barQuarti || quartiBattuta(key), p.barEnd - p.barStart);
-  if (bpm === null) {
-    if (info) info.textContent = '⚠ la battuta è troppo lunga o troppo corta per un BPM valido';
-    return;
-  }
-  try {
-    parent.postMessage({ action: 'saveBpm', bpm: bpm, filename: p.filename,
-                         songId: p.songId || '', barStart: p.barStart, barEnd: p.barEnd,
-                         quarters: p.barQuarti || quartiBattuta(key) }, '*');
-    if (info) info.textContent = '💾 BPM ' + String(bpm).replace('.', ',') + ' salvato nel database';
-  } catch (e) {
-    if (info) info.textContent = '❌ non riesco a salvare: ' + e.message;
-  }
-}
-
 function setLoopMode(key, mode) {
   const p = players[key];
   if (!p) return;
-  p.loopMode = (mode === 'all' || mode === 'bar') ? mode : 'sel';
+  p.loopMode = (mode === 'all') ? mode : 'sel';
   p.loopSel = (p.loopMode === 'sel');
   document.getElementById(`loop-sel-${key}`)?.classList.toggle('active', p.loopMode === 'sel');
   document.getElementById(`loop-all-${key}`)?.classList.toggle('active', p.loopMode === 'all');
-  document.getElementById(`loop-bar-${key}`)?.classList.toggle('active', p.loopMode === 'bar');
 }
 function setVol(key, val) { const p = players[key]; if (p) p.audio.volume = parseFloat(val); }
 
@@ -2450,7 +2128,8 @@ function updateTrimUI(key) {
   const W = getTrimAreaWidth(key);
   // Il trim GIALLO si può nascondere del tutto (pulsante «✂ Trim giallo»): gli
   // elementi restano nel DOM ma con display:none, quindi spariscono riquadro,
-  // ombreggiature e maniglie — e senza drag area non si trascina nemmeno.
+  // ombreggiature e maniglie — e senza drag area non si trascina nemmeno. Anche
+  // l'onda dentro la selezione torna grigia (vedi drawWaveform): niente giallo.
   const visibile = p.trimVisibile !== false;
   const mostra = (el) => { if (el) el.style.display = visibile ? 'block' : 'none'; };
 
@@ -2474,7 +2153,6 @@ function updateTrimUI(key) {
   document.getElementById(`tt-end-${key}`).textContent = fmtTime(p.trimEnd);
   document.getElementById(`tt-dur-${key}`).textContent = fmtTime(p.trimEnd - p.trimStart);
   document.getElementById(`tt-offset-${key}`).textContent = (p.sampleOffset >= 0 ? '+' : '') + p.sampleOffset.toFixed(2) + 's';
-  aggiornaBattuta(key);
 }
 
 function updatePlayhead(key) {
@@ -3322,15 +3000,13 @@ console.log('SampleLab (2) Player — Undo/Redo Globale (Snapshot) & Metronomo S
 // ── URL ASSOLUTA DEL BACKEND (questo documento è un iframe "blob:") ──────────
 // La pagina ci monta dentro un iframe con src = blob:… (il documento lo prende da
 // una <textarea>): in un documento blob: la base NON è http, quindi una fetch con
-// URL RELATIVA non parte nemmeno — Chrome dice «Failed to parse URL from
-// /beat/bar» — anche col backend attivo e rispondente. Qui il percorso diventa
-// assoluto con l'origine che la pagina ci manda nel messaggio 'load'
-// (window.location.origin); se quel campo manca si prova l'origine del mittente,
-// il referrer e infine la nostra posizione. La usa 🎯 Trova la battuta
-// (trovaBattuta, più sopra).
-// Sta in fondo al documento e non accanto a trovaBattuta di proposito: i numeri
-// di riga interni citati in README_sampler.md (§12) si contano da qui e così
-// restano validi.
+// URL RELATIVA non parte nemmeno — Chrome si ferma con «Failed to parse URL» —
+// anche col backend attivo e rispondente. Qui il percorso diventa assoluto con
+// l'origine che la pagina ci manda nel messaggio 'load' (window.location.origin);
+// se quel campo manca si prova l'origine del mittente, il referrer e infine la
+// nostra posizione. Lo usa il caricamento dell'audio (l'URL /stream/... del brano).
+// Sta in fondo al documento di proposito: i numeri di riga interni citati in
+// README_sampler.md (§12) si contano da qui e così restano validi.
 let baseBackend = '';
 
 function origineHttp(valore) {
@@ -3364,8 +3040,8 @@ window.addEventListener('message', function(e) {
     return;
   }
   if (e.data.action === 'load') {
-    // L'origine della pagina che ci ha aperti: da qui in poi i percorsi dell'app
-    // (es. /beat/bar) si rendono assoluti con urlBackend().
+    // L'origine della pagina che ci ha aperti: serve a urlBackend() per rendere
+    // assoluti i percorsi dell'app (l'audio, /stream/...).
     const originePagina = origineHttp(e.data.origin);
     if (originePagina) baseBackend = originePagina;
     else if (origineHttp(e.origin)) baseBackend = origineHttp(e.origin);
@@ -3376,26 +3052,19 @@ window.addEventListener('message', function(e) {
     document.getElementById('player-container').style.display = 'block';
     document.getElementById('player-title').textContent = e.data.etichetta || e.data.filename || 'audio';
     if (currentAudioUrl && currentAudioUrl.startsWith('blob:')) URL.revokeObjectURL(currentAudioUrl);
-    // Risolve l'URL relativo (es. /stream/...) contro l'origine del parent:
-    // dentro un iframe blob: un URL relativo verrebbe risolto come blob:.../stream/...
-    // e l'audio non caricherebbe mai. Con e.origin diventa assoluto e funziona.
-    try {
-      currentAudioUrl = new URL(e.data.url, e.origin).href;
-    } catch (_) {
-      currentAudioUrl = e.data.url;
-    }
+    // L'audio sta in downloads/: dentro un iframe blob: un percorso relativo
+    // (/stream/...) verrebbe risolto come blob:.../stream/... e non caricherebbe
+    // mai, quindi si rende assoluto con l'origine della pagina (urlBackend).
+    currentAudioUrl = urlBackend(e.data.url);
     initPlayer('main', currentAudioUrl, e.data.startSec || 0);
     // BPM passato dalla pagina che apre il sampler (dal database): la griglia
     // parte già su quel valore, così si sente subito se il brano ci sta sopra.
     if (e.data.bpm) { try { setBpm('main', e.data.bpm); } catch (_) {} }
-    // Il nome del FILE e la canzone del database: senza il nome vero il pulsante
-    // 🎯 Trova la battuta non saprebbe cosa analizzare (e nemmeno «Scarica
-    // selezione», che usa lo stesso campo).
+    // Il nome del FILE e la canzone del database: il nome vero serve a «Scarica
+    // selezione» e al taglio, che lavorano su downloads/.
     const pl = players['main'];
     if (pl) {
       pl.filename = e.data.filename || pl.filename;
-      pl.songId = e.data.songId || '';
-      aggiornaBattuta('main');
     }
   }
 });
@@ -3505,32 +3174,7 @@ window.addEventListener('message', e => {
   else if(d.action === 'dbChanged'){ loadDb(); } // il player ha aggiunto brani → aggiorna il DB
   else if(d.action === 'openSampler'){ openInSampler(d.songId || d.local_file || ''); } // il player chiede il sampler FL-Studio
   else if(d.action === 'audioplaying'){ pauseAllScraperAudio(e.source); } // un editor embedded ha iniziato: ferma tutto il resto
-  else if(d.action === 'saveBpm'){ salvaBpmDaSampler(d); } // 💾 il sampler ha misurato il BPM sulla battuta celeste
 });
-
-// Il sampler ha misurato il BPM sul TRIM CELESTE (la battuta): lo salva nella
-// canzone aperta — id del database, oppure cercata per nome file. `updateSongField`
-// marca anche bpm_verified = 1: è una misura fatta a orecchio con la battuta che
-// gira in loop, non una stima automatica.
-async function salvaBpmDaSampler(d){
-  const bpm = parseFloat(d && d.bpm);
-  if(!isFinite(bpm) || bpm <= 0){ toast('BPM non valido: niente da salvare','err'); return; }
-  let song = d.songId ? (allDbSongs||[]).find(s=>s.id===d.songId) : null;
-  if(!song && d.filename) song = (allDbSongs||[]).find(s=>s.local_file===d.filename) || null;
-  if(!song){
-    try{
-      const lista = await fetch('/db/songs').then(r=>r.json());
-      if(Array.isArray(lista)){
-        song = lista.find(s=>s.local_file===d.filename) || null;
-        if(song) allDbSongs = lista;
-      }
-    }catch(_){}
-  }
-  if(!song){ toast('Questa canzone non è nel database: salva prima la canzone, poi il BPM','err'); return; }
-  const valore = Math.round(bpm*10)/10;
-  await updateSongField(song.id, 'bpm', valore);
-  toast(`💾 BPM ${valore} salvato per «${song.title||song.local_file}» (battuta da ${Number(d.quarters)||4} quarti)`,'ok');
-}
 
 // Un brano è stato rimosso dal player → lo elimina anche dal database (e dal file).
 async function deleteSongFromPlayer(t){
@@ -3799,7 +3443,7 @@ function renderResults(data){
         <div class="track-name">${esc(data.title)}</div>
         <div class="track-artist">${esc(data.artist)}</div>
         <div class="meta-row" id="meta-main">
-          <span class="meta-loading">🥁 BPM: misuralo nel sampler (🎛 → 🎯 Trova la battuta)</span>
+          <span class="meta-loading">🥁 BPM: misuralo nel sampler (🎛 → 🎵 TAP o Allinea griglia)</span>
         </div>
       </div>
       ${data.ws_url?`<a href="${data.ws_url}" target="_blank" class="ws-badge">WhoSampled ↗</a>`:""}
@@ -4062,8 +3706,8 @@ function embedAudioEditorX(containerId, url, filename, startSec, etichetta){
   const blobUrl=URL.createObjectURL(blob);
   const fr=document.createElement('iframe');
   fr.style.cssText='width:100%;height:540px;border:1px solid var(--border);border-radius:10px;background:#0a0a0a;display:block';
-  // `filename` è il nome del FILE in downloads/ (lo usano 🎯 Trova la battuta e
-  // «Scarica selezione»), `etichetta` è solo il nome da mostrare nel sampler.
+  // `filename` è il nome del FILE in downloads/ (lo usa «Scarica selezione»),
+  // `etichetta` è solo il nome da mostrare nel sampler.
   fr.onload=function(){ try{ fr.contentWindow.postMessage({action:'load',origin:window.location.origin,url:url,filename:filename||'audio',etichetta:etichetta||filename||'audio',startSec:startSec||0},'*'); }catch(_){} };
   fr.src=blobUrl;
   cont.innerHTML='';
@@ -4717,8 +4361,8 @@ function savePair(btn,xTitle,xArtist,xYtUrl,yiTitle,yiArtist,yiYtUrl,defaultTsX,
 
 // ── METADATA: la stima automatica del BPM («🔎 BPM & Key») è stata TOLTA il
 // 18/09/2026: sbagliava troppo spesso (Tunebat misura un'altra versione del
-// brano, librosa/ffmpeg misurano tutto il file, intro compresa). Il BPM ora si
-// misura nel sampler con 🎯 Trova la battuta + trim celeste, e da lì si salva.
+// brano, librosa/ffmpeg misurano tutto il file, intro compresa). Il BPM ora lo
+// misura l'orecchio nel sampler (🎵 TAP o Allinea griglia) e si salva con ✏️ Edit.
 // Nel backend le rotte dei metadati restano (le usa la pagina legacy index.html),
 // ma da questa pagina non le chiama più nessuno.
 
@@ -5548,7 +5192,7 @@ async function dbFileSelected(name){
   // automatica (librosa/ffmpeg/Tunebat) è stata tolta il 18/09/2026 — sbagliava
   // spesso: il BPM vero si misura nel sampler con la battuta celeste.
   info.textContent='✓ Metadati letti dal file'+(bpmFromTags?` · BPM ${bpmFromTags} dai tag`:'')
-    +' · per il BPM usa il sampler (🎯 Trova la battuta)';
+    +' · per il BPM usa il sampler (🎵 TAP o Allinea griglia)';
 }
 
 async function dbAddManual(){
@@ -5874,7 +5518,7 @@ async function saveDbEditor(){
 // ─── AUDIO EDITOR INTEGRATION ─────────────────────────────────
 // `startSec` = secondo da cui partire, `bpm` = BPM da mettere nella casella
 // (arrivano dal database quando il sampler viene aperto da una canzone).
-function openAudioEditor(url, filename, startSec, bpm, songId, etichetta) {
+function openAudioEditor(url, filename, startSec, bpm, etichetta) {
   const modal = document.getElementById('audio-editor-modal');
   const iframe = document.getElementById('audio-editor-iframe');
   const title = document.getElementById('audio-editor-title');
@@ -5885,14 +5529,13 @@ function openAudioEditor(url, filename, startSec, bpm, songId, etichetta) {
   const blob = new Blob([html], {type: 'text/html'});
   const blobUrl = URL.createObjectURL(blob);
   iframe.onload = function() {
-    // `filename` è il nome del FILE in downloads/ — 🎯 Trova la battuta e
-    // «Scarica selezione» lavorano lì: col titolo della canzone il backend
-    // rispondeva «File non trovato». `etichetta` è solo il nome da mostrare.
+    // `filename` è il nome del FILE in downloads/ — «Scarica selezione» lavora lì:
+    // col titolo della canzone il backend rispondeva «File non trovato».
+    // `etichetta` è solo il nome da mostrare.
     iframe.contentWindow.postMessage({action: 'load', origin: window.location.origin,
                                       url: url, filename: filename,
                                       etichetta: nome || 'audio',
-                                      startSec: startSec || 0, bpm: bpm || 0,
-                                      songId: songId || ''}, '*');
+                                      startSec: startSec || 0, bpm: bpm || 0}, '*');
   };
   iframe.src = blobUrl;
 }
@@ -5931,7 +5574,7 @@ async function openInSampler(songIdOrFile, opts){
   const label = (song && (song.title || song.local_file)) || localFile;
   const bpm = (song && song.bpm) || opts.bpm || 0;
   openAudioEditor('/stream/'+encodeURIComponent(localFile), localFile, opts.startSec||0, bpm,
-                  (song && song.id) || '', label);
+                  label);
   toast('🎛️ "'+label+'" aperto nel sampler' +
         (bpm ? (' — BPM nel database: '+bpm+' (controlla con griglia/TAP)')
              : ' — nessun BPM nel database: misuralo con TAP'), 'ok');
