@@ -351,9 +351,20 @@ Da tenere presente nelle sessioni di lavoro successive:
   iTunes 0 risultati per «50 Cent 1998 Freestyle»», «…i 5 risultati con anteprima sono
   di altri artisti», «…troppo diverso (0.42 < 0.55)», «ricerca iTunes non riuscita: …»)
   e la pastiglia lo mostra: la prima parte in riga, la frase intera nel tooltip —
-  così «non verificabile» non resta un mistero. ⚠️ Limite noto: freestyle, mixtape e
-  brani fuori catalogo non hanno anteprima ufficiale → "non verificabile", cioè
-  nessun verdetto invece di un sì.
+  così «non verificabile» non resta un mistero. **Il candidato scartato si scrive
+  comunque nel dato** (`ws_audio_esito = 'scartato'` + motivo + `ws_query`, cioè cosa
+  è stato cercato): prima lo diceva solo il messaggio a video, che sparisce — così
+  invece la riga ricorda di aver controllato. E la ricerca si rifà da sé quando la
+  query cambia (titolo corretto a mano), non a ogni Verifica. ⚠️ Limite noto:
+  freestyle, mixtape e brani fuori catalogo non hanno anteprima ufficiale → "non
+  verificabile", cioè nessun verdetto invece di un sì.
+- **Il player mostra i link del DATABASE, non la sua copia vecchia.** La pagina
+  `/onyx` tiene i brani in IndexedDB e la Verifica aggiornava quella copia **solo
+  aggiungendo** i link (`if (s.whosampled_url) …`): quando il database ne toglieva uno
+  (es. la pagina WhoSampled era di un altro brano) la copia continuava a mostrarlo, e
+  sembrava che la Verifica non avesse controllato (segnalato il 18/09/2026). Ora la
+  sincronizzazione **assegna sempre** (`track.whosampledUrl = s.whosampled_url || ''`)
+  e il pannello info mostra anche il verdetto 🔒 (`🔊 link WhoSampled: scartato — …`).
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
   `do_download_playlist`): con yt-dlp recenti provocava "Video unavailable"/403.
 - **FORTISSIMO COMPARE (11/09/2026).** Aggiunti `fortissimo_compare_v3.py`, la
@@ -1684,6 +1695,48 @@ Da tenere presente nelle sessioni di lavoro successive:
   ricerca fatta dall'app (artista principale + titolo), quindi un titolo "sporco" può
   portare a "0 risultati" anche se il brano esiste con un altro nome — è il motivo per
   cui il campo dice anche *cosa* è stato cercato.
+
+- **«HA DI NUOVO TROVATO UNA CANZONE SBAGLIATA» — ERA IL PLAYER, NON LA VERIFICA
+  (18/09/2026, sera).** Seconda segnalazione di Alessandro: «ha di nuovo trovato una
+  canzone sbagliata su end of the world, ha trovato 🔗 WhoSampled:
+  https://www.whosampled.com/Skeeter-Davis/The-End-of-the-World/ senza controllare se
+  fosse effettivamente quella». Il controllo **c'era** e aveva funzionato: nel database
+  quel link non c'era più (verdetto "non confermato", 9 hash). Si vedeva ancora perché
+  il **player** tiene una copia dei brani (IndexedDB) e la sincronizzazione dopo la
+  Verifica la aggiornava **solo aggiungendo** (`if (s.whosampled_url) track.whosampledUrl
+  = s.whosampled_url;`): tolto il link dal database, il valore vecchio restava nella
+  copia — e anche il modal, che ricadeva su `row.whosampled_url || track.whosampledUrl`,
+  lo rimostrava. Corretto (il database è la verità: assegnazione sempre, `|| ''`, anche
+  per Genius; e il pannello info mostra il verdetto 🔊). Nella stessa sessione sono
+  stati corretti altri due buchi emersi dal caso:
+  1. **il candidato scartato non veniva scritto**: se la riga non aveva un link da
+     rimuovere, il rifiuto restava solo nel messaggio a video (che sparisce) e la riga
+     sembrava non controllata → ora si scrive `ws_audio_esito = 'scartato'` con il
+     motivo e i numeri, e la pastiglia dice «✗ candidato scartato»;
+  2. **la ricerca non si rifaceva** una volta scartato un candidato, nemmeno se il
+     titolo veniva corretto → ora la regola è una funzione pura (`ws_da_cercare`) con
+     `ws_query` (cosa è stato cercato): stessa query e candidato già scartato → non si
+     ripete; query diversa (titolo corretto a mano) → si riprova; link salvato senza
+     verdetto → si mette alla prova.
+  Verifiche del 18/09/2026: **la Verifica vera sulla riga**, dopo la correzione del
+  titolo a *FORGOTTENAGE - End of the World* fatta a mano da Alessandro, ha **rifatto
+  la ricerca** e stavolta ha trovato la pagina **giusta**
+  (`whosampled.com/FORGOTTENAGE/End-of-the-World/`, score 0,942) con l'audio
+  "non verificabile" e il motivo («i 5 risultati con anteprima per «FORGOTTENAGE End of
+  the World» sono di altri artisti») salvato nel dato insieme a `ws_query`; **97 test**
+  in `test_audio_match.py` (erano 89: la regola `ws_da_cercare`, la pastiglia
+  «scartato», il player che non mostra più un link rimosso) e **379 test di suite**
+  (erano 371, `OK`); la pagina `/onyx` servita contiene il fix (assegnazione con `|| ''`
+  e il verdetto nel pannello) e i dati che il pannello riceve sono quelli del database
+  (link FORGOTTENAGE, verdetto e motivo) — il controllo in Chrome di automazione del
+  pannello non è riuscito in questa sessione (la finestra del browser pilotato si
+  chiudeva all'avvio: `NoSuchWindowException`), quindi la prova è sul codice servito,
+  sul percorso dati e sui test; backup in
+  `/tmp/samplelab_backup_18set2026_pre_scartato.db`.
+  📌 Nota per il futuro: i campi `*_at` della conferma audio ora sono in **UTC** come il
+  resto del database (prima erano ora locale e i due timestamp sembravano in
+  disordine).
+
 
 
 

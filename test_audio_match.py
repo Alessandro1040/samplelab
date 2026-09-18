@@ -52,6 +52,7 @@ import wave
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_PATH = os.path.join(BASE_DIR, "app (2).py")
 INDEX_PATH = os.path.join(BASE_DIR, "index (2).html")
+ONYX_PATH = os.path.join(BASE_DIR, "onyx_whosampled.html")
 GITIGNORE_PATH = os.path.join(BASE_DIR, ".gitignore")
 FFMPEG = shutil.which("ffmpeg")
 HA_OSASCRIPT = shutil.which("osascript") is not None
@@ -503,6 +504,18 @@ class TestChipNellaPagina(unittest.TestCase):
         self.assertIn("iTunes 0 risultati per «50 Cent 1998 Freestyle»", html)  # frase intera nel title
         self.assertNotIn("nessuna anteprima ufficiale · nessuna", html)
 
+    def test_pastiglia_del_candidato_scartato(self):
+        html = self._chip(
+            "[chipAudio({ws_audio_esito:'scartato',"
+            "ws_audio_fonte:'iTunes 258619200 · Skeeter Davis — The End of the World (157.6 s)',"
+            "ws_audio_motivo:\"l'audio del candidato NON è dentro il file locale: probabile "
+            "falso positivo (9 hash allineati)\"},'whosampled')]")[0]
+        self.assertIn("🔊 ✗ candidato scartato", html)
+        self.assertIn("#ff4545", html)
+        self.assertIn("il link WhoSampled", html)
+        self.assertIn("Skeeter Davis", html)                # la fonte nel title
+        self.assertIn("falso positivo", html)               # il motivo, intero, nel title
+
     def test_pastiglia_del_link_anche_col_motivo(self):
         html = self._chip("[chipAudio({ws_audio_esito:'non verificabile',"
                           "ws_audio_motivo:'nessuna anteprima ufficiale: i 3 risultati con anteprima "
@@ -699,6 +712,34 @@ class TestMotivoSenzaAnteprima(unittest.TestCase):
         self.assertIn("altri artisti", APP.motivo_senza_anteprima(diag, "Big Sean", "Control"))
 
 
+class TestWsDaCercare(unittest.TestCase):
+    """Quando la Verifica deve (ri)cercare il link WhoSampled? Una ricerca costa un
+    browser e un confronto audio: non va ripetuta a vuoto, ma non va nemmeno saltata
+    quando il titolo è stato corretto (caso di Alessandro del 18/09/2026)."""
+
+    def test_senza_link_si_cerca(self):
+        self.assertTrue(APP.ws_da_cercare(None, None, None, "End of the World"))
+
+    def test_link_senza_verdetto_si_ricontrolla(self):
+        self.assertTrue(APP.ws_da_cercare("https://www.whosampled.com/A/B/", None, None, "q"))
+
+    def test_link_con_verdetto_non_si_ricontrolla(self):
+        for esito in ("confermato", "non confermato", "scartato", "non verificabile"):
+            self.assertFalse(APP.ws_da_cercare("https://www.whosampled.com/A/B/", esito, "q", "q"), esito)
+
+    def test_candidato_scartato_stessa_query_non_si_ripete(self):
+        self.assertFalse(APP.ws_da_cercare(None, "scartato", "End of the World", "End of the World"))
+
+    def test_candidato_scartato_con_titolo_corretto_si_riprova(self):
+        # il caso vero: la riga è stata corretta in "FORGOTTENAGE - End of the World"
+        self.assertTrue(APP.ws_da_cercare(None, "scartato", "End of the World",
+                                          "FORGOTTENAGE - End of the World"))
+
+    def test_query_vuote(self):
+        self.assertFalse(APP.ws_da_cercare(None, "scartato", "", ""))
+        self.assertTrue(APP.ws_da_cercare("   ", None, None, ""))     # link vuoto = nessun link
+
+
 def estrai_funzione_py(src, nome):
     """Il testo della funzione `nome` del backend (def a indentazione 0)."""
     m = re.search(r"^def %s\(" % re.escape(nome), src, re.M)
@@ -720,6 +761,7 @@ class TestCablaggio(unittest.TestCase):
     def setUp(self):
         self.app_src = leggi(APP_PATH)
         self.index_src = leggi(INDEX_PATH)
+        self.onyx_src = leggi(ONYX_PATH)
 
     def test_rotta_dedicata(self):
         self.assertIn('@app.route("/db/songs/<song_id>/audio_check", methods=["POST"])', self.app_src)
@@ -760,6 +802,7 @@ class TestCablaggio(unittest.TestCase):
         self.assertEqual(self.index_src.count("audioCheckSong("), 2)   # onclick + definizione
         for pezzo in ("✓ confermato", "✗ non confermato", "? ambiguo", "– non verificabile"):
             self.assertIn(pezzo, self.index_src)
+        self.assertIn("✗ candidato scartato", self.index_src)
         # la pastiglia sta nella riga della tabella, accanto al pulsante Verifica
         riga = estrai_funzione(self.index_src, "renderDbTable")
         self.assertIn("chipAudio(s)", riga)
@@ -770,11 +813,26 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("esito_whosampled(", corpo)
         self.assertIn("verifica_audio_riferimento(", corpo)
         self.assertIn("ws_da_controllare", corpo)
+        self.assertIn("ws_da_cercare(", corpo)
+        self.assertIn("query_ws", corpo)
+        self.assertIn('updates["ws_query"] = query_ws', corpo)
         self.assertIn('updates["ws_match_score"] = round(ws_score, 3)', corpo)
         self.assertIn('campi_dal_risultato_audio(verdetto, "ws_audio_")', corpo)
-        # il link sbagliato si RIMUOVE (solo con una prova contraria: rimuovi_url)
+        # il link sbagliato si RIMUOVE e il CANDIDATO scartato si SCRIVE comunque
         self.assertIn('decisione.get("rimuovi_url")', corpo)
         self.assertIn('updates["whosampled_url"] = None', corpo)
+        self.assertIn('updates["ws_audio_esito"] = "scartato"', corpo)
+
+    def test_il_player_non_mostra_piu_un_link_rimosso(self):
+        """Il difetto segnalato il 18/09/2026: il player tiene una copia propria
+        (IndexedDB) e, quando il database toglieva un link, la copia restava — così
+        sembrava che la Verifica non avesse controllato."""
+        self.assertIn("track.whosampledUrl = s.whosampled_url || '';", self.onyx_src)
+        self.assertIn("track.geniusUrl = s.genius_url || '';", self.onyx_src)
+        self.assertIn("whosampledUrl: row.whosampled_url || '',", self.onyx_src)
+        # e il pannello del player mostra il verdetto audio (link e canzone)
+        self.assertIn("wsAudioMotivo", self.onyx_src)
+        self.assertIn('🔊 ${escHtml(dove)}: ${escHtml(esito)}', self.onyx_src)
 
     def test_ricerca_whosampled_non_piu_a_occhio(self):
         # senza artista si sceglie per TITOLO, non `candidates[0]` (era il motivo per

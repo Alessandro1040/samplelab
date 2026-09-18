@@ -2196,6 +2196,18 @@ function openEditTrackModal(trackId) {
     let h = "";
     if (t.geniusUrl) h += `<div>🔗 Genius: <a href="${escHtml(t.geniusUrl)}" target="_blank" style="color:var(--text2);">${escHtml(t.geniusUrl)}</a></div>`;
     if (t.whosampledUrl) h += `<div>🔗 WhoSampled: <a href="${escHtml(t.whosampledUrl)}" target="_blank" style="color:var(--text2);">${escHtml(t.whosampledUrl)}</a></div>`;
+    // CONFERMA AUDIO (🔊): il verdetto sul link WhoSampled e quello sulla canzone di
+    // Genius. Serve a non lasciare l'impressione che la Verifica non abbia controllato:
+    // quando un link viene SCARTATO si legge qui il perché (l'audio non combacia).
+    const esito = t.wsAudioEsito || t.audioMatchEsito || "";
+    if (esito) {
+      const dove = t.wsAudioEsito ? "link WhoSampled" : "canzone di Genius";
+      const colore = (esito === "confermato") ? "#4ade80"
+                    : (esito === "non verificabile" ? "var(--muted)" : "#ff4545");
+      const motivo = (t.wsAudioEsito ? t.wsAudioMotivo : t.audioMatchMotivo) || "";
+      h += `<div style="color:${colore}">🔊 ${escHtml(dove)}: ${escHtml(esito)}` +
+           (motivo ? ` — ${escHtml(motivo)}` : "") + `</div>`;
+    }
     return h + (credits || "");
   };
   fill(track);
@@ -2224,8 +2236,13 @@ function openEditTrackModal(trackId) {
       const fresh = {
         name: row.title || track.name, artist: row.artist || track.artist,
         album: row.album || '', year: row.year || '', lyrics: row.lyrics || track.lyrics,
-        geniusUrl: row.genius_url || track.geniusUrl,
-        whosampledUrl: row.whosampled_url || track.whosampledUrl,
+        // I LINK seguono il database (che è la verità): se la Verifica li ha rimossi
+        // vanno tolti anche dalla copia del player, non solo aggiunti.
+        geniusUrl: row.genius_url || '',
+        whosampledUrl: row.whosampled_url || '',
+        wsAudioEsito: row.ws_audio_esito || '', wsAudioMotivo: row.ws_audio_motivo || '',
+        audioMatchEsito: row.audio_match_esito || '',
+        audioMatchMotivo: row.audio_match_motivo || '',
       };
       fill(fresh);
       let credits = "";
@@ -2237,6 +2254,9 @@ function openEditTrackModal(trackId) {
       track.name = fresh.name; track.artist = fresh.artist;
       track.album = fresh.album; track.year = fresh.year;
       track.geniusUrl = fresh.geniusUrl; track.whosampledUrl = fresh.whosampledUrl;
+      track.wsAudioEsito = fresh.wsAudioEsito; track.wsAudioMotivo = fresh.wsAudioMotivo;
+      track.audioMatchEsito = fresh.audioMatchEsito;
+      track.audioMatchMotivo = fresh.audioMatchMotivo;
       await dbPut("tracks", track);
       renderTracks();
       if (currentTrackId === track.id) renderNowBar(track);
@@ -2486,8 +2506,16 @@ async function analyzeTrack(trackId) {
     if (s.bpm) track.bpm = s.bpm;
     if (s.musical_key) track.musical_key = s.musical_key;
     if (s.lyrics) track.lyrics = s.lyrics;
-    if (s.genius_url) track.geniusUrl = s.genius_url;
-    if (s.whosampled_url) track.whosampledUrl = s.whosampled_url;
+    // Il DATABASE è la verità: se la Verifica ha RIMOSSO un link (es. la pagina
+    // WhoSampled era di un altro brano) deve sparire anche dalla copia del player —
+    // prima la copia vecchia restava (IndexedDB) e sembrava che la Verifica non
+    // avesse controllato (segnalato il 18/09/2026 su *End of the World*).
+    track.geniusUrl = s.genius_url || '';
+    track.whosampledUrl = s.whosampled_url || '';
+    track.wsAudioEsito = s.ws_audio_esito || '';
+    track.wsAudioMotivo = s.ws_audio_motivo || '';
+    track.audioMatchEsito = s.audio_match_esito || '';
+    track.audioMatchMotivo = s.audio_match_motivo || '';
     if (s.youtube_url) track.youtubeUrl = s.youtube_url;
     if (s.release_date) track.release_date = s.release_date;
     track.analyzed = (s.lyrics || s.genius_url || s.whosampled_url) ? "done" : "empty";

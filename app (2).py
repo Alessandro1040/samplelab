@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import yt_dlp, os, threading, uuid, ssl, socket, json, time, re
 import urllib.parse, subprocess, hashlib, sqlite3, struct, math
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -338,6 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               ("ws_audio_comuni", "INTEGER"),
                               ("ws_audio_fonte", "TEXT"),
                               ("ws_audio_motivo", "TEXT"),
+                              ("ws_query", "TEXT"),
                               ("ws_audio_at", "TEXT")):
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
@@ -3764,9 +3765,13 @@ def verify_song(song_id):
 
         # 2) Browser SOLO se serve davvero (WhoSampled da cercare o da ricontrollare,
         #    o BPM/Key non già verificati). Dal 18/09/2026 si ricontrolla anche un URL
-        #    già salvato che non ha ancora un verdetto audio: è così che si scopre un
-        #    link sbagliato (l'audio è l'unica prova non testuale).
-        ws_da_controllare = bool((not s.get("whosampled_url")) or (not s.get("ws_audio_esito")))
+        #    già salvato che non ha ancora un verdetto audio — è così che si scopre un
+        #    link sbagliato (l'audio è l'unica prova non testuale) — mentre un candidato
+        #    già scartato NON si ricontrolla con la STESSA ricerca: `ws_query` ricorda
+        #    cosa è stato cercato, quindi se il titolo cambia la Verifica riprova.
+        query_ws = f"{search_artist} {search_title}".strip()
+        ws_da_controllare = ws_da_cercare(s.get("whosampled_url"), s.get("ws_audio_esito"),
+                                          s.get("ws_query"), query_ws)
         need_browser = ws_da_controllare or (not bpmkey_done)
         if need_browser:
             try:
@@ -3782,7 +3787,7 @@ def verify_song(song_id):
             try:
                 track, candidati = search_whosampled(
                     ws_driver,
-                    f"{search_artist} {search_title}",
+                    query_ws,
                     searched_artist=search_artist,
                     searched_title=search_title)
                 if track and track.get("url"):
@@ -3810,18 +3815,31 @@ def verify_song(song_id):
                     if decisione["azione"] == "salva":
                         updates["whosampled_url"] = track["url"]
                         updates["ws_match_score"] = round(ws_score, 3)
+                        updates["ws_query"] = query_ws        # cosa è stato cercato
                         updates.update(campi_dal_risultato_audio(verdetto, "ws_audio_"))
                         messages.append(f"🔗 URL WhoSampled: {riga_candidato} "
                                         f"(score {ws_score:.2f} · {decisione['motivo']})")
                     else:
+                        # Il candidato scartato si SCRIVE COMUNQUE nel database: prima
+                        # si scriveva solo quando c'era un link da rimuovere, quindi la
+                        # riga non ricordava di aver controllato e sembrava che la
+                        # Verifica non avesse fatto niente (segnalato il 18/09/2026).
+                        rimosso = bool(decisione.get("rimuovi_url")
+                                       and s.get("whosampled_url") == track["url"])
+                        updates["whosampled_url"] = None
+                        updates["ws_match_score"] = round(ws_score, 3)
+                        updates["ws_query"] = query_ws        # cosa è stato cercato
+                        updates.update(campi_dal_risultato_audio(verdetto, "ws_audio_"))
+                        updates["ws_audio_esito"] = "scartato"    # verdetto sul CANDIDATO
+                        dettagli = decisione["motivo"]
+                        if verdetto["confronto"]:
+                            dettagli += f" ({verdetto['voti']} hash allineati)"
+                        if rimosso:
+                            dettagli += " · link salvato rimosso"
+                        updates["ws_audio_motivo"] = dettagli[:200]
                         messages.append(f"❌ WhoSampled scartato ({decisione['motivo']}): "
                                         f"{riga_candidato}")
-                        # Il link già salvato si toglie SOLO con una prova contraria
-                        # (audio non confermato o ambiguo), mai per mancanza di dati.
-                        if decisione.get("rimuovi_url") and s.get("whosampled_url") == track["url"]:
-                            updates["whosampled_url"] = None
-                            updates["ws_match_score"] = None
-                            updates.update(campi_dal_risultato_audio(verdetto, "ws_audio_"))
+                        if rimosso:
                             messages.append("🧹 Il link WhoSampled salvato era proprio questo: rimosso")
                 else:
                     messages.append("⚠️ WhoSampled: nessun risultato trovato")
@@ -3962,6 +3980,10 @@ def audio_check_song(song_id):
             if decisione.get("rimuovi_url") and verdetto["confronto"]:
                 aggiornamenti["whosampled_url"] = None
                 aggiornamenti["ws_match_score"] = None
+                aggiornamenti["ws_audio_esito"] = "scartato"      # verdetto sul CANDIDATO
+                aggiornamenti["ws_audio_motivo"] = (
+                    f"{decisione['motivo']} ({verdetto['voti']} hash allineati) · "
+                    f"link salvato rimosso")[:200]
                 messaggi.append("🧹 Il link WhoSampled salvato è di un altro brano: rimosso")
     finally:
         verify_progress.pop(song_id, None)
@@ -4523,6 +4545,7 @@ COLUMN_DOCS = {"songs": {
     "ws_audio_offset": "dove sta l'anteprima del candidato dentro il file locale (secondi)",
     "ws_audio_fonte": "anteprima usata per il link WhoSampled: 'iTunes <id> · artista — titolo'",
     "ws_audio_motivo": "PERCHÉ il confronto del link WhoSampled non si è potuto fare (vuoto se è stato fatto)",
+    "ws_query": "cosa è stato cercato su WhoSampled per quest'ultimo verdetto (se il titolo cambia, la Verifica riprova)",
     "ws_audio_at": "quando è stato fatto il confronto audio del link WhoSampled",
     "created_at": "quando è stata aggiunta",
     "updated_at": "ultima modifica",
@@ -5067,6 +5090,25 @@ _SEGMENTI_NON_ARTISTA = {"search", "sample", "artist", "album", "track", "lists"
                          "producer", "song", "video"}
 
 
+def ws_da_cercare(url_salvato, verdetto_audio, query_memorizzata, query_corrente):
+    """Funzione PURA. La Verifica deve (ri)cercare il link WhoSampled?
+
+    - **nessun link salvato**: sì, a meno che l'ultima ricerca — con la STESSA query —
+      abbia già scartato il candidato: rifare sarebbe un browser e un confronto audio
+      per niente. Se però il titolo (o l'artista) è cambiato, la query è diversa e si
+      **riprova** (è il caso di Alessandro: titolo corretto a mano → nuovo tentativo).
+    - **link salvato ma senza verdetto audio**: sì, va messo alla prova (è così che si
+      scopre una pagina sbagliata).
+    - **link salvato con verdetto**: no, è già stato giudicato.
+    """
+    salvato = (url_salvato or "").strip()
+    if not salvato:
+        if (verdetto_audio or "") == "scartato" and (query_memorizzata or "") == (query_corrente or ""):
+            return False
+        return True
+    return not (verdetto_audio or "")
+
+
 def artista_titolo_da_whosampled_url(url):
     """Funzione PURA. Da 'https://www.whosampled.com/Skeeter-Davis/The-End-of-the-World/'
     → ('Skeeter Davis', 'The End of the World'). None se l'URL non ha la forma
@@ -5163,7 +5205,9 @@ def campi_dal_risultato_audio(risultato, prefisso="audio_match_"):
         # PERCHÉ non si è potuto confrontare (NULL quando il confronto è stato fatto:
         # lì i numeri parlano da soli). È il testo che la pastiglia mostra nel tooltip.
         prefisso + "motivo": risultato.get("motivo_testo"),
-        prefisso + "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        # come il resto del database: UTC (prima erano ora locale e la riga sembrava
+        # modificata "prima" del verdetto quando si confrontavano i due timestamp)
+        prefisso + "at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 

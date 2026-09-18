@@ -4804,6 +4804,10 @@ const AUDIO_CHIP = {
   'non confermato':  ['#ff4545', '✗ non confermato'],
   'ambiguo':         ['#fbbf24', '? ambiguo'],
   'non verificabile':['var(--muted)', '– non verificabile'],
+  // il candidato trovato è stato SCARTATO (l'audio dice che è un altro brano): la
+  // riga lo ricorda anche quando il link non è stato salvato, così non sembra che
+  // la Verifica non abbia controllato
+  'scartato':        ['#ff4545', '✗ candidato scartato'],
 };
 // Il motivo è una frase lunga («nessuna anteprima ufficiale: iTunes 0 risultati per
 // «50 Cent 1998 Freestyle»»): nella pastiglia se ne mostra la prima parte, la frase
