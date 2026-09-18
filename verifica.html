@@ -18,6 +18,11 @@ header{border-bottom:1px solid var(--border);padding:20px 32px;display:flex;alig
 .logo span{color:var(--muted);font-weight:400}
 .back{margin-left:auto;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:6px 12px}
 .back:hover{color:var(--accent);border-color:var(--accent)}
+/* ⏹ Ferma l'audio principale: il player dell'app continua a suonare anche quando
+   la verifica si apre in un'altra scheda — da qui lo si zittisce sempre. */
+.ferma-audio{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);background:transparent;border:1px solid var(--border);border-radius:6px;padding:6px 12px;cursor:pointer}
+.ferma-audio:hover{color:var(--accent);border-color:var(--accent)}
+.ferma-audio.spento{color:var(--accent);border-color:var(--accent);font-weight:700}
 .wrap{max-width:1100px;margin:0 auto;padding:24px 32px}
 .song{display:flex;gap:18px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
 .song img{width:72px;height:72px;border-radius:8px;object-fit:cover;background:var(--surface3)}
@@ -115,6 +120,8 @@ button.confronta:hover{background:var(--accent);color:#080808}
 <body>
 <header>
   <div class="logo">SampleLab <span>· verifica guidata</span></div>
+  <button class="ferma-audio" id="btnFermaAudio" onclick="fermaPlayerPrincipale()"
+          title="Ferma il player dell'app: se sta suonando in un'altra scheda (il tab Player, o la pagina principale) da qui lo zittisci">⏹ ferma l'audio principale</button>
   <a class="back" href="/?tab=database">← torna al database</a>
 </header>
 <div class="wrap">
@@ -524,6 +531,110 @@ let playerVoce = [];           // i player del pannello voce (solo quello di sin
                                // quando il riferimento è il TESTO: vedi il 18/09/2026)
 let playerImpronta = [];       // i due player del confronto audio (impronta)
 
+// ── UN SOLO AUDIO PER VOLTA (18/09/2026) ────────────────────────────────────
+// Segnalato da Alessandro: «gli audio si sovrappongono: appena clicco play sulla
+// versione a cappella dovrebbero fermarsi automaticamente tutti gli altri» e
+// «l'audio principale può essere messo in background senza possibilità di
+// toglierlo». Le due cause: (1) `creaPlayer` usa `new Audio(…)`, che suona anche
+// fuori dal documento, quindi il player SOSTITUITO (ricarica del pannello,
+// interruttore mix ↔ a cappella) restava vivo in background senza più nessun
+// comando; (2) nessun player sapeva degli altri. Qui: il registro dei player
+// vivi, chi si ferma quando ne parte uno, e i messaggi per zittire il player
+// dell'app (che vive in un'ALTRA scheda: questa pagina si apre con window.open).
+let playerVivi = [];        // tutti i player vivi della pagina
+let playerPerBox = {};      // contenitore → il SUO player (uno solo per contenitore)
+
+// Funzione PURA: quali player RESTANO accesi quando ne parte uno. Con un ▶
+// singolo resta solo quello; con i pulsanti di gruppo («▶ avvia», «▶ avvia i due
+// dal punto allineato») resta il gruppo, perché lì il confronto È ascoltare lo
+// stesso passaggio su due file insieme.
+function chiResta(vivi, partente) {
+  const gruppo = partente && partente.compagni;
+  if (gruppo && gruppo.length && gruppo.indexOf(partente) >= 0) return gruppo.filter(Boolean);
+  return partente ? [partente] : [];
+}
+
+// Ferma tutti i player vivi tranne quelli indicati; torna quelli fermati.
+function fermaTuttiTranne(esclusi) {
+  const tenere = esclusi || [];
+  const fermati = [];
+  playerVivi.forEach(p => {
+    if (p && tenere.indexOf(p) < 0) { try { p.ferma(); } catch (_) {} fermati.push(p); }
+  });
+  return fermati;
+}
+
+// Un player sostituito non deve restare a suonare: si ferma e si dimentica.
+function dimenticaPlayer(p) {
+  if (!p) return null;
+  try { p.ferma(); } catch (_) {}
+  playerVivi = playerVivi.filter(x => x !== p);
+  Object.keys(playerPerBox).forEach(k => { if (playerPerBox[k] === p) delete playerPerBox[k]; });
+  return p;
+}
+
+function registraPlayer(contenitoreId, p) {
+  if (!p) return p;
+  playerPerBox[contenitoreId] = p;
+  playerVivi.push(p);
+  return p;
+}
+
+// Svuotare un contenitore = fermare quello che ci suonava dentro.
+function svuotaPlayer(contenitoreId, html) {
+  dimenticaPlayer(playerPerBox[contenitoreId]);
+  const box = document.getElementById(contenitoreId);
+  if (box) box.innerHTML = (html == null) ? "" : html;
+  return box;
+}
+
+// ── IL PLAYER PRINCIPALE DELL'APP ───────────────────────────────────────────
+// Chi può averci aperto è una pagina diversa a seconda di dove si è cliccato
+// «🔎 Verifica»: la pagina principale (che tiene il player in un iframe) o il
+// player aperto da solo (/onyx). Parlano due dialetti diversi — «audioplaying» è
+// l'avviso della pagina principale («sto suonando io, ferma gli altri»),
+// «fermaAudioApp» è la richiesta esplicita di zittire, «pause» la capisce il
+// player — quindi si mandano tutti: chi non li conosce li ignora.
+function messaggiAlPlayerPrincipale(motivo) {
+  return (motivo === "ferma")
+    ? [{action: "fermaAudioApp"}, {action: "pause"}]
+    : [{action: "audioplaying"}, {action: "pause"}];
+}
+
+// Le finestre che possono avere il player: quella che ci ha aperto e, se diverso,
+// il parent (la verifica può finire dentro un iframe).
+function finestreCollegate() {
+  const fuori = [];
+  try { if (window.opener && window.opener !== window) fuori.push(window.opener); } catch (_) {}
+  try {
+    if (window.parent && window.parent !== window && fuori.indexOf(window.parent) < 0) fuori.push(window.parent);
+  } catch (_) {}
+  return fuori;
+}
+
+// Manda i messaggi alle finestre indicate (o a quelle collegate) e dice quante ne
+// ha avvisate: 0 = verifica aperta da sola, non c'è nessun player da fermare.
+function inviaAlPlayerPrincipale(motivo, finestre) {
+  const destinazioni = finestre || finestreCollegate();
+  const messaggi = messaggiAlPlayerPrincipale(motivo);
+  let inviati = 0;
+  destinazioni.forEach(w => messaggi.forEach(m => {
+    try { w.postMessage(m, "*"); inviati++; } catch (_) {}
+  }));
+  return inviati;
+}
+
+// Il pulsante nel header: ferma il player dell'app e lo conferma col colore.
+function fermaPlayerPrincipale() {
+  const quanti = inviaAlPlayerPrincipale("ferma");
+  const b = document.getElementById("btnFermaAudio");
+  if (b) {
+    b.classList.add("spento");
+    setTimeout(() => b.classList.remove("spento"), 1200);
+  }
+  return quanti;
+}
+
 // Funzione PURA: "1:07" da 67 secondi.
 function formattaTempo(secondi) {
   const s = Math.max(0, Math.floor(Number(secondi) || 0));
@@ -582,9 +693,12 @@ function creaPlayer(contenitoreId, dati) {
   const box = document.getElementById(contenitoreId);
   if (!box) return null;
   if (!dati || !dati.url) {
-    box.innerHTML = '<div class="vuoto">nessun audio salvato per questo confronto</div>';
+    svuotaPlayer(contenitoreId, '<div class="vuoto">nessun audio salvato per questo confronto</div>');
     return null;
   }
+  // Il player di questo contenitore è UNO: quello di prima si ferma QUI — un
+  // `new Audio` sostituito continuerebbe a suonare, senza più nessun comando.
+  dimenticaPlayer(playerPerBox[contenitoreId]);
   box.innerHTML =
     '<div class="player">' +
       '<div class="riga">' +
@@ -606,6 +720,7 @@ function creaPlayer(contenitoreId, dati) {
   const tempo = box.querySelector('[data-r="tempo"]');
   const bottone = box.querySelector('[data-r="play"]');
   let picchi = null;
+  let io = null;      // il player che questa funzione costruisce (si registra in fondo)
 
   function disegna() {
     const W = Math.max(160, canvas.clientWidth || 320), H = 56;
@@ -659,7 +774,19 @@ function creaPlayer(contenitoreId, dati) {
     disegna();
     if (!audio.paused && !audio.ended) requestAnimationFrame(anima);
   }
-  audio.addEventListener("play", () => { bottone.textContent = "⏸"; anima(); });
+  audio.addEventListener("play", () => {
+    bottone.textContent = "⏸";
+    // UN AUDIO PER VOLTA: gli altri player della pagina si fermano. Chi fa parte
+    // di un avvio di gruppo (pulsanti «▶ avvia …») resta, e il gruppo vale solo
+    // per questo giro: `compagni` si consuma qui.
+    const tenere = chiResta(playerVivi, io);
+    if (io) io.compagni = null;
+    fermaTuttiTranne(tenere);
+    // E si zittisce anche il player dell'app (vive in un'altra scheda, o nel tab
+    // Player della pagina principale): si ascolta una cosa sola.
+    inviaAlPlayerPrincipale("suono");
+    anima();
+  });
   audio.addEventListener("pause", () => { bottone.textContent = "▶"; disegna(); });
   audio.addEventListener("ended", () => { bottone.textContent = "▶"; disegna(); });
   audio.addEventListener("loadedmetadata", () => {
@@ -689,9 +816,10 @@ function creaPlayer(contenitoreId, dati) {
   });
   window.addEventListener("resize", disegna);
   disegna();
-  return {audio: audio, disegna: disegna, inizio: inizio,
-          ferma: function () { audio.pause(); audio.currentTime = inizio; disegna(); },
-          daCapo: function () { audio.pause(); audio.currentTime = inizio; return audio.play(); }};
+  io = {audio: audio, disegna: disegna, inizio: inizio,
+        ferma: function () { audio.pause(); audio.currentTime = inizio; disegna(); },
+        daCapo: function () { audio.pause(); audio.currentTime = inizio; return audio.play(); }};
+  return registraPlayer(contenitoreId, io);
 }
 
 function mostraConfronto(d) {
@@ -748,11 +876,11 @@ function mostraConfronto(d) {
                   creaPlayer("playerRiferimento", d.audio_riferimento)];
   } else {
     playerVoce = [creaPlayer("playerNostro", d.audio_nostro)];
-    document.getElementById("playerRiferimento").innerHTML =
+    svuotaPlayer("playerRiferimento",
       '<div class="vuoto">Il riferimento di questo confronto è il <b>testo</b>' +
       ' (le liriche di Genius), non un audio: qui non c\'è un secondo file da sentire.' +
       ' Il confronto fra due audio è nel pannello <b>4 · Confronto audio (impronta)' +
-      '</b>, più sotto.</div>';
+      '</b>, più sotto.</div>');
   }
 }
 
@@ -831,8 +959,8 @@ function mostraImpronta(d) {
   if (!imp) {
     nota.textContent = "nessun controllo audio su questa canzone — " + invito;
     numeri.innerHTML = "";
-    document.getElementById("playerImprontaNostro").innerHTML = "";
-    document.getElementById("playerImprontaAnteprima").innerHTML = "";
+    svuotaPlayer("playerImprontaNostro");
+    svuotaPlayer("playerImprontaAnteprima");
     playerImpronta = [];
     return;
   }
@@ -863,10 +991,18 @@ function mostraImpronta(d) {
   ];
 }
 
-// I player si possono sentire uno per volta (sono indipendenti): questi bottoni li
-// fanno partire insieme dal loro punto di casa (per il confronto audio: il nostro
-// dall'offset, l'anteprima da zero = lo stesso passaggio musicale).
-function avvia(player) { player.forEach(p => { if (p) p.daCapo().catch(() => {}); }); }
+// Questi bottoni fanno partire il GRUPPO insieme dal punto di casa di ognuno (per
+// il confronto audio: il nostro dall'offset, l'anteprima da zero = lo stesso
+// passaggio musicale): è l'unico caso in cui due player suonano insieme, e per
+// questo si segnano `compagni` — che il gestore del `play` consuma subito, così
+// dopo un ▶ singolo resta acceso un player solo. L'altro pannello si ferma
+// comunque: si ascolta un confronto alla volta.
+function avvia(player) {
+  const gruppo = player.filter(Boolean);
+  fermaTuttiTranne(gruppo);
+  gruppo.forEach(p => { p.compagni = gruppo; });
+  gruppo.forEach(p => { const avvio = p.daCapo(); if (avvio && avvio.catch) avvio.catch(() => {}); });
+}
 function ferma(player) { player.forEach(p => { if (p) p.ferma(); }); }
 function avviaEntrambi() { avvia(playerVoce); }
 function fermaEntrambi() { ferma(playerVoce); }

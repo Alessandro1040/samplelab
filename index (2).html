@@ -3598,6 +3598,9 @@ window.addEventListener('message', e => {
   else if(d.action === 'dbChanged'){ loadDb(); } // il player ha aggiunto brani → aggiorna il DB
   else if(d.action === 'openSampler'){ openInSampler(d.songId || d.local_file || ''); } // il player chiede il sampler FL-Studio
   else if(d.action === 'audioplaying'){ pauseAllScraperAudio(e.source); } // un editor embedded ha iniziato: ferma tutto il resto
+  // La pagina /verifica (aperta in un'altra scheda con window.open) chiede di
+  // zittire l'audio: qui non c'è nessuna eccezione, si ferma tutto.
+  else if(d.action === 'fermaAudioApp'){ pauseAllScraperAudio(null); }
 });
 
 // Un brano è stato rimosso dal player → lo elimina anche dal database (e dal file).

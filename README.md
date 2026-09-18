@@ -670,6 +670,62 @@ del player genera gli stessi comandi (e resta con 27 campi, come vuole il test
 dei modali), nessun errore JS; `/covers` 200 e `/cover/<file>` 404 sul file
 inesistente.
 
+## Un solo audio per volta nella Verifica — e il player dell'app da qui si zittisce — 18/09/2026
+
+Segnalato da Alessandro aprendo la scheda di *Control*: «l'audio principale può
+essere messo in background senza possibilità di toglierlo e questo è il primo
+problema, il secondo problema è che gli audio si sovrappongono: appena clicco play
+sulla versione acapella ad esempio dovrebbero fermarsi automaticamente tutti gli
+altri o quantomeno mettersi in pausa».
+
+Due cause vere, lette nel codice:
+
+1. **Il player sostituito restava vivo.** `creaPlayer()` costruisce un
+   `new Audio(url)` — un elemento che **suona anche fuori dal documento** — e
+   ridisegna il contenitore con `innerHTML`. Quando l'interruttore
+   **mix ↔ a cappella** (o la ricarica del pannello) ricostruiva il player, quello
+   di prima non veniva fermato: continuava a suonare in background **senza più
+   nessun comando**. È il «senza possibilità di toglierlo».
+2. **Nessun player sapeva degli altri.** I due pannelli (3 · confronto voce,
+   4 · confronto audio) creavano player indipendenti: il ▶ di uno non fermava
+   l'altro. E il **player dell'app** vive in un'altra scheda (la verifica si apre
+   con `window.open`), quindi non riceveva niente.
+
+Ora in `/verifica`:
+
+- un **registro dei player vivi** (`playerVivi`, `playerPerBox`): un contenitore
+  tiene **un player solo**, e sostituirlo **ferma** e dimentica il vecchio
+  (`dimenticaPlayer` / `svuotaPlayer`) — quello svuotato non risuona;
+- **un audio per volta**: al `play` di un player si fermano tutti gli altri
+  (`chiResta` + `fermaTuttiTranne`). L'unica eccezione è **voluta**: i pulsanti di
+  gruppo («▶ avvia», «▶ avvia i due dal punto allineato») fanno partire il loro
+  gruppo **insieme**, perché il confronto È ascoltare lo stesso passaggio su due
+  file — e quel `compagni` vale solo per quel giro (si consuma al primo `play`),
+  quindi dopo un ▶ singolo resta acceso un player solo;
+- **il player dell'app si zittisce da qui**: nel header c'è il pulsante
+  **⏹ ferma l'audio principale** (sempre visibile). Manda i messaggi alle finestre
+  che ci hanno aperto (`window.opener` e, se diverso, `window.parent`):
+  `{action:'fermaAudioApp'}` + `{action:'pause'}` per fermare, e
+  `{action:'audioplaying'}` + `{action:'pause'}` quando qui parte un audio, così si
+  ascolta una cosa sola. La pagina principale (`index (2).html`) risponde a
+  `fermaAudioApp` con `pauseAllScraperAudio(null)` (ferma player, iframe e preview
+  del DB) e ad `audioplaying` col suo gestore di sempre; il player `/onyx`, se è
+  lui ad aver aperto la verifica, capisce `pause`. Chi non conosce un messaggio lo
+  ignora: nessun endpoint nuovo e nessuna delle due pagine da riconfigurare.
+
+**Verifiche (18/09/2026):** `test_audio_match.py` → **6 test nuovi** in
+`TestUnAudioPerVolta` (le funzioni vere della pagina eseguite in JavaScriptCore con
+player finti: un ▶ ferma gli altri, il gruppo suona insieme ma `compagni` si
+consuma, il player sostituito si ferma e sparisce dal registro, i due dialetti dei
+messaggi, i casi limite — finestra chiusa, nessuna finestra collegata); in **Chrome
+vero headless** su *Control* (a cappella + file locale, **con l'audio che suona
+davvero**): a cappella in play → il player del pannello 4 è **in pausa**, e
+viceversa; a cappella in play → interruttore su «file locale (con la musica)» → **il
+vecchio è in pausa** (prima continuava in background); il pulsante ⏹ c'è ed è
+visibile; con la verifica aperta **da** `/?tab=database` la pagina principale ha
+fermato l'audio **due volte** (una per il ⏹, una perché qui è partito un audio) e
+nessun errore JS.
+
 ## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
@@ -795,6 +851,17 @@ Da tenere presente nelle sessioni di lavoro successive:
   controlla la **firma** del file (un `.jpg` che è una pagina HTML si rifiuta).
   Rotte: `GET /covers`, `POST/DELETE /db/songs/<id>/cover`. Dettagli nella sezione
   «La copertina: metterla o cambiarla dalla pagina».
+- **🔇 Un solo audio per volta nella Verifica (18/09/2026).** In `/verifica` il ▶ di
+  un player ferma tutti gli altri (eccezione **voluta**: i pulsanti di gruppo, che
+  fanno partire i due file insieme perché è quello il confronto) e il player
+  **sostituito** dall'interruttore mix ↔ a cappella non resta più a suonare in
+  background: era un `new Audio` senza più comandi («senza possibilità di
+  toglierlo», segnalato da Alessandro). Nel header c'è **⏹ ferma l'audio
+  principale**: manda `{action:'fermaAudioApp'}` (+ `pause`) alle finestre che
+  hanno aperto la verifica e la pagina principale risponde con
+  `pauseAllScraperAudio(null)`; quando qui parte un audio manda anche
+  `{action:'audioplaying'}`, così l'audio dell'app si zittisce da sé. Dettagli
+  nella sezione «Un solo audio per volta nella Verifica».
 - **⚠️ La suite completa, con l'app attiva, scrive sul database VERO.** Il 18/09/2026
   `python3 -m unittest discover -p 'test_*.py'` ha dato **436 test `OK`** ma ha anche
   aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`

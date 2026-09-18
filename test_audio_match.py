@@ -1057,6 +1057,170 @@ class TestConfrontoVoce(unittest.TestCase):
                       estrai_funzione_py(self.app_src, "conferma_audio"))
 
 
+@unittest.skipUnless(HA_OSASCRIPT, "JavaScriptCore (osascript) non disponibile")
+class TestUnAudioPerVolta(unittest.TestCase):
+    """Un solo audio per volta in `/verifica` — e il comando sul player dell'app
+    (18/09/2026).
+
+    Segnalato da Alessandro: «l'audio principale può essere messo in background
+    senza possibilità di toglierlo e questo è il primo problema, il secondo
+    problema è che gli audio si sovrappongono: appena clicco play sulla versione
+    acapella ad esempio dovrebbero fermarsi automaticamente tutti gli altri o
+    quantomeno mettersi in pausa». Due cause vere, entrambe nel codice: (1)
+    `creaPlayer` costruisce un `new Audio(…)`, che suona anche fuori dal
+    documento, quindi il player SOSTITUITO (ricarica del pannello, interruttore
+    mix ↔ a cappella) continuava a suonare in background senza più nessun
+    comando; (2) nessun player sapeva degli altri, e il player dell'app (che vive
+    in un'altra scheda, perché la verifica si apre con `window.open`) non riceveva
+    nulla. Qui si provano il registro dei player, la regola «uno per volta» (con
+    l'eccezione voluta dell'avvio di gruppo: il confronto È ascoltare lo stesso
+    passaggio su due file) e i messaggi verso la finestra che ci ha aperto.
+    """
+
+    def setUp(self):
+        self.verifica = leggi(VERIFICA_PATH)
+        self.index_src = leggi(INDEX_PATH)
+
+    def _esegui(self, extra, nome_file):
+        """Le funzioni VERE della pagina + un DOM finto (JavaScriptCore non ha DOM)
+        e i player finti che registrano chi si ferma."""
+        pezzi = ["var playerVivi = [];", "var playerPerBox = {};", "var fermati = [];",
+                 "function finto(nome){ return {nome:nome, ferma:function(){ fermati.push(this.nome); }}; }"]
+        for nome in ("chiResta", "fermaTuttiTranne", "dimenticaPlayer", "registraPlayer",
+                     "svuotaPlayer", "messaggiAlPlayerPrincipale", "finestreCollegate",
+                     "inviaAlPlayerPrincipale"):
+            pezzi.append(estrai_funzione(self.verifica, nome))
+        pezzi.append(extra)
+        return esegui_js("\n".join(pezzi) + "\n", nome_file)
+
+    def test_il_play_di_un_player_ferma_tutti_gli_altri(self):
+        d = self._esegui(
+            "var a = finto('voce'), b = finto('impronta');\n"
+            "registraPlayer('playerNostro', a); registraPlayer('playerImprontaNostro', b);\n"
+            "var out = {};\n"
+            "out.chi = chiResta(playerVivi, b).map(function(p){ return p.nome; });\n"
+            "fermaTuttiTranne(chiResta(playerVivi, b));\n"
+            "out.fermati = fermati.slice();\n"
+            "out.ancoraVivi = playerVivi.map(function(p){ return p.nome; });\n"
+            "fermati.length = 0;\n"
+            "out.senzaPartente = chiResta(playerVivi, null);\n"
+            "fermaTuttiTranne(chiResta(playerVivi, null));\n"
+            "out.fermatiSenzaPartente = fermati.slice();\n"
+            "JSON.stringify(out);", "/tmp/test_un_audio_per_volta.js")
+        self.assertEqual(d["chi"], ["impronta"])            # resta acceso solo quello
+        self.assertEqual(d["fermati"], ["voce"])            # l'altro si ferma
+        self.assertEqual(d["ancoraVivi"], ["voce", "impronta"])  # ... ma resta nel registro
+        self.assertEqual(d["senzaPartente"], [])
+        self.assertEqual(d["fermatiSenzaPartente"], ["voce", "impronta"])  # caso limite: si ferma tutto
+
+
+    def test_l_avvio_di_gruppo_suona_insieme_ma_vale_solo_per_quel_giro(self):
+        """«▶ avvia i due dal punto allineato» fa partire il gruppo insieme (è il
+        confronto); un ▶ singolo dopo ferma anche il compagno di gruppo."""
+        d = self._esegui(
+            "var a = finto('voce'), b = finto('impronta');\n"
+            "registraPlayer('playerNostro', a); registraPlayer('playerImprontaNostro', b);\n"
+            "a.compagni = [a, b];\n"
+            "var out = {};\n"
+            "out.chi = chiResta(playerVivi, a).map(function(p){ return p.nome; });\n"
+            "out.fermati = fermaTuttiTranne(chiResta(playerVivi, a));\n"
+            "fermati.length = 0;\n"
+            "a.compagni = null;                       // il gruppo si consuma al primo play\n"
+            "out.dopo = chiResta(playerVivi, a).map(function(p){ return p.nome; });\n"
+            "fermaTuttiTranne(chiResta(playerVivi, a));\n"
+            "out.fermatiDopo = fermati.slice();\n"
+            "JSON.stringify(out);", "/tmp/test_un_audio_gruppo.js")
+        self.assertEqual(d["chi"], ["voce", "impronta"])    # insieme
+        self.assertEqual(d["fermati"], [])                  # nessuno dei due si ferma
+        self.assertEqual(d["dopo"], ["voce"])               # poi uno per volta...
+        self.assertEqual(d["fermatiDopo"], ["impronta"])    # ...e il compagno si ferma
+
+    def test_il_player_sostituito_non_resta_a_suonare_in_background(self):
+        """Un `new Audio` sostituito continuerebbe a suonare senza comandi: il
+        contenitore ne tiene UNO e il vecchio si ferma (e si dimentica)."""
+        d = self._esegui(
+            "var box = {'playerNostro': {innerHTML: 'vecchio player'}};\n"
+            "globalThis.document = { getElementById: function(id){ return box[id] || null; } };\n"
+            "var vecchio = finto('vecchio');\n"
+            "registraPlayer('playerNostro', vecchio);\n"
+            "svuotaPlayer('playerNostro', '<div class=\"vuoto\">niente da sentire</div>');\n"
+            "var out = {};\n"
+            "out.fermati = fermati.slice();\n"
+            "out.vivi = playerVivi.length;\n"
+            "out.perBox = Object.keys(playerPerBox).length;\n"
+            "out.html = box['playerNostro'].innerHTML;\n"
+            "out.inesistente = svuotaPlayer('non_esiste', 'x');\n"
+            "JSON.stringify(out);", "/tmp/test_un_audio_sostituito.js")
+        self.assertEqual(d["fermati"], ["vecchio"])     # il player di prima si ferma
+        self.assertEqual(d["vivi"], 0)                  # e non resta nel registro
+        self.assertEqual(d["perBox"], 0)
+        self.assertIn("vuoto", d["html"])               # il contenitore è svuotato
+        self.assertIsNone(d["inesistente"])             # contenitore assente: nessun errore
+
+
+    def test_i_messaggi_per_il_player_dell_app(self):
+        """Chi ci ha aperto può essere la pagina principale o il player da solo:
+        ognuna capisce un messaggio diverso, quindi si mandano tutti e due."""
+        d = self._esegui(
+            "var visti = [];\n"
+            "var finestra = { postMessage: function(m){ visti.push(m.action); } };\n"
+            "function azioni(m){ return m.map(function(x){ return x.action; }); }\n"
+            "var out = {};\n"
+            "out.ferma = azioni(messaggiAlPlayerPrincipale('ferma'));\n"
+            "out.suono = azioni(messaggiAlPlayerPrincipale('suono'));\n"
+            "out.senzaMotivo = azioni(messaggiAlPlayerPrincipale());\n"
+            "out.inviati = inviaAlPlayerPrincipale('ferma', [finestra]);\n"
+            "out.visti = visti.slice();\n"
+            "out.rotto = inviaAlPlayerPrincipale('ferma',"
+            " [{postMessage: function(){ throw new Error('chiusa'); }}]);\n"
+            "out.zeroFinestre = inviaAlPlayerPrincipale('ferma', []);\n"
+            "out.zeroCollegate = inviaAlPlayerPrincipale('ferma', null);\n"
+            "JSON.stringify(out);", "/tmp/test_un_audio_messaggi.js")
+        self.assertEqual(d["ferma"], ["fermaAudioApp", "pause"])
+        self.assertEqual(d["suono"], ["audioplaying", "pause"])
+        self.assertEqual(d["senzaMotivo"], ["audioplaying", "pause"])   # default: sto suonando
+        self.assertEqual(d["inviati"], 2)                               # due dialetti, una finestra
+        self.assertEqual(d["visti"], ["fermaAudioApp", "pause"])
+        self.assertEqual(d["rotto"], 0)                                 # finestra morta: non esplode
+        self.assertLessEqual(d["zeroFinestre"], 0)                      # nulla da avvisare
+
+    def test_la_pagina_ferma_e_avvisa(self):
+        """Il cablaggio nei punti giusti: il gestore del `play`, i pulsanti di
+        gruppo e i pannelli svuotati non lasciano più audio acceso per conto suo."""
+        corpo = estrai_funzione(self.verifica, "creaPlayer")
+        self.assertIn("chiResta(playerVivi, io)", corpo)
+        self.assertIn("fermaTuttiTranne(tenere)", corpo)
+        self.assertIn('inviaAlPlayerPrincipale("suono")', corpo)
+        self.assertIn("io.compagni = null", corpo)
+        self.assertIn("dimenticaPlayer(playerPerBox[contenitoreId])", corpo)   # niente audio orfano
+        self.assertIn("return registraPlayer(contenitoreId, io)", corpo)
+        self.assertIn("svuotaPlayer(contenitoreId,", corpo)
+        avvia = estrai_funzione(self.verifica, "avvia")
+        self.assertIn("p.compagni = gruppo", avvia)
+        self.assertIn("fermaTuttiTranne(gruppo)", avvia)
+        impronta = estrai_funzione(self.verifica, "mostraImpronta")
+        self.assertIn('svuotaPlayer("playerImprontaNostro")', impronta)
+        self.assertIn('svuotaPlayer("playerImprontaAnteprima")', impronta)
+        confronto = estrai_funzione(self.verifica, "mostraConfronto")
+        self.assertIn('svuotaPlayer("playerRiferimento"', confronto)
+
+    def test_il_pulsante_per_zittare_l_audio_principale(self):
+        self.assertIn('id="btnFermaAudio"', self.verifica)
+        self.assertIn('onclick="fermaPlayerPrincipale()"', self.verifica)
+        self.assertIn(".ferma-audio{", self.verifica)
+        corpo = estrai_funzione(self.verifica, "fermaPlayerPrincipale")
+        self.assertIn('inviaAlPlayerPrincipale("ferma")', corpo)
+        # le due finestre possibili: quella che ci ha aperto e il parent
+        collegate = estrai_funzione(self.verifica, "finestreCollegate")
+        self.assertIn("window.opener", collegate)
+        self.assertIn("window.parent", collegate)
+        # la pagina principale risponde al messaggio fermando TUTTO (nessuna eccezione)…
+        self.assertIn("d.action === 'fermaAudioApp'", self.index_src)
+        self.assertIn("pauseAllScraperAudio(null)", self.index_src)
+        # …e il player aperto da solo (/onyx) capisce «pause», che è già suo
+        self.assertIn("d.action === 'pause'", leggi(ONYX_PATH))
+
+
 class TestProgressoVerifica(unittest.TestCase):
     """Il progresso TOTALE della verifica (0-100%) — 18/09/2026.
 
