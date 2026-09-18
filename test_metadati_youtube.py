@@ -41,6 +41,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import time
 import types
 import unittest
 import urllib.request
@@ -99,6 +100,13 @@ INFO = {
     "thumbnail": "https://i.ytimg.com/vi/IX7UWaSoVv0/maxresdefault.jpg",
     "duration": 236.4,
 }
+
+# PNG 1×1 valido (firma + IHDR + IDAT + IEND): è l'immagine che i test danno al
+# posto della miniatura, così la cover si prova senza andare in rete.
+PNG_DI_PROVA = bytes.fromhex(
+    "89504e470d0a1a0a0000000d494844520000000100000001080600000"
+    "01f15c4890000000a49444154789c63000100000500010d0a2db40000"
+    "000049454e44ae426082")
 
 
 class TestDataDaYt(unittest.TestCase):
@@ -382,10 +390,12 @@ class TestGiroDellaPlaylist(unittest.TestCase):
             for nome, voce in (
                 ("Artista Uno - Brano Uno [aaaaaaaaaaa].mp3",
                  {"id": "aaaaaaaaaaa", "upload_date": "20250915", "channel": "Canale Uno",
-                  "description": "descrizione uno", "view_count": 10}),
+                  "description": "descrizione uno", "view_count": 10,
+                  "thumbnail": "https://i.ytimg.com/vi/aaaaaaaaaaa/maxresdefault.jpg"}),
                 ("Artista Due - Brano Due [bbbbbbbbbbb].mp3",
                  {"id": "bbbbbbbbbbb", "upload_date": "20011103", "uploader": "Canale Due",
-                  "description": "descrizione due", "view_count": 20}),
+                  "description": "descrizione due", "view_count": 20,
+                  "thumbnail": "https://i.ytimg.com/vi/bbbbbbbbbbb/hqdefault.jpg"}),
             ):
                 with open(os.path.join(APP.DL_DIR, nome), "wb") as f:
                     f.write(b"audio" * 4)
@@ -396,16 +406,25 @@ class TestGiroDellaPlaylist(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="giro_playlist_prova_")
         self.db_originale, self.dl_originale, self.yt_originale = (
             APP.DB_PATH, APP.DL_DIR, APP.yt_dlp)
+        self.covers_originale, self.scarica_originale = (
+            APP.COVERS_DIR, APP._scarica_immagine)
         APP.DB_PATH = os.path.join(self.tmp, "samplelab di prova.db")
         APP.DL_DIR = os.path.join(self.tmp, "downloads")
+        APP.COVERS_DIR = os.path.join(self.tmp, "covers")
         os.makedirs(APP.DL_DIR, exist_ok=True)
+        os.makedirs(APP.COVERS_DIR, exist_ok=True)
+        # La copertina si prende dalla miniatura: `_scarica_immagine` è finta, così
+        # il test non va in rete (e non scrive nel `covers/` vero).
+        APP._scarica_immagine = lambda url, timeout=20: PNG_DI_PROVA
         APP.init_db()
         APP.yt_dlp = types.SimpleNamespace(YoutubeDL=self.FakeYDL)
         self.job = {}
 
     def tearDown(self):
-        APP.DB_PATH, APP.DL_DIR, APP.yt_dlp = (self.db_originale, self.dl_originale,
-                                               self.yt_originale)
+        (APP.DB_PATH, APP.DL_DIR, APP.yt_dlp,
+         APP.COVERS_DIR, APP._scarica_immagine) = (
+            self.db_originale, self.dl_originale, self.yt_originale,
+            self.covers_originale, self.scarica_originale)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def lancia(self, jid="job_di_prova"):
@@ -507,6 +526,38 @@ class TestGiroDellaPlaylist(unittest.TestCase):
             riga = conn.execute("SELECT local_file FROM songs WHERE id='song_uguale'").fetchone()
         self.assertEqual(riga["local_file"], "Artista Uno - Brano Uno [aaaaaaaaaaa].mp3")
 
+    def test_la_copertina_del_brano_viene_dalla_miniatura(self):
+        # 19/09/2026: la riga si portava dietro l'URL della miniatura
+        # (`yt_thumbnail`) ma in `covers/` non c'era nessuna immagine, quindi in
+        # pagina la canzone restava senza copertina. Ora la playlist la aggancia
+        # da sé, riga per riga, appena la riga nasce.
+        job = self.lancia()
+        self.assertEqual(job["status"], "done")
+        with APP.get_db() as conn:
+            righe = {r["title"]: r for r in conn.execute("SELECT * FROM songs")}
+        uno, due = righe["Brano Uno"], righe["Brano Due"]
+        # l'estensione si ricava dall'URL (maxresdefault.jpg / hqdefault.jpg)
+        self.assertEqual(uno["cover_art_path"], f"{uno['id']}.jpg")
+        self.assertEqual(due["cover_art_path"], f"{due['id']}.jpg")
+        self.assertTrue(os.path.exists(os.path.join(APP.COVERS_DIR, uno["cover_art_path"])))
+        self.assertTrue(os.path.exists(os.path.join(APP.COVERS_DIR, due["cover_art_path"])))
+
+    def test_la_copertina_scelta_a_mano_resta(self):
+        # Una riga che c'è già con una sua copertina NON si tocca: rifare la
+        # playlist non deve sostituire una copertina scelta a mano.
+        with APP.get_db() as conn:
+            conn.execute("INSERT INTO songs(id,title,artist,local_file,cover_art_path) "
+                         "VALUES(?,?,?,?,?)",
+                         ("song_cover", "Brano Uno", "Artista Uno",
+                          "un-altro-file.mp3", "song_cover.png"))
+        with open(os.path.join(APP.COVERS_DIR, "song_cover.png"), "wb") as f:
+            f.write(PNG_DI_PROVA)
+        job = self.lancia()
+        self.assertEqual(job["status"], "done")
+        with APP.get_db() as conn:
+            riga = conn.execute("SELECT cover_art_path FROM songs WHERE id='song_cover'").fetchone()
+        self.assertEqual(riga["cover_art_path"], "song_cover.png")
+
     def test_playlist_senza_data_niente_anno_ma_la_riga_si_crea(self):
         # yt-dlp può restituire voci senza `upload_date`/descrizione: le righe si
         # creano lo stesso, senza anno inventato.
@@ -528,6 +579,188 @@ class TestGiroDellaPlaylist(unittest.TestCase):
         self.assertEqual(r["title"], "Brano")
         self.assertIsNone(r["year"])
         self.assertEqual(r["yt_video_id"], "ccccccccccc")
+
+
+class TestArricchimentoDalVideo(unittest.TestCase):
+    """Un download non porta solo il file: la riga si completa DA SOLA (19/09/2026).
+
+    Il caso vero: su 945 canzoni, 890 non avevano nessun campo `yt_*`, la
+    copertina c'era su 17 e il VIDEO su 57. Causa: nel download singolo l'`info_dict`
+    di yt-dlp veniva buttato via (si salvava solo il nome del file) e la miniatura
+    restava un URL in tabella. Ora i dati del video restano nel job, la pagina li
+    passa a `/db/add_local` e da lì `arricchisci_riga_dal_video` scrive i campi,
+    aggancia la COPERTINA dalla miniatura e fa partire il VIDEO MP4.
+    """
+
+    class FakeYDL:
+        """yt-dlp finto: scrive il file e torna l'`info_dict` (nessuna rete)."""
+
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def prepare_filename(self, info):
+            richieste = (info or {}).get("requested_downloads") or []
+            if richieste and isinstance(richieste[0], dict):
+                return richieste[0].get("filepath") or ""
+            return ""
+
+        def extract_info(self, url, download=True):
+            video = "bestvideo" in str(self.opts.get("format") or "")
+            cartella = os.path.dirname(self.opts["outtmpl"])
+            nome = ("Fifty Cent - Window Shopper [IX7UWaSoVv0].mp4" if video
+                    else "Fifty Cent - Window Shopper [IX7UWaSoVv0].mp3")
+            percorso = os.path.join(cartella, nome)
+            with open(percorso, "wb") as f:
+                f.write(b"video" * 8 if video else b"audio" * 8)
+            info = dict(INFO)
+            info["webpage_url"] = "https://www.youtube.com/watch?v=IX7UWaSoVv0"
+            info["requested_downloads"] = [{"filepath": percorso}]
+            return info
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="arricchimento_video_prova_")
+        self.orig = (APP.DB_PATH, APP.DL_DIR, APP.VID_DIR, APP.COVERS_DIR,
+                     APP.TRASH_DIR, APP.yt_dlp, APP._scarica_immagine)
+        APP.DB_PATH = os.path.join(self.tmp, "samplelab di prova.db")
+        APP.DL_DIR = os.path.join(self.tmp, "downloads")
+        APP.VID_DIR = os.path.join(self.tmp, "videos")
+        APP.COVERS_DIR = os.path.join(self.tmp, "covers")
+        APP.TRASH_DIR = os.path.join(self.tmp, ".trash")
+        for cartella in (APP.DL_DIR, APP.VID_DIR, APP.COVERS_DIR, APP.TRASH_DIR):
+            os.makedirs(cartella, exist_ok=True)
+        APP.init_db()
+        APP.yt_dlp = types.SimpleNamespace(YoutubeDL=self.FakeYDL)
+        APP._scarica_immagine = lambda url, timeout=20: PNG_DI_PROVA   # niente rete
+        self.client = APP.app.test_client()
+
+    def tearDown(self):
+        (APP.DB_PATH, APP.DL_DIR, APP.VID_DIR, APP.COVERS_DIR, APP.TRASH_DIR,
+         APP.yt_dlp, APP._scarica_immagine) = self.orig
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def riga(self, sid):
+        with APP.get_db() as conn:
+            return conn.execute("SELECT * FROM songs WHERE id=?", (sid,)).fetchone()
+
+    def scrivi(self, sid, titolo, artista, **campi):
+        with APP.get_db() as conn:
+            colonne = ["id", "title", "artist"] + list(campi)
+            conn.execute("INSERT INTO songs(" + ", ".join(colonne) + ") VALUES(" +
+                         ", ".join(["?"] * len(colonne)) + ")",
+                         [sid, titolo, artista] + list(campi.values()))
+
+    def aspetta(self, condizione, secondi=15):
+        fine = time.time() + secondi
+        while time.time() < fine:
+            if condizione():
+                return True
+            time.sleep(0.1)
+        return condizione()
+
+    def test_il_download_lascia_i_metadati_nel_job_e_status_li_serve(self):
+        jid = "job_singolo"
+        APP.jobs[jid] = {"status": "pending", "progress": {}, "files": [],
+                         "filename": None, "yt_title": "", "error": ""}
+        APP.do_download(jid, "https://www.youtube.com/watch?v=IX7UWaSoVv0", "mp3")
+        job = APP.jobs[jid]
+        self.assertEqual(job["status"], "done")
+        # l'info_dict non si butta più via: tag, descrizione, canale, miniatura…
+        self.assertEqual(job["yt_meta"]["yt_video_id"], "IX7UWaSoVv0")
+        self.assertEqual(job["yt_meta"]["yt_tags"], "50 cent, hip hop, window shopper")
+        self.assertEqual(job["yt_meta"]["yt_channel"], "50 Cent")
+        self.assertEqual(job["yt_meta"]["yt_upload_date"], "2025-09-15")
+        self.assertEqual(job["yt_url"], "https://www.youtube.com/watch?v=IX7UWaSoVv0")
+        # …e `/status` li serve alla pagina così come sono (nessun endpoint nuovo)
+        corpo = self.client.get(f"/status/{jid}").get_json()
+        self.assertEqual(corpo["yt_meta"]["yt_tags"], "50 cent, hip hop, window shopper")
+        self.assertEqual(corpo["yt_url"], "https://www.youtube.com/watch?v=IX7UWaSoVv0")
+
+    def test_add_local_completa_la_riga_da_sola(self):
+        nome = "Fifty Cent - Window Shopper [IX7UWaSoVv0].mp3"
+        with open(os.path.join(APP.DL_DIR, nome), "wb") as f:
+            f.write(b"audio" * 8)
+        res = self.client.post("/db/add_local", json={
+            "filename": nome,
+            "yt_meta": APP.campi_youtube(INFO),
+            "youtube_url": "https://www.youtube.com/watch?v=IX7UWaSoVv0"})
+        corpo = res.get_json()
+        sid = corpo["id"]
+        # 1) i dati del video sono nella riga
+        self.assertEqual(corpo["title"], "Window Shopper")
+        self.assertEqual(corpo["artist"], "Fifty Cent")
+        self.assertEqual(corpo["yt_video_id"], "IX7UWaSoVv0")
+        self.assertEqual(corpo["yt_tags"], "50 cent, hip hop, window shopper")
+        self.assertIn("Official video", corpo["yt_description"])
+        self.assertEqual(corpo["yt_views"], 12345678)
+        self.assertEqual(corpo["year"], 2025)
+        # 2) la copertina arriva dalla miniatura (estensione dall'URL)
+        self.assertEqual(corpo["cover_art_path"], f"{sid}.jpg")
+        self.assertTrue(os.path.exists(os.path.join(APP.COVERS_DIR, f"{sid}.jpg")))
+        # 3) e il VIDEO MP4 parte da solo, dal link della riga
+        self.assertTrue(corpo["arricchimento"]["video_job"], corpo["arricchimento"])
+        self.assertTrue(self.aspetta(lambda: (self.riga(sid)["video_file"] or "") != ""),
+                        "il video non è stato agganciato alla riga")
+        self.assertEqual(self.riga(sid)["video_file"],
+                         "Fifty Cent - Window Shopper [IX7UWaSoVv0].mp4")
+        self.assertTrue(APP.file_video_valido(self.riga(sid)["video_file"]))
+
+    def test_senza_yt_meta_non_si_completa_niente(self):
+        # Un file che NON viene da un download YouTube (o una pagina vecchia che
+        # non manda `yt_meta`): si registra e basta — nessuna cover inventata e
+        # nessun video scaricato.
+        nome = "Artista - Brano Locale.mp3"
+        jobs_prima = set(APP.jobs)
+        res = self.client.post("/db/add_local", json={"filename": nome})
+        corpo = res.get_json()
+        self.assertNotIn("arricchimento", corpo)
+        self.assertIsNone(corpo["yt_video_id"])
+        self.assertIsNone(corpo["cover_art_path"])
+        self.assertEqual(os.listdir(APP.COVERS_DIR), [])
+        self.assertEqual(set(APP.jobs), jobs_prima)
+
+    def test_la_copertina_che_c_e_non_si_tocca(self):
+        self.scrivi("song_prova", "Brano", "Artista",
+                    cover_art_path="song_prova.png",
+                    yt_thumbnail="https://i.ytimg.com/vi/x/maxresdefault.jpg")
+        with open(os.path.join(APP.COVERS_DIR, "song_prova.png"), "wb") as f:
+            f.write(PNG_DI_PROVA)
+        nome, motivo = APP.copertina_da_miniatura("song_prova")
+        self.assertEqual(nome, "")
+        self.assertEqual(motivo, "la copertina c'era già")
+        self.assertEqual(self.riga("song_prova")["cover_art_path"], "song_prova.png")
+        # …ma a mano si può rifare (`forzato=True`), come fa il modale 📄
+        nome2, _ = APP.copertina_da_miniatura("song_prova", forzato=True)
+        self.assertEqual(nome2, "song_prova.jpg")
+
+    def test_senza_miniatura_lo_dice_e_non_scrive(self):
+        self.scrivi("song_prova", "Brano", "Artista")
+        self.assertEqual(APP.copertina_da_miniatura("song_prova"),
+                         ("", "nessuna miniatura da usare"))
+        self.assertEqual(APP.copertina_da_miniatura("song_fantasma"),
+                         ("", "riga non trovata"))
+        self.assertEqual(os.listdir(APP.COVERS_DIR), [])
+
+    def test_i_metadati_solo_delle_colonne_yt(self):
+        # `aggancia_metadati_youtube` non è una scorciatoia per scrivere su una
+        # colonna qualsiasi, e un valore vuoto non spegne quello che c'è: la
+        # miniatura non può diventare un modo per riscrivere `cover_art_path`.
+        self.scrivi("song_prova", "Brano", "Artista", yt_description="la vecchia")
+        scritto = APP.aggancia_metadati_youtube(
+            "song_prova", {"title": "HACK", "id": "HACK", "yt_description": "",
+                           "yt_channel": "Canale", "nsomma": "x"})
+        self.assertTrue(scritto)
+        r = self.riga("song_prova")
+        self.assertEqual(r["title"], "Brano")
+        self.assertEqual(r["id"], "song_prova")
+        self.assertEqual(r["yt_description"], "la vecchia")
+        self.assertEqual(r["yt_channel"], "Canale")
+        self.assertFalse(APP.aggancia_metadati_youtube("song_prova", {"nsomma": "x"}))
 
 
 class TestCablaggio(unittest.TestCase):
@@ -568,6 +801,33 @@ class TestCablaggio(unittest.TestCase):
         html = leggi(PAGINA_PATH)
         self.assertIn("j.con_anno", html)
         self.assertIn("j.con_metadati", html)
+
+    def test_il_download_lascia_i_metadati_nel_job(self):
+        # 19/09/2026: nel download SINGOLO l'info_dict di yt-dlp non si butta più
+        # via — resta scritto nel job e `/status` lo serve alla pagina.
+        src = leggi(APP_PATH)
+        self.assertIn('jobs[job_id]["yt_meta"] = campi', src)
+        self.assertIn('jobs[job_id]["yt_url"] = (info or {}).get("webpage_url") or url', src)
+        self.assertIn("def aggancia_metadati_youtube(song_id, campi):", src)
+        self.assertIn("def copertina_da_miniatura(song_id, url=None, forzato=False):", src)
+        self.assertIn("def arricchisci_riga_dal_video(song_id, campi=None, video=True):", src)
+
+    def test_il_download_di_una_riga_si_completa_da_solo(self):
+        src = leggi(APP_PATH)
+        # il download di una riga (⬇ Scarica / «➕ Aggiungi» senza file)…
+        self.assertIn('esito = arricchisci_riga_dal_video(song_id, job.get("yt_meta"))', src)
+        # …il download dal modale (file appena scaricato)…
+        self.assertIn("arricchimento = arricchisci_riga_dal_video(sid, campi) if campi else None", src)
+        self.assertIn('s["arricchimento"] = arricchimento', src)
+        # …e la playlist, che la copertina la aggancia riga per riga.
+        self.assertIn('copertina_da_miniatura(sid, campi.get("yt_thumbnail"))', src)
+
+    def test_la_pagina_passa_metadati_e_link(self):
+        html = leggi(PAGINA_PATH)
+        self.assertIn("async function addToDb(filename, ytMeta, ytUrl){", html)
+        self.assertIn("corpo.yt_meta=ytMeta;", html)
+        self.assertIn("corpo.youtube_url=ytUrl;", html)
+        self.assertIn("await addToDb(j.filename, j.yt_meta, j.yt_url);", html)
 
 
 class TestAppViva(unittest.TestCase):

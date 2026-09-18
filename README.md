@@ -682,6 +682,76 @@ del player genera gli stessi comandi (e resta con 27 campi, come vuole il test
 dei modali), nessun errore JS; `/covers` 200 e `/cover/<file>` 404 sul file
 inesistente.
 
+## Metadati, copertina e VIDEO: dal download alla riga completa — 19/09/2026
+
+Su 945 canzoni la libreria era così: **890 senza nessun campo `yt_*`**, la
+**copertina su 17**, il **VIDEO su 57**. Non era un caso: i dati del video
+YouTube li salvava **solo la playlist**.
+
+Le tre cause, lette nel codice:
+
+1. `campi_youtube(info)` (riga ~1091) legge id, data di caricamento e di uscita,
+   canale, descrizione, tag, categoria, miniatura, viste/like/commenti e durata…
+   ma la chiamava **solo** `mappa_metadati_playlist`, cioè **solo**
+   `do_download_playlist` → `register_local_file`.
+2. Nel **download singolo** (`_do_download`) l'`info_dict` di yt-dlp **veniva
+   buttato via**: si usava solo `prepare_filename` per il nome del file. La riga
+   la creava poi la pagina con `POST /db/add_local`, mandando solo titolo, artista
+   e nome del file.
+3. L'**artista non è mai stato preso da YouTube**: `register_local_file` lo ricava
+   dal **nome del file** (split su `" - "`); il canale finiva in `yt_channel`, e i
+   campi yt-dlp `artist`/`track`/`album` non si leggevano affatto.
+
+E due cose non c'erano proprio: il **video** si scaricava solo a mano (pulsante
+🎬 Video) o con l'opzione 🎬 della playlist, e la **miniatura restava un URL** in
+tabella (`yt_thumbnail`): il file in `covers/` nasceva solo dal modale
+«🎬 Dal video» o da Genius durante la Verifica.
+
+Cosa fa ora un download (solo i download **nuovi**: le righe che ci sono già non
+si toccano, non c'è nessun recupero in blocco):
+
+| dove | cosa succede |
+|---|---|
+| `_do_download` | l'`info_dict` **non si butta più via**: `jobs[jid]["yt_meta"]` e `jobs[jid]["yt_url"]` (il link del video davvero scaricato). `/status` restituisce già tutto il job, quindi i dati arrivano alla pagina **senza endpoint nuovi** |
+| `index (2).html` | `dbAddSong` → `/status` → `addToDb(j.filename, j.yt_meta, j.yt_url)`: il payload di `/db/add_local` porta `yt_meta` + `youtube_url` |
+| `POST /db/add_local` | `yt_meta` entra nella riga (`extra`, quindi solo le colonne di `CAMPI_YOUTUBE`, `year` solo se vuoto) e poi chiama l'arricchimento. **Senza** `yt_meta` (file caricato dal computer, pagine vecchie) si registra e basta: nessun download |
+| `avvia_download_canzone` (⬇ Scarica, «➕ Aggiungi» senza file) | dopo aver agganciato l'audio: scrive il link del video se manca e arricchisce la riga |
+| `do_download_playlist` | come prima per metadati e MP4 (opzione 🎬) e **adesso anche la copertina**, riga per riga |
+
+L'arricchimento è **una funzione sola** (`arricchisci_riga_dal_video`, con
+`aggancia_metadati_youtube` e `copertina_da_miniatura`): scrive i campi `yt_*`,
+mette la **copertina** in `covers/<id>.<ext>` (estensione dall'URL della
+miniatura: `…/maxresdefault.jpg` → `jpg`) e fa partire il **VIDEO MP4** in
+`videos/` con `avvia_download_video_canzone`, che parte dal **link o dall'id
+scritto nella riga** — mai una ricerca per artista+titolo (18/09/2026: «Public
+Enemy» era finito con «Public Enemy #1»).
+
+Tre regole che il codice difende (e i test verificano):
+
+- **niente si calpesta**: un campo vuoto non spegne quello che c'era, una
+  **copertina già scelta a mano resta** (`copertina_da_miniatura` esce con «la
+  copertina c'era già»), un video già agganciato non si riscarica;
+- **nessun download a sorpresa**: se la riga non ha né link né id del video
+  (o il file non viene da YouTube) non parte niente;
+- il nome del file di copertina **si scrive anche in tabella**
+  (`cover_art_path`): `salva_copertina_bytes` da sola scrive solo il file — è il
+  bug trovato da questi test (la cover c'era su disco e in pagina non si vedeva).
+
+⚠️ Restano fuori i brani **già** in libreria prima di oggi: per quelli i dati si
+recuperano a mano (🎬 Video, «📁 Copertine in covers/», Verifica) o rifacendo il
+download. Un recupero in blocco sono centinaia di MP4 (GB) e resta una decisione
+da prendere.
+
+**Verifiche (19/09/2026):** 11 test nuovi in `test_metadati_youtube.py` (52 `OK`,
+erano 41): il job porta i metadati e `/status` li serve, `/db/add_local` scrive i
+campi e aggancia **cover e video** (`FakeYDL`, database/`downloads/`/`videos/`/
+`covers/` temporanei, miniatura finta: nessuna rete), senza `yt_meta` non si
+completa niente, una copertina esistente non si tocca, i campi fuori lista
+(`title`, `cover_art_path`…) non arrivano nell'SQL, la playlist aggancia la
+copertina dalla miniatura e `copertina_da_miniatura` non scrive file quando non
+c'è niente da scaricare; `test_cover_canzone.py` + `test_video_canzone.py` 56 `OK`
+(le strade a mano restano quelle di prima); suite completa **616 → 627 `OK`**.
+
 ## Un solo audio per volta nella Verifica — e il player dell'app da qui si zittisce — 18/09/2026
 
 Segnalato da Alessandro aprendo la scheda di *Control*: «l'audio principale può
@@ -738,9 +808,32 @@ visibile; con la verifica aperta **da** `/?tab=database` la pagina principale ha
 fermato l'audio **due volte** (una per il ⏹, una perché qui è partito un audio) e
 nessun errore JS.
 
-## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
+## Note operative e stato corrente (11/09/2026, aggiornate al 19/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
+
+- **Stato al 19/09/2026 (fine sessione).** Un download **nuovo** non porta più solo
+  il file: la riga nasce coi dati del video YouTube (tag, descrizione, canale,
+  viste, data di caricamento), con la **copertina** presa dalla miniatura e col
+  **VIDEO MP4** che parte da solo (vedi la sezione *Metadati, copertina e VIDEO:
+  dal download alla riga completa*). Vale per il download dal modale «➕ Aggiungi»
+  (`/db/add_local` con `yt_meta`), per ⬇ Scarica di una riga
+  (`avvia_download_canzone`) e per la playlist. Le righe **già** in libreria non si
+  toccano: niente recupero in blocco (sarebbero centinaia di MP4).
+  ⚠️ Un download adesso **scarica due file** (audio + MP4): è voluto, ma su una
+  playlist lunga si sente — e se il video non è scaricabile il file audio c'è
+  comunque (l'errore del video resta scritto nel suo job).
+- **Regola di lavoro di ogni sessione.** Dopo **ogni** modifica ai sorgenti:
+  riavviare l'app (è l'unica copia: non c'è una copia di lavoro separata dal
+  clone), controllare il log di avvio, provare con `curl` le rotte toccate e le
+  pagine `/`, `/browse`, `/onyx`, `/verifica`, `/scheda`, fare un **backup** di
+  `samplelab (2).db` prima di qualsiasi prova che scriva (i test scrivono verdetti
+  sul DB vero), poi `git diff` per controllare che ci sia **solo** il previsto
+  (mai `app.py`/`index.html`/`samplelab.db` legacy, mai `cookies.txt` completo,
+  mai `downloads/` `stems/` `videos/` `covers/` `.trash/` `__pycache__/`) e infine
+  commit + push su `main` con messaggio in italiano
+  (`SampleLab: <cosa> — <dettaglio>; <verifiche fatte>`). Il database binario si
+  committa **solo** se la modifica dei dati è voluta.
 
 - **Cartella di lavoro = clone git.** Qui **non** esiste una copia di lavoro
   separata dal repository: si lavora direttamente in

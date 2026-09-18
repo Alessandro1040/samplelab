@@ -4957,9 +4957,22 @@ document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="inp-t
 
 // ════════════════════════════════════════════════════════════
 
-async function addToDb(filename){
-  const res=await fetch('/db/add_local',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename})}).then(r=>r.json());
-  if(res.id){alert(`✓ "${res.title}" aggiunto al database`);loadDb()}}
+// `ytMeta`/`ytUrl` (19/09/2026): i dati del video YouTube che ha prodotto questo
+// file, presi da /status/<job> (`yt_meta`/`yt_url`). Con quelli la riga nasce
+// completa — data di caricamento, canale, tag, descrizione, viste — e il backend
+// le aggancia da sé la COPERTINA dalla miniatura e il VIDEO MP4
+// (`arricchisci_riga_dal_video`). Senza (file caricato dal computer) si registra
+// e basta: nessun download.
+async function addToDb(filename, ytMeta, ytUrl){
+  const corpo={filename};
+  if(ytMeta && typeof ytMeta==='object') corpo.yt_meta=ytMeta;
+  if(ytUrl) corpo.youtube_url=ytUrl;
+  const res=await fetch('/db/add_local',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corpo)}).then(r=>r.json());
+  if(res.id){
+    const a=res.arricchimento||{};
+    const extra=[a.metadati?'🏷 dati del video':null, a.cover?(a.cover.startsWith('🖼')?'🖼 cover':`⚠️ ${a.cover}`):null, a.video_job?'🎬 video in download':null].filter(Boolean).join(' · ');
+    alert(`✓ "${res.title}" aggiunto al database${extra?`\n${extra}`:''}`);
+    loadDb()}}
 
 // ════════════════════════════════════════════════════════════
 // DATABASE TAB
@@ -6020,8 +6033,10 @@ async function dbAddSong(){
     if(j.status==='done'){
       clearInterval(poll);
       status.textContent=`✓ "${j.filename||'file'}" scaricato`;
-      // Registra subito la canzone nel database così compare in lista
-      await addToDb(j.filename);
+      // Registra subito la canzone nel database così compare in lista. I dati
+      // del video (`yt_meta`) e il link si passano al backend: la riga nasce
+      // completa e da sé prende cover e VIDEO (19/09/2026).
+      await addToDb(j.filename, j.yt_meta, j.yt_url);
       loadDb();
       ['db-add-artist','db-add-title','db-add-yt'].forEach(id=>document.getElementById(id).value='');
     }

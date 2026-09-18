@@ -2215,7 +2215,15 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
 
         def _attempt_download(url):
             """Un giro di download (3 tentativi). Ritorna il nome del file creato
-            da yt-dlp (percorso reale, non un file qualsiasi della cartella), o None."""
+            da yt-dlp (percorso reale, non un file qualsiasi della cartella), o None.
+
+            19/09/2026 — l'`info_dict` NON si butta più via. Il video racconta
+            canale, tag, descrizione, viste e miniatura (`campi_youtube`) e quei
+            dati restano scritti NEL JOB: `/status` li serve alla pagina, che li
+            passa a `/db/add_local`, e da lì la riga nasce completa (vedi
+            `arricchisci_riga_dal_video`). Prima si salvava solo `prepare_filename`
+            e i metadati finivano nel cestino: 890 righe su 945 senza niente.
+            """
             for attempt in range(1, 4):
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -2225,6 +2233,10 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
                         if requested and requested[0].get("filepath"):
                             prepared = requested[0]["filepath"]
                         name = os.path.basename(prepared) if prepared else None
+                        campi = campi_youtube(info)
+                        if campi:
+                            jobs[job_id]["yt_meta"] = campi
+                            jobs[job_id]["yt_url"] = (info or {}).get("webpage_url") or url
                     if name and os.path.exists(os.path.join(cartella, name)):
                         return name
                 except Exception as e:
@@ -2384,7 +2396,8 @@ def avvia_download_canzone(song_id, forzato=False):
         try:
             do_download(jid, query, "mp3", "192", s.get("title") or "",
                         s.get("artist") or "", 0)
-            nome = (jobs.get(jid) or {}).get("filename")
+            job = jobs.get(jid) or {}
+            nome = job.get("filename")
             if nome:
                 # Il file va su QUESTA riga: nessuna riga nuova, nessun doppione.
                 with get_db() as conn:
@@ -2395,6 +2408,19 @@ def avvia_download_canzone(song_id, forzato=False):
                         "WHERE id=?",
                         (nome, query if is_youtube_url(query) else "", song_id))
                 print(f"[db {song_id}] file locale agganciato alla riga: {nome}")
+                # Il download porta anche il RESTO (19/09/2026): i dati del video
+                # YouTube, la copertina dalla miniatura e il VIDEO MP4. Il link
+                # vero del video scaricato si scrive sulla riga se non c'è: è da
+                # lì (o dall'id) che il video si riprende, mai per ricerca.
+                url_video = (job.get("yt_url") or "").strip()
+                if url_video and is_youtube_url(url_video):
+                    with get_db() as conn:
+                        conn.execute("UPDATE songs SET youtube_url=?, "
+                                     "updated_at=datetime('now') WHERE id=? "
+                                     "AND (youtube_url IS NULL OR youtube_url='')",
+                                     (url_video, song_id))
+                esito = arricchisci_riga_dal_video(song_id, job.get("yt_meta"))
+                print(f"[db {song_id}] arricchita dal video: {esito}")
             else:
                 print(f"[db {song_id}] download non riuscito: "
                       f"{(jobs.get(jid) or {}).get('error', '')}")
@@ -2563,6 +2589,96 @@ def _sposta_video_in_archivio(nome, origine=None):
     return dest_name
 
 
+# ── DAL VIDEO AL RESTO DELLA RIGA (19/09/2026) ────────────────────────────────
+# Un download porta con sé MOLTO più del file audio: il video racconta il canale,
+# i tag, la descrizione, le viste, la data di caricamento e ha la sua miniatura
+# (`campi_youtube`). Fino a ieri quei dati arrivavano alla riga **solo** passando
+# da una playlist, e la miniatura restava un URL: su 945 canzoni, 890 non avevano
+# nemmeno un campo `yt_*`, la copertina c'era su 17 e il VIDEO su 57.
+# Da oggi la riga appena nata da un download si completa DA SOLA, e il lavoro sta
+# in UN posto solo: lo usano il download di una riga (`avvia_download_canzone`),
+# il download dal modale «➕ Aggiungi» (`/db/add_local`) e la playlist.
+def aggancia_metadati_youtube(song_id, campi):
+    """Scrive sulla riga i campi `yt_*` del video (solo quelli con un valore).
+
+    Stessa regola di `resolve_or_create_song`: si accettano SOLO le colonne di
+    `CAMPI_YOUTUBE` (un nome fuori lista si ignora) e un campo vuoto non spegne
+    quello che c'era. Ritorna True se c'era qualcosa da scrivere.
+    """
+    campi = {k: v for k, v in (campi or {}).items()
+             if k in CAMPI_YOUTUBE_NOMI and v is not None and str(v).strip() != ""}
+    if not campi:
+        return False
+    with get_db() as conn:
+        conn.execute("UPDATE songs SET " + ", ".join(f"{k}=?" for k in campi) +
+                     ", updated_at=datetime('now') WHERE id=?",
+                     (*campi.values(), song_id))
+    return True
+
+
+def copertina_da_miniatura(song_id, url=None, forzato=False):
+    """Mette in `covers/<id>.<ext>` la MINIATURA del video YouTube. Ritorna
+    `(nome_file|"", motivo)`.
+
+    La miniatura è l'unica immagine che abbiamo di certo per un brano appena
+    scaricato (`yt_thumbnail`, da `campi_youtube`). Se la riga ha già una
+    copertina **non si tocca** (a meno di `forzato=True`): una copertina scelta a
+    mano vale più di una miniatura. L'URL si prende da `url` o, se non c'è, dalla
+    colonna `yt_thumbnail` della riga.
+
+    Il file va in `covers/<id>.<ext>` E il nome si scrive nella riga
+    (`cover_art_path`): `salva_copertina_bytes` da sola scrive solo il file, e
+    senza la colonna la copertina non si vedrebbe in pagina.
+    """
+    with get_db() as conn:
+        riga = row2dict(conn.execute(
+            "SELECT cover_art_path, yt_thumbnail FROM songs WHERE id=?",
+            (song_id,)).fetchone())
+    if not riga:
+        return "", "riga non trovata"
+    if not forzato and not _cover_mancante(riga.get("cover_art_path")):
+        return "", "la copertina c'era già"
+    url = url or (riga.get("yt_thumbnail") or "").strip()
+    if not url:
+        return "", "nessuna miniatura da usare"
+    try:
+        dati = _scarica_immagine(url)
+    except Exception as e:
+        return "", f"miniatura non scaricabile ({str(e)[:60]})"
+    if not dati:
+        return "", "miniatura non scaricabile"
+    nome, errore = salva_copertina_bytes(song_id, dati, _cover_ext_from_url(url))
+    if errore:
+        return "", errore
+    with get_db() as conn:
+        conn.execute("UPDATE songs SET cover_art_path=?, updated_at=datetime('now') "
+                     "WHERE id=?", (nome, song_id))
+    return nome, f"🖼 Copertina dalla miniatura del video: {nome}"
+
+
+def arricchisci_riga_dal_video(song_id, campi=None, video=True):
+    """La riga nata da un download si completa DA SOLA dal video.
+
+    Tre passi, tutti già pronti altrove: i campi `yt_*`
+    (`aggancia_metadati_youtube`), la copertina dalla miniatura
+    (`copertina_da_miniatura`) e il VIDEO MP4 (`avvia_download_video_canzone`,
+    che parte dal link o dall'id della riga appena scritto — mai una ricerca a
+    caso). Niente viene calpestato: i campi vuoti non spengono quelli che c'erano,
+    la copertina esistente resta, un video già agganciato non si riscarica.
+
+    Ritorna il resoconto di cosa è stato fatto (la pagina lo mostra):
+    `{"metadati":…, "cover":…, "video_job":…, "video_motivo":…}`.
+    """
+    res = {"metadati": "", "cover": "", "video_job": "", "video_motivo": ""}
+    if aggancia_metadati_youtube(song_id, campi):
+        res["metadati"] = "dati del video YouTube scritti nella riga"
+    nome, motivo = copertina_da_miniatura(song_id, (campi or {}).get("yt_thumbnail"))
+    res["cover"] = nome or motivo
+    if video:
+        res["video_job"], res["video_motivo"] = avvia_download_video_canzone(song_id)
+    return res
+
+
 def do_download_playlist(job_id, url, fmt="mp3", video=False):
     """Scarica TUTTA la playlist. Con `video=True` (18/09/2026) scarica l'MP4 del
     video, lo archivia in `videos/` e ne ricava l'mp3 da ascoltare in libreria:
@@ -2710,6 +2826,11 @@ def do_download_playlist(job_id, url, fmt="mp3", video=False):
             if sid:
                 registered += 1
                 id_con_audio.add(vid)
+                # La copertina si prende dalla MINIATURA del video (19/09/2026): la
+                # riga aveva l'URL (`yt_thumbnail`) ma in `covers/` non c'era
+                # niente, così in pagina la canzone restava senza immagine. Una
+                # copertina già scelta a mano non si tocca.
+                copertina_da_miniatura(sid, campi.get("yt_thumbnail"))
                 if campi.get("year"):
                     con_anno += 1
                 if sid in prima:
@@ -4367,6 +4488,9 @@ def db_song_set_cover(song_id):
     else:
         data = request.json or {}
         if data.get("da") == "youtube":
+            # Gemella automatica di questa strada: `copertina_da_miniatura()`
+            # (19/09/2026), usata dal download per completare la riga da sé. Qui
+            # però si è a mano, quindi si può anche RIFARE la copertina (`forzato`).
             url = (s.get("yt_thumbnail") or "").strip()
             if not url:
                 return jsonify({"error": "Questa canzone non ha la miniatura del video "
@@ -6140,18 +6264,40 @@ def move_field():
 # ── DB: ADD FROM FILE (upload) ────────────────────────────────────────────────
 @app.route("/db/add_local", methods=["POST"])
 def add_local_file():
-    """Register a local file in the DB (after user uploads/selects it)"""
+    """Register a local file in the DB (after user uploads/selects it).
+
+    `yt_meta` (19/09/2026): i dati del video YouTube che ha prodotto questo file.
+    La pagina li prende da `/status/<job>` — l'`info_dict` di yt-dlp resta scritto
+    nel job (vedi `_do_download`) — e con quelli la riga nasce già con data di
+    caricamento, canale, tag, descrizione, viste e miniatura; poi si completa DA
+    SOLA dal video: copertina dalla miniatura e VIDEO MP4
+    (`arricchisci_riga_dal_video`). `youtube_url` è il LINK del video scaricato.
+
+    Senza `yt_meta` (un file caricato dal computer, o le pagine vecchie) il
+    comportamento è quello di sempre: si registra e basta, nessun download.
+    """
     data = request.json or {}
     filename = data.get("filename", "").strip()
     if not filename:
         return jsonify({"error": "filename richiesto"}), 400
+    campi = data.get("yt_meta") if isinstance(data.get("yt_meta"), dict) else None
+    url = (data.get("youtube_url") or "").strip()
+    if not is_youtube_url(url):
+        url = ""
     raw = clean_filename(filename)
     parts = raw.split(" - ", 1)
     artist = parts[0].strip() if len(parts) == 2 else ""
     title = parts[1].strip() if len(parts) == 2 else raw
     with get_db() as conn:
-        sid = get_or_create_song_db(conn, title, artist, local_file=filename)
+        sid = get_or_create_song_db(conn, title, artist, url, local_file=filename,
+                                    extra=campi)
+    arricchimento = arricchisci_riga_dal_video(sid, campi) if campi else None
+    # La riga si rilegge DOPO l'arricchimento: così nella risposta si vedono i
+    # campi e la copertina appena scritti (la pagina li mostra).
+    with get_db() as conn:
         s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (sid,)).fetchone())
+    if arricchimento:
+        s["arricchimento"] = arricchimento
     return jsonify(s)
 
 # ── DB: ADD FROM ONYX PLAYER ──────────────────────────────────────────────────
