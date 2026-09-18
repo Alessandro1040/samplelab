@@ -1763,6 +1763,28 @@ Da tenere presente nelle sessioni di lavoro successive:
   oggettivo: su un brano strumentale non c'è niente da trascrivere → verdetto
   "non verificabile". Va quindi progettata come **secondo parere** con campo suo
   (es. `testo_esito`), soglia conservativa e degradazione pulita se il modello non c'è.
+  **Misure su 4 righe VERE della libreria (18/09/2026, modello `small`, VAD spento,
+  soglie "non parlato" disattivate):** *Get Up* (50 Cent, 200,1 s) 294 parole ascoltate
+  in 21,1 s → **77,9%** delle parole ascoltate sono nelle SUE liriche (0,7-14,3% in
+  quelle degli altri tre brani); *Simon Says (Freestyle)* (Hopsin, 112,7 s) 179 parole
+  in 14,3 s → **76,6%** (0,0-16,3% fuori); *ANTIPATICO* (Salmo, 117,3 s, **italiano**
+  riconosciuto da solo) 246 parole in 21,1 s → **68,8%** (1,5-2,0% fuori); *Havana*
+  (liriche **portoghesi** di una pagina di traduzioni su audio inglese, 218,6 s) 198
+  parole in 60,8 s → **10,9%**, cioè il metodo dice correttamente che quelle parole non
+  si cantano. Una soglia dell'ordine del **40%** separa i tre casi buoni (68,8-77,9%)
+  dal rumore (≤16,3%). ⚠️ **Le impostazioni contano più del metodo**: con il modello
+  `base` e il VAD attivo (il default di `faster-whisper`) *Get Up* rendeva **18 parole**
+  in 3 s e *Havana* **3 parole** in 1 s (VAD che scarta la musica) — quindi nessun
+  verdetto possibile; con `base` e VAD spento *Havana* andava in **allucinazione** a
+  loop («Hey! Hey! Hey!…»). Da qui le regole per un'implementazione seria: modello
+  `small` (o più grande), `vad_filter=False`,
+  `no_speech_threshold=None`/`log_prob_threshold=None`,
+  `condition_on_previous_text=False`, **guardia sul numero di parole** (sotto ~100
+  parole, o ~0,5 parole/secondo, il verdetto deve restare "non verificabile": *Havana*
+  ne ha 0,9/s ed è al limite), metrica **unidirezionale** (le parole ascoltate sono nel
+  testo, con stopword tolte) e soglie 40% / 15% per confermato / non confermato.
+  Costo: ≈1,5 GB di wheel + modello (145-480 MB) e **20-70 s di CPU per brano**
+  (`small`) — accettabile sul pulsante di una riga, ~10-15 h su tutte le 890.
 
 
 
