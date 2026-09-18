@@ -2708,7 +2708,14 @@ async function analyzeTrack(trackId) {
     }, 1500);
 
     // ══ CHIAMA LA STESSA FUNZIONE DI "VERIFICA" ══
-    const res = await fetch(`/db/songs/${dbId}/verify`, { method: 'POST' }).then(r => r.json());
+    // «Analizza tutto» = verifica COMPLETA di ogni brano (richiesta di Alessandro,
+    // 18/09/2026: «tutte queste cose per ogni canzone»): `tutto: true` accende
+    // audio + voce (Whisper) + separazione della voce (a cappella, demucs), come
+    // le caselle della pagina /verifica. ⚠️ demucs 1-3 min + Whisper 20-70 s per brano.
+    const res = await fetch(`/db/songs/${dbId}/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tutto: true }),
+    }).then(r => r.json());
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     if (!res.song) {
       if (!isAnalyzingAll) alert('❌ ' + (res.error || 'Errore durante la verifica'));

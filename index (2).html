@@ -5255,7 +5255,16 @@ async function verifySong(id) {
     window._verifyPollTimer = pollTimer;
   }
   try {
-    const resp = await fetch(`/db/songs/${id}/verify`, { method: 'POST' });
+    // «Verifica tutto» fa il lavoro COMPLETO su ogni canzone (richiesta di
+    // Alessandro, 18/09/2026: «tutte queste cose per ogni canzone»): `tutto: true`
+    // accende audio + voce (Whisper) + separazione della voce (a cappella, demucs)
+    // — le stesse caselle della pagina /verifica, che ora nascono già spuntate.
+    // ⚠️ Costa: demucs 1-3 min + Whisper 20-70 s PER BRANO.
+    const resp = await fetch(`/db/songs/${id}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tutto: true }),
+    });
     let res = null;
     try { res = await resp.json(); } catch (_) { /* corpo non-JSON */ }
     stopPolling();

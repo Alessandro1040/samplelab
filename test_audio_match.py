@@ -1221,6 +1221,82 @@ class TestUnAudioPerVolta(unittest.TestCase):
         self.assertIn("d.action === 'pause'", leggi(ONYX_PATH))
 
 
+class TestVerificaTutto(unittest.TestCase):
+    """«Verifica tutto» / «Analizza tutto» = verifica COMPLETA di ogni canzone —
+    18/09/2026.
+
+    Richiesta di Alessandro: «lascia preimpostato 🗣 Controlla voce … e 🎤 Prima
+    separa la voce (a cappella, demucs) e poi fai in modo che "analizza tutto"
+    vada a fare in automatico tutte queste cose per ogni canzone». Quindi: le due
+    caselle della pagina /verifica nascono **spuntate**, e i due pulsanti in blocco
+    (tab Database e player) mandano `{"tutto": true}`, che il backend espande in
+    audio + voce + a cappella (`opzioni_verifica`: UN posto solo per dire cosa
+    vuol dire "tutto"). ⚠️ Costa: demucs 1-3 min + Whisper 20-70 s per brano.
+
+    Le tre chiavi sono un patto fra tre file: la pagina che le spunta, il backend
+    che le accende e le due pagine che chiedono `tutto`. Qui si confrontano.
+    """
+
+    def setUp(self):
+        self.verifica = leggi(VERIFICA_PATH)
+        self.index_src = leggi(INDEX_PATH)
+        self.onyx_src = leggi(ONYX_PATH)
+        self.app_src = leggi(APP_PATH)
+
+    def test_tutto_accende_audio_voce_e_acapella(self):
+        o = APP.opzioni_verifica({"tutto": True})
+        self.assertTrue(o["tutto"])
+        self.assertTrue(o["audio"] and o["testo"] and o["testo_acapella"])
+        self.assertEqual(sorted(o), ["audio", "testo", "testo_acapella", "tutto"])
+
+    def test_le_scelte_esplicite_non_si_sovrascrivono(self):
+        """`tutto` riempie solo quello che manca: una casella tolta a mano nella
+        pagina /verifica (che manda le sue chiavi) resta tolta, e le tolleranze che
+        arrivano col corpo non si perdono nel giro."""
+        o = APP.opzioni_verifica({"tutto": True, "audio": False, "testo_acapella": False})
+        self.assertFalse(o["audio"])
+        self.assertFalse(o["testo_acapella"])
+        self.assertTrue(o["testo"])
+        self.assertEqual(APP.opzioni_verifica({}), {})          # senza `tutto`: niente
+        self.assertEqual(APP.opzioni_verifica({"audio": True}), {"audio": True})
+        self.assertEqual(APP.opzioni_verifica({"tutto": True, "testo_conferma": 45})["testo_conferma"], 45)
+        for brutto in (None, [], "x", 0):                       # corpo assente o strano
+            self.assertEqual(APP.opzioni_verifica(brutto), {})
+
+    def test_la_verifica_usa_le_opzioni_nuove(self):
+        corpo = estrai_funzione_py(self.app_src, "verify_song")
+        self.assertIn("opzioni = opzioni_verifica(request.json or {})", corpo)
+        self.assertIn("testo_acapella", corpo)
+        self.assertIn('@app.route("/db/songs/<song_id>/verify", methods=["POST"])', self.app_src)
+
+    def test_le_caselle_nascono_spuntate(self):
+        """I default chiesti da Alessandro: voce e a cappella già scelti."""
+        for casella in ('id="optAudio" checked', 'id="optTesto" checked',
+                        'id="optAcapella" checked'):
+            self.assertIn(casella, self.verifica, casella)
+
+    def test_i_due_pulsanti_in_blocco_chiedono_tutto(self):
+        # tab Database: «Verifica tutto» → verifyAllTracks → verifySong
+        tutto = estrai_funzione(self.index_src, "verifyAllTracks")
+        self.assertIn("verifySong(id)", tutto)
+        corpo = estrai_funzione(self.index_src, "verifySong")
+        self.assertIn("body: JSON.stringify({ tutto: true })", corpo)
+        self.assertNotIn("{ method: 'POST' }", corpo)      # niente POST senza opzioni
+        # player: «Analizza tutto» → analyzeAllTracks → analyzeTrack
+        analizza = estrai_funzione(self.onyx_src, "analyzeAllTracks")
+        self.assertIn("analyzeTrack(track.id)", analizza)
+        corpo = estrai_funzione(self.onyx_src, "analyzeTrack")
+        self.assertIn("body: JSON.stringify({ tutto: true })", corpo)
+
+    def test_le_tre_chiavi_sono_le_caselle_della_pagina(self):
+        """Il patto: quello che `tutto` accende sono esattamente le caselle che la
+        pagina /verifica spunta (id della casella → chiave del corpo della POST)."""
+        for casella, chiave in (("optAudio", "audio"), ("optTesto", "testo"),
+                                ("optAcapella", "testo_acapella")):
+            self.assertIn('id="%s" checked' % casella, self.verifica)
+            self.assertIn('opzioni.setdefault("%s", True)' % chiave, self.app_src)
+
+
 class TestProgressoVerifica(unittest.TestCase):
     """Il progresso TOTALE della verifica (0-100%) — 18/09/2026.
 

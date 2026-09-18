@@ -359,6 +359,18 @@ risolto il caso *End of the World*: titolo corretto a mano → pagina giusta tro
 | 🎤 **Prima separa la voce** | trascrive l'**a cappella** (demucs `--two-stems=vocals`) invece del brano intero | +1-3 min |
 | 🚫 **Non è su Genius** | freestyle/mixtape: salta la ricerca Genius e la riga resta etichettata (`genius_escluso`) | — |
 
+Le caselle **🗣 Controlla voce** e **🎤 Prima separa la voce** nascono **già
+spuntate** (18/09/2026, richiesta di Alessandro: «lascia preimpostato…»): la voce è
+il controllo che ha trovato i casi veri e l'a cappella la rende più precisa. E i
+pulsanti in blocco **🔍 Verifica tutto** (tab Database) e **🔍 Analizza tutto**
+(player) non si fermano più ai metadati: mandano `{"tutto": true}` e il backend lo
+espande in **audio + voce + a cappella** (`opzioni_verifica` in `app (2).py`, UN
+posto solo per dire cosa vuol dire «tutto»), così su ogni canzone si fa tutto
+quello che si può fare a mano. ⚠️ **Costa**: demucs 1-3 min + Whisper 20-70 s
+**per brano** — su un filtro di centinaia di canzoni sono decine di ore — e le
+tolleranze restano quelle di default (`50`/`20` hash, `40%`/`15%`), perché i
+pulsanti in blocco non passano numeri.
+
 **3 · Le tolleranze** (numeri che si scelgono prima): hash per dire *confermato* e
 *hash* per dire *non confermato* (`50` / `20`, misure reali: 250-2.500 sul brano
 giusto, 5-16 su uno sbagliato); percentuale di parole per la voce (`40%` / `15%`,
@@ -916,6 +928,14 @@ Da tenere presente nelle sessioni di lavoro successive:
   sembrava che la Verifica non avesse controllato (segnalato il 18/09/2026). Ora la
   sincronizzazione **assegna sempre** (`track.whosampledUrl = s.whosampled_url || ''`)
   e il pannello info mostra anche il verdetto 🔒 (`🔊 link WhoSampled: scartato — …`).
+- **✅ «Verifica tutto» / «Analizza tutto» = verifica COMPLETA (18/09/2026).** I due
+  pulsanti in blocco mandano `{"tutto": true}` e il backend (`opzioni_verifica`)
+  accende **audio + voce + a cappella**: le chiavi esplicite restano quelle del
+  corpo della POST, `tutto` riempie solo quello che manca (una casella tolta a mano
+  in `/verifica` resta tolta). In `/verifica` le caselle 🗣 Controlla voce e 🎤 Prima
+  separa la voce nascono **già spuntate**. ⚠️ Demucs 1-3 min + Whisper 20-70 s
+  **per brano**: su tutta la libreria è un lavoro di ore, e le tolleranze restano
+  quelle di default (i pulsanti in blocco non passano numeri).
 - **Verifica guidata (`/verifica`, 18/09/2026).** Il pulsante 🔎 del database e il 🔍
   del player aprono una **schermata dedicata** invece di verificare in silenzio dentro
   la riga: dati da correggere (**salvati PRIMA della ricerca**), caselle per i controlli

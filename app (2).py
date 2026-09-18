@@ -5104,6 +5104,29 @@ def verify_status_endpoint(song_id):
                     "secondi": round(secondi, 1),
                     "frazione": st.get("frazione"), "percento": percento})
 
+def opzioni_verifica(corpo):
+    """Le opzioni di `/db/songs/<id>/verify` lette dal corpo della POST.
+
+    `tutto: true` = il lavoro COMPLETO che si può spuntare nella pagina /verifica:
+    audio (anteprima ufficiale iTunes) + voce (trascrizione Whisper) + prima la
+    separazione della voce (a cappella, demucs). Lo mandano i pulsanti
+    «🔍 Verifica tutto» (tab Database) e «🔍 Analizza tutto» (player), che devono
+    fare **su ogni canzone** tutto quello che si può fare a mano — richiesta di
+    Alessandro del 18/09/2026: «fai in modo che "analizza tutto" vada a fare in
+    automatico tutte queste cose per ogni canzone». Le chiavi esplicite restano
+    quelle del corpo (la pagina /verifica manda le sue caselle): `tutto` riempie
+    solo quello che non c'è, quindi non sovrascrive mai una scelta precisa.
+
+    ⚠️ `tutto` accende anche demucs e Whisper: 1-3 min + 20-70 s PER BRANO.
+    """
+    opzioni = dict(corpo) if isinstance(corpo, dict) else {}
+    if opzioni.get("tutto"):
+        opzioni.setdefault("audio", True)
+        opzioni.setdefault("testo", True)
+        opzioni.setdefault("testo_acapella", True)
+    return opzioni
+
+
 @app.route("/db/songs/<song_id>/verify", methods=["POST"])
 def verify_song(song_id):
     """Look up Genius + Tunebat and fill unverified fields"""
@@ -5136,13 +5159,15 @@ def verify_song(song_id):
 
     # ─── OPZIONI SCELTE NELLA PAGINA /verifica ──────────────────────────────────
     # La pagina fa decidere PRIMA cosa controllare e con quali TOLLERANZE (e vale
-    # anche per il pulsante "Verifica" del database, che manda solo `{"audio": …}`):
+    # anche per i pulsanti in blocco «Verifica tutto» / «Analizza tutto», che
+    # mandano `{"tutto": true}`, cioè audio + voce + a cappella):
+    #   tutto          → TUTTO quello che si può spuntare (vedi `opzioni_verifica`)
     #   audio          → confronto con l'anteprima ufficiale (5-10 s)
     #   testo          → confronto dal parlato, Whisper (20-70 s)
     #   testo_acapella → trascrive solo la voce, demucs (1-3 min in più)
     #   non_su_genius  → la canzone non è su Genius (freestyle/mixtape): si salta
     #   voti_conferma/voti_rifiuto e testo_conferma/testo_rifiuto → le tolleranze
-    opzioni = request.json or {}
+    opzioni = opzioni_verifica(request.json or {})
 
     def _tolleranza(chiave, default, minimo, massimo):
         try:
