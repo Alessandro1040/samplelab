@@ -1097,3 +1097,37 @@ Da tenere presente nelle sessioni di lavoro successive:
   ricalcolata dal file vero: il documento del sampler ora finisce a riga **3345** e i
   numeri interni (67 fra funzioni e ancore) sono stati riallineati.
 
+
+- **LOOP DELLA BATTUTA — NON SI SENTE PIÙ MUSICA OLTRE LA BARRA (18/09/2026).**
+  Segnalazione di Alessandro: «l'endpoint e punto di inizio del trim blu non
+  coincidono con l'inizio e la fine effettiva, cioè viene suonata anche una piccola
+  parte che va oltre la barra blu». Prima di toccare il codice l'ho **misurato**
+  (campioni di `audio.currentTime` ogni 4 ms mentre il loop 🔁 gira, battuta
+  4,000→6,000 s): il controllo del loop sfora di **4-8 ms** e la ripresa è **sempre
+  esatta** (4,000 s in tutti e sei i giri) — quindi non era il controllo: era
+  **l'audio già consegnato al dispositivo**, che si sente comunque anche dopo aver
+  riportato indietro la testina. Il ritardo lo dichiara il browser:
+  `AudioContext.outputLatency` = **24 ms** su questo Mac (5,8 ms `baseLatency`;
+  identico headless e in una finestra vera). Fix: il ritorno si **anticipa** di
+  quella latenza più il margine del disegno (8 ms), con due funzioni pure —
+  `anticipoRitorno(latenza)` (tetto **60 ms**, valore tipico 20 ms se il browser non
+  lo dichiara) e `anticipoLoop(latenza, lunghezza)` (mai più di **un terzo** della
+  selezione, altrimenti con una selezione corta si tornerebbe indietro subito, in un
+  loop vuoto). La latenza si legge davvero: `aggiornaLatenzaUscita()` alla prima
+  riproduzione (il clic su ▶ è il gesto dell'utente che rende lecito il contesto
+  audio) più `leggiLatenzaUscita()` a ogni fotogramma del loop, perché
+  `outputLatency` compare **solo a contesto avviato** (misurato: 0 da fermo, 24 ms
+  poco dopo — la prima versione leggeva 6 ms, cioè solo `baseLatency`). Vale per
+  **tutti e due** i loop: 🔁 Battuta e ✂ Sel.
+  Verifiche del 18/09/2026: **3 test nuovi** (`test_sampler_battuta.py`, 31 in
+  tutto: `anticipoRitorno` su 6 casi, `anticipoLoop` su 5, più il cablaggio) e
+  **214 test di suite** (erano 211); misurato in Chrome dopo il fix: **sforamento 0 ms**, ritorno
+  ~26 ms prima della fine, ripresa esatta a 4,000 s in tutti e 6 i giri, latenza
+  letta 24 ms → anticipo 32 ms, e **identico col loop ✂ Sel** (sempre 0 ms di
+  sforamento). Cosa **non** cambia: barra disegnata, `barStart`/`barEnd`, BPM
+  salvato e taglio scaricato restano esatti — cambia solo dove torna indietro la
+  testina, quindi la battuta **suonata** è ~30 ms più corta di quella disegnata
+  (1,5% su una battuta di 2 s) e in cambio non si sente più musica dopo la barra.
+  Guida del sampler aggiornata (riga 🔁 Battuta in §5.7 e il «perché» in §13) e
+  mappa del codice §12 ricalcolata dal file vero.
+

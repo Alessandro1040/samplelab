@@ -237,6 +237,8 @@ class TestFunzioniPagina(unittest.TestCase):
             estrai_funzione(src, "urlBackend"),
             estrai_funzione(src, "etichettaTrimGiallo"),
             estrai_funzione(src, "etichettaBattutaVisibile"),
+            estrai_funzione(src, "anticipoRitorno"),
+            estrai_funzione(src, "anticipoLoop"),
         ])
         js += """
 // Il documento del sampler vive in un iframe blob:: qui `document` e `window` non
@@ -245,6 +247,8 @@ class TestFunzioniPagina(unittest.TestCase):
 var document = {referrer: ''};
 var window = {location: {href: ''}};
 var baseBackend = '';
+// Le costanti dell'anticipo del loop (nel documento sono dichiarate con `const`).
+var LATENZA_USCITA_TIPICA = 0.02, MARGINE_DISEGNO = 0.008, ANTICIPO_MAX = 0.06;
 function urlDa(base, referrer, href, percorso) {
   baseBackend = base; document.referrer = referrer; window.location.href = href;
   return urlBackend(percorso);
@@ -273,6 +277,10 @@ console.log(JSON.stringify({
   url_nomi: urlCasi.map(c => c[0]),
   trim: [etichettaTrimGiallo(true), etichettaTrimGiallo(false),
          etichettaBattutaVisibile(true), etichettaBattutaVisibile(false)],
+  anticipo: [anticipoRitorno(0.024), anticipoRitorno(0), anticipoRitorno(undefined),
+             anticipoRitorno(-1), anticipoRitorno('0.024'), anticipoRitorno(0.2)],
+  anticipo_loop: [anticipoLoop(0.024, 2), anticipoLoop(0.024, 0.06), anticipoLoop(0.024, 0),
+                  anticipoLoop(0.024, undefined), anticipoLoop(0.024, 10)],
   origini: ['http://localhost:5070', 'http://localhost:5070/onyx?x=1',
             'blob:http://localhost:5070/abc', 'null', '',
             'https://esempio.test:8443/x', undefined].map(origineHttp)
@@ -350,6 +358,27 @@ console.log(JSON.stringify({
         self.assertEqual(et[1], "✂ Trim giallo off")
         self.assertEqual(et[2], "🎯 Battuta on")
         self.assertEqual(et[3], "🎯 Battuta off")
+
+    def test_anticipo_del_ritorno(self):
+        # Di quanto si anticipa il ritorno all'inizio: la latenza dichiarata dal
+        # browser (24 ms su questo Mac) più il margine misurato del disegno (8 ms).
+        a = self.risultati["anticipo"]
+        self.assertAlmostEqual(a[0], 0.032, places=6)
+        self.assertAlmostEqual(a[1], 0.028, places=6, msg="senza latenza: valore tipico 20 ms")
+        self.assertAlmostEqual(a[2], 0.028, places=6, msg="undefined: valore tipico")
+        self.assertAlmostEqual(a[3], 0.028, places=6, msg="negativa: valore tipico")
+        self.assertAlmostEqual(a[4], 0.032, places=6, msg="le caselle danno stringhe")
+        self.assertAlmostEqual(a[5], 0.06, places=6, msg="tetto: oltre 60 ms si taglierebbe troppo")
+
+    def test_anticipo_non_mangia_la_selezione(self):
+        # Con una selezione più corta dell'anticipo si tornerebbe indietro subito
+        # (loop vuoto): al massimo si anticipa un terzo della selezione.
+        al = self.risultati["anticipo_loop"]
+        self.assertAlmostEqual(al[0], 0.032, places=6, msg="battuta di 2 s: anticipo pieno")
+        self.assertAlmostEqual(al[1], 0.02, places=6, msg="selezione di 60 ms: un terzo")
+        self.assertEqual(al[2], 0, msg="selezione vuota: nessun anticipo")
+        self.assertEqual(al[3], 0, msg="senza lunghezza: nessun anticipo")
+        self.assertAlmostEqual(al[4], 0.032, places=6)
 
 
 class TestCablaggio(unittest.TestCase):
@@ -478,6 +507,30 @@ class TestCablaggio(unittest.TestCase):
         ombre = self.pagina.split(".bar-trim-shade-left, .bar-trim-shade-right {")[1].split("}")[0]
         self.assertIn("background:rgba(0,0,0,.45);", ombre,
                       "fuori dalla battuta si scurisce, come nel trim giallo")
+
+    def test_il_loop_non_suona_oltre_la_barra(self):
+        # Segnalato il 18/09/2026: col loop 🔁 si sentiva un pezzetto di musica oltre
+        # la barra celeste. Non era il controllo del loop (misurato: 4-8 ms di
+        # sforamento) ma l'audio già consegnato alle casse (~24 ms dichiarati da
+        # Chrome): ora il ritorno si anticipa di quel tanto.
+        self.assertIn("const anticipo = anticipoLoop(latenzaUscita, p.loopMode === 'bar'", self.pagina)
+        self.assertIn("p.timelineTime >= p.barEnd - anticipo", self.pagina)
+        self.assertIn("p.timelineTime >= p.trimEnd - anticipo", self.pagina)
+        self.assertIn("function anticipoRitorno(latenza)", self.pagina)
+        self.assertIn("function anticipoLoop(latenza, lunghezzaSelezione)", self.pagina)
+        self.assertIn("LATENZA_USCITA_TIPICA = 0.02", self.pagina)
+        self.assertIn("MARGINE_DISEGNO = 0.008", self.pagina)
+        self.assertIn("ANTICIPO_MAX = 0.06", self.pagina)
+        # la latenza la dichiara il browser: si chiede quando parte la riproduzione e
+        # si rilegge a ogni fotogramma, perché `outputLatency` compare solo a
+        # contesto avviato (da fermo vale 0 e resterebbe `baseLatency`, più corta)
+        self.assertIn("aggiornaLatenzaUscita();   // quanto ritarda l'uscita", self.pagina)
+        self.assertIn("leggiLatenzaUscita();   // appena il browser dichiara il ritardo vero",
+                      self.pagina)
+        self.assertIn("ctxLatenza.resume().catch(() => {});", self.pagina)
+        # la barra disegnata, il BPM e il taglio NON cambiano: cambia solo dove si
+        # riporta indietro la testina (barStart/barEnd restano quelli)
+        self.assertIn("p.timelineTime = p.barStart;      // 🔁 Battuta", self.pagina)
 
     def test_endpoint_nellapp(self):
         self.assertIn('@app.route("/beat/bar", methods=["POST"])', self.app)

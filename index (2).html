@@ -1681,6 +1681,59 @@ function unloadFile() {
   document.getElementById('follow-btn-main')?.classList.remove('active');
 }
 
+// ─── ANTICIPO DEL RITORNO: perché il loop non suona OLTRE la barra ────────────
+// Quando si riporta indietro `currentTime`, l'audio già consegnato al dispositivo
+// si sente comunque: è il «viene suonata anche una piccola parte che va oltre la
+// barra blu» segnalato il 18/09/2026. Il ritardo lo dichiara il browser
+// (`AudioContext.outputLatency`: misurato 24 ms su questo Mac, 18/09/2026) e a
+// quello si aggiunge ciò che può sfuggire al controllo del loop, che gira dentro
+// il disegno (requestAnimationFrame: misurato 4-8 ms su un giro di 2 s). Il
+// ritorno si anticipa di quel tanto, così la musica finisce SULLA barra invece
+// che dopo. Non cambia barStart/barEnd: la barra disegnata, il BPM e il taglio
+// restano quelli, cambia solo DOVE si riporta indietro la testina.
+const LATENZA_USCITA_TIPICA = 0.02;   // secondi: si usa solo se il browser non la dichiara
+const MARGINE_DISEGNO = 0.008;        // secondi: sforamento misurato del controllo nel disegno
+const ANTICIPO_MAX = 0.06;            // secondi: oltre questo si taglierebbe troppo la battuta
+let latenzaUscita = 0;                // secondi dichiarati dal browser (aggiornati a ogni fotogramma)
+let ctxLatenza = null;                // contesto audio usato SOLO per leggere quel ritardo
+
+function anticipoRitorno(latenza) {
+  const dichiarata = parseFloat(latenza);
+  const l = (isFinite(dichiarata) && dichiarata > 0) ? dichiarata : LATENZA_USCITA_TIPICA;
+  return Math.min(ANTICIPO_MAX, l + MARGINE_DISEGNO);
+}
+
+// L'anticipo non può mangiarsi la selezione: al massimo un terzo, perché con una
+// selezione più corta dell'anticipo si tornerebbe indietro subito (loop vuoto).
+function anticipoLoop(latenza, lunghezzaSelezione) {
+  const lunga = Math.max(0, parseFloat(lunghezzaSelezione) || 0);
+  return Math.min(anticipoRitorno(latenza), lunga / 3);
+}
+
+// Quanto ritarda l'uscita audio di questo dispositivo. Si chiede alla prima
+// riproduzione (la pressione di ▶ è un gesto dell'utente, quindi il contesto audio
+// è lecito) e non si ripete: con lo stesso dispositivo non cambia.
+function aggiornaLatenzaUscita() {
+  if (ctxLatenza) return;
+  try {
+    ctxLatenza = new (window.AudioContext || window.webkitAudioContext)();
+    latenzaUscita = parseFloat(ctxLatenza.baseLatency) || 0;   // primo valore utile
+    ctxLatenza.resume().catch(() => {});
+  } catch (_) { ctxLatenza = null; }
+}
+
+// Il ritardo VERO dell'uscita (`outputLatency`) il browser lo dichiara solo un
+// attimo DOPO che il contesto è avviato — da fermo vale 0 e resta `baseLatency`,
+// che è più corta (misurato: 24 ms contro 5,8 ms). Quindi non si legge una volta
+// sola: si guarda a ogni fotogramma del loop, che gira già, e appena il numero
+// buono c'è entra in gioco da solo.
+function leggiLatenzaUscita() {
+  if (!ctxLatenza) return;
+  const v = Math.max(parseFloat(ctxLatenza.outputLatency) || 0,
+                     parseFloat(ctxLatenza.baseLatency) || 0);
+  if (v > latenzaUscita) latenzaUscita = v;
+}
+
 // ─── ANIMATION LOOP (60 fps) ─────────────────────────────────
 function startAnimationLoop(key) {
   const p = players[key];
@@ -1693,13 +1746,19 @@ function startAnimationLoop(key) {
     }
     const currentTime = p.audio.currentTime;
     p.timelineTime = currentTime + p.sampleOffset;
+    leggiLatenzaUscita();   // appena il browser dichiara il ritardo vero dell'uscita, si usa
+    // Di quanto anticipare il ritorno: l'audio già consegnato alle casse si sente
+    // comunque, quindi si torna indietro prima della fine del trim/battuta.
+    const anticipo = anticipoLoop(latenzaUscita, p.loopMode === 'bar'
+      ? (p.barEnd - p.barStart) : (p.trimEnd - p.trimStart));
     
-    if (p.loopSel && p.trimEnd != null && p.timelineTime >= p.trimEnd) {
+    if (p.loopSel && p.trimEnd != null && p.timelineTime >= p.trimEnd - anticipo) {
       p.timelineTime = p.trimStart;
       p.audio.currentTime = Math.max(0, p.timelineTime - p.sampleOffset);
       p.nextMetroBeatTime = null; // Ricalcola il metronomo quando loopa indietro
     }
-    if (p.loopMode === 'bar' && p.barStart !== null && p.barEnd !== null && p.timelineTime >= p.barEnd) {
+    if (p.loopMode === 'bar' && p.barStart !== null && p.barEnd !== null &&
+        p.timelineTime >= p.barEnd - anticipo) {
       p.timelineTime = p.barStart;      // 🔁 Battuta: torna all'inizio della battuta celeste
       p.audio.currentTime = Math.max(0, p.timelineTime - p.sampleOffset);
       p.nextMetroBeatTime = null;
@@ -1799,6 +1858,7 @@ function initPlayer(key, url, startSec) {
   });
 
   audio.addEventListener('play', () => {
+    aggiornaLatenzaUscita();   // quanto ritarda l'uscita: serve al loop per non sfondare la barra
     if (!p._animId) startAnimationLoop(key);
     // Avvisa la pagina parent: questo player ha iniziato a suonare, così il
     // parent ferma automaticamente tutti gli altri (sample, originali, Onyx…).
