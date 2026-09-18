@@ -529,8 +529,11 @@ class TestCablaggioDellaPagina(unittest.TestCase):
     def test_il_trim_giallo_riceve_la_fine_dell_intervallo(self):
         self.assertIn("function trimRangeFor(startSec, duration, defaultDur, endSec)", self.pagina)
         self.assertIn("endSec: endSec || 0", self.pagina)
-        self.assertIn("initPlayer('main', currentAudioUrl, e.data.startSec || 0, e.data.endSec || 0)",
+        self.assertIn("initPlayer('main', currentAudioUrl, e.data.startSec || 0, e.data.endSec || 0,",
                       self.pagina)
+        # …e dal 19/09/2026 anche il caso opposto: `trim:false` = niente trim giallo
+        # (gli stem di /scheda si ascoltano interi, vedi test_stem_player.py)
+        self.assertIn("{senzaTrim: e.data.trim === false}", self.pagina)
         self.assertIn("carico.grid=false", self.pagina)
 
     def test_il_backend_ha_dedup_merge_e_download_automatico(self):

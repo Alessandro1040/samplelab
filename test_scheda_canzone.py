@@ -660,7 +660,9 @@ class TestCablaggio(unittest.TestCase):
                 self.assertRegex(self.pagina, r"(?:async\s+)?function\s+%s\s*\(" % re.escape(nome))
 
     def test_la_pagina_non_si_ricarica_mentre_gli_stem_suonano(self):
-        self.assertIn("if(stemInRiproduzione().length){ attesaRicaricamento=true; return; }",
+        # Vale per il mixer (`<audio>`) e per i player del sampler (iframe): se la
+        # scheda si ridisegnasse mentre suonano, la musica si interromperebbe.
+        self.assertIn("if(stemInRiproduzione().length||stemSamplerInRiproduzione()){ attesaRicaricamento=true; return; }",
                       self.pagina)
         self.assertIn("setInterval(autoAggiorna,4000)", self.pagina)
         self.assertIn("/db/changed", self.pagina)
@@ -783,6 +785,7 @@ class TestMixerStem(unittest.TestCase):
             estrai_funzione(src, "mostraTempo"),
             estrai_funzione(src, "mixerToggle"),
             estrai_funzione(src, "mixerStop"),
+            estrai_funzione(src, "pausaSamplerStem"),
         ])
         js += """
 // ── DOM finto ──
@@ -796,7 +799,11 @@ function fakeEl(id){
           pause(){this.paused=true}};
 }
 const elementi={};
-const document={getElementById:id=>{ if(!elementi[id]) elementi[id]=fakeEl(id); return elementi[id]; }};
+const document={getElementById:id=>{ if(!elementi[id]) elementi[id]=fakeEl(id); return elementi[id]; },
+                // I player degli stem sono iframe `/sampler`: in questo DOM finto
+                // non ce ne sono, ma `pausaSamplerStem()` li cerca davvero (la
+                // chiamano «Suona tutti insieme» e il ▶ di una traccia).
+                querySelectorAll:()=>[]};
 const window={};
 let intervalli=0;
 const setInterval=()=>{intervalli++; return 1;};

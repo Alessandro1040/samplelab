@@ -1908,7 +1908,30 @@ function stopAnimationLoop(key) {
 }
 
 // ─── PLAYER INIT ──────────────────────────────────────────────
-function initPlayer(key, url, startSec, endSec) {
+// ─── L'INTERVALLO INIZIALE DEL TRIM (funzione PURA) ──────────────────────────
+// Quale porzione di file copre la selezione appena il file è caricato:
+// - con un intervallo SALVATO nel database (`endSec`: il confronto campioni) il
+//   trim copre ESATTAMENTE quello, non una finestra di 30 s;
+// - altrimenti una finestra di `finestra` secondi (30 di default) dall'inizio;
+// - con `senzaTrim` il trim NON si usa: è il caso degli STEM (19/09/2026), che si
+//   ascoltano INTERI e senza riquadro giallo, quindi la selezione è tutto il file.
+function intervalloTrimIniziale(startSec, endSec, durata, senzaTrim, finestra) {
+  const dur = Math.max(0, Number(durata) || 0);
+  if (senzaTrim) return { start: 0, end: dur, voluto: false, senzaTrim: true };
+  const win = Math.max(1, Number(finestra) || 30);
+  const want = Math.max(0, Number(startSec) || 0);
+  const wantEnd = Math.max(0, Number(endSec) || 0);
+  const st = Math.min(want, Math.max(0, dur - 0.1));
+  let en = Math.min(st + win, dur);
+  if (wantEnd > st + 0.05 && dur > 0) {
+    const e0 = Math.min(wantEnd, dur);
+    if (e0 > st + 0.05) en = e0;
+  }
+  return { start: st, end: en, voluto: wantEnd > st + 0.05 };
+}
+
+function initPlayer(key, url, startSec, endSec, opts) {
+  opts = opts || {};
   const audio = new Audio(url);
   audio.preload = 'metadata';
   const p = {
@@ -1936,7 +1959,8 @@ function initPlayer(key, url, startSec, endSec) {
     waveformLoading: false,
     selectedBarNumber: null,
     selectedBarStartTime: null,
-    trimVisibile: true,      // il trim GIALLO (IN/OUT del sample) si può nascondere del tutto
+    trimVisibile: opts.senzaTrim ? false : true,   // il trim GIALLO (IN/OUT del sample) si può nascondere del tutto
+    senzaTrim: !!opts.senzaTrim,   // gli STEM (19/09/2026): niente trim, si ascolta tutto il file
     loopMode: 'sel',         // 'sel' (trim giallo) · 'all' (tutto)
     tapTimes: [],
     cellBorderDrag: null,
@@ -1953,21 +1977,23 @@ function initPlayer(key, url, startSec, endSec) {
 
   audio.addEventListener('loadedmetadata', () => {
     const dur = audio.duration;
-    const want = Math.max(0, Number(p.startSec) || 0);
-    const wantEnd = Math.max(0, Number(p.wantEnd) || 0);
-    const st = Math.min(want, Math.max(0, dur - 0.1));
-    // `endSec` = fine dell'intervallo SALVATO nel database (confronto campioni):
-    // il trim giallo copre ESATTAMENTE quello, non una finestra di 30 s.
-    let en = Math.min(st + 30, dur);
-    if (wantEnd > st + 0.05 && dur > 0) {
-      const e0 = Math.min(wantEnd, dur);
-      if (e0 > st + 0.05) en = e0;
+    // L'intervallo iniziale del trim (matematica in `intervalloTrimIniziale`):
+    // con `endSec` = intervallo SALVATO nel database il trim giallo copre ESATTA-
+    // MENTE quello (confronto campioni); con `senzaTrim` invece tutto il file —
+    // è il caso degli STEM, che si ascoltano interi e senza riquadro giallo.
+    const iv = intervalloTrimIniziale(p.startSec, p.wantEnd, dur, p.senzaTrim);
+    p.trimStart = iv.start;
+    p.trimEnd = iv.end;
+    p.scrollOffset = Math.max(0, iv.start - 5);
+    p.timelineTime = iv.start;
+    audio.currentTime = iv.start;
+    if (p.senzaTrim) {
+      // Senza trim non c'è nessuna selezione da ripetere: il cursore attraversa
+      // tutto lo stem e si ferma in fondo, come un player normale. Il pulsante ✂
+      // resta lì (spento) se si vuole ritagliare a mano.
+      setLoopMode(key, 'all');
+      aggiornaPulsantiTrim(key);
     }
-    p.trimStart = st;
-    p.trimEnd = en;
-    p.scrollOffset = Math.max(0, st - 5);
-    p.timelineTime = st;
-    audio.currentTime = st;
     document.getElementById(`bpm-${key}`).value = p.bpm;
     document.getElementById(`offset-${key}`).value = p.gridOffset;
     p.nextMetroBeatTime = null;
@@ -3473,7 +3499,11 @@ window.addEventListener('message', function(e) {
     currentAudioUrl = urlBackend(e.data.url);
     // `endSec` = fine dell'intervallo salvato nel database: il trim giallo copre
     // ESATTAMENTE quello (serve al confronto campioni, 19/09/2026).
-    initPlayer('main', currentAudioUrl, e.data.startSec || 0, e.data.endSec || 0);
+    // `trim === false` (19/09/2026): NIENTE trim giallo e si ascolta tutto il file
+    // — è così che `/scheda` apre un player su ogni stem (uno stem non ha un
+    // intervallo da ritagliare: si sente intero).
+    initPlayer('main', currentAudioUrl, e.data.startSec || 0, e.data.endSec || 0,
+               {senzaTrim: e.data.trim === false});
     // BPM passato dalla pagina che apre il sampler (dal database): la griglia
     // parte già su quel valore, così si sente subito se il brano ci sta sopra.
     if (e.data.bpm) { try { setBpm('main', e.data.bpm); } catch (_) {} }

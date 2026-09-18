@@ -127,6 +127,13 @@ con `(2)` nella cartella locale:
   in JavaScriptCore, il giro completo sull'app viva (import, ricarica senza
   doppioni, ✏️ Rinomina in massa sulle etichette + ↩️ Undo, 🗑 cancellazione della
   sessione) e le rotte: `python3 -m unittest -v test_stem_upload`
+- `test_stem_player.py` — test del **player di ogni stem** in `/scheda` (19/09/2026):
+  la rotta **`GET /sampler`** che serve il sampler preso dalla textarea di
+  `index (2).html` (parità carattere per carattere, cache sull'mtime, 500 chiaro se
+  la textarea sparisce), il cablaggio in `scheda.html` (un iframe per riga,
+  `trim:false` nel messaggio di carico, BPM, handler su `window`, mixer intatto, «un
+  solo audio per volta» nei due versi):
+  `python3 -m unittest -v test_stem_player`
 - `test_metadati_youtube.py` — test dei **metadati del video YouTube** nella riga
   (`songs.yt_*`), dalla **playlist** scaricata: le funzioni pure `data_da_yt`,
   `id_video_dal_nome_file`, `campi_youtube`, `mappa_metadati_playlist`,
@@ -264,7 +271,7 @@ riquadri, riempiti **solo** con i dati del database.
 
 | Riquadro | Cosa mostra | Da dove viene |
 |---|---|---|
-| ✂️ **Tracce di cui è composta** | gli stem (voce, batteria, basso, altro) con player, mute, volume e download; **▶ Suona tutti insieme** li fa partire sincronizzati, per sentire il brano ricomposto | `stem_sessions` + `stem_tracks`, più la cartella `stems/htdemucs/<nome>` se il job era partito senza `song_id` |
+| ✂️ **Tracce di cui è composta** | gli stem (voce, batteria, basso, altro), **ognuno col suo player** (il sampler stile FL Studio, senza il trim giallo: vedi la sezione sotto), più mute, volume e download; **▶ Suona tutti insieme** li fa partire sincronizzati, per sentire il brano ricomposto | `stem_sessions` + `stem_tracks`, più la cartella `stems/htdemucs/<nome>` se il job era partito senza `song_id` |
 | ♻️ **Remix e cover** | i remix e le cover registrati, con il verso della relazione, più un blocco separato di **candidati** riconosciuti dal titolo | `sample_relations` (`category` VOCAL_COVER / FULL_REMAKE / INSTRUMENT_REMAKE, oppure «remix» in categoria/trasformazione/note) |
 | 🎚 **Campionamenti (WhoSampled)** | cosa campiona questa canzone e chi campiona questa canzone, con gli intervalli e i link WhoSampled/YouTube | `sample_relations` (`derivative_song_id` = chi usa il sample, `source_song_id` = la fonte campionata) |
 | 🧠 **Analisi audio** | BPM, tonalità e confidenza salvati per il brano | `audio_analyses` |
@@ -301,6 +308,56 @@ finto** (sync, mute, volume, stop), il cablaggio (pulsante in tabella, sezioni,
 handler esposti su `window`) e l'endpoint vero su un **database di prova** (stem
 con file mancanti, una relazione per gruppo, analisi, candidati) senza toccare la
 libreria: `python3 -m unittest -v test_scheda_canzone`.
+
+## Un player per OGNI stem, senza il trim giallo — 19/09/2026
+
+Richiesta di Alessandro: «quando l'utente carica dal computer gli stems di una
+canzone oppure gli stems vengono estratti, per ognuno degli stems deve esserci un
+player, il player classico stile fl studio che è già implementato in altre parti
+dell'app però SENZA il trim giallo ovviamente».
+
+Nel riquadro ✂️ **Tracce di cui è composta** di `/scheda` ogni traccia ha ora il
+suo player: la stessa identica cosa di **🎛 Sampler** (onda, griglia del BPM,
+metronomo, TAP, undo/redo), **col trim giallo spento** e con la selezione che
+copre **tutto il file**.
+
+| pezzo | dove | cosa fa |
+|---|---|---|
+| `GET /sampler` | `app (2).py` | serve il documento del sampler **preso dalla `<textarea id="audio-editor-src">` di `index (2).html`** (cache sull'mtime): la sorgente resta UNA — copiarla in `scheda.html` l'avrebbe fatta andare fuori sincrono alla prima modifica del sampler |
+| `trim: false` | `index (2).html` (protocollo dei messaggi `load`) | il sampler si apre col trim spento: `trimVisibile=false`, selezione `[0, durata]`, `loopMode='all'` (il cursore attraversa la traccia e si ferma in fondo). Senza, il play si fermerebbe dopo i 30 s di default |
+| `intervalloTrimIniziale()` | `index (2).html` | funzione **pura** con la matematica della selezione iniziale (finestra di 30 s · intervallo salvato nel database · `senzaTrim` = tutto il file), provata in JavaScriptCore |
+| `<iframe loading="lazy" src="/sampler">` | `scheda.html` | un player per riga, montato quando la riga entra nello schermo: `stemPlayerMonto` manda il messaggio `load` con l'URL della traccia, l'etichetta («🎤 Voce · *Titolo*») e il **BPM della canzone** per la griglia |
+
+Tre regole che restano:
+
+- il **mixer «▶ Suona tutti insieme»** (sugli `<audio>` nascosti, sincronizzati) c'è
+  ancora: il player del sampler è **in più**, per guardare e ascoltare una traccia
+  sola;
+- **un solo audio per volta nei due versi**: quando parte un player di stem il
+  mixer si ferma (il sampler avvisa da sé con `audioplaying`), quando parte il
+  mixer i player si fermano (`pauseall`);
+- la scheda **non si ridisegna mentre un player suona**
+  (`stemSamplerInRiproduzione()`): ricostruire le righe butterebbe giù gli iframe a
+  metà traccia.
+
+⚠️ Il taglio del sampler (✂ Taglia / Scarica selezione) lavora sui file di
+`downloads/`: su uno stem (che sta in `stems/`) non porta da nessuna parte — ed è
+coerente col fatto che qui il trim non serve. Per ritagliare uno stem lo si scarica
+(⬇) e si usa 🎛 Sampler sulla canzone.
+
+**Verifiche (19/09/2026):** `test_stem_player.py` — **12 test `OK`**: il documento
+di `/sampler` è la textarea di `index (2).html` (parità carattere per carattere),
+la rotta risponde 200, il file si legge una volta sola (cache sull'mtime), senza la
+textarea si risponde 500 col motivo; in `scheda.html` l'iframe sta nel `map` delle
+righe (uno per traccia), il messaggio di carico manda `trim:false` e il BPM, gli
+handler sono su `window`, il mixer resta sugli `<audio>` e il «un solo audio per
+volta» c'è nei due versi. In `test_sampler_trim.py` la funzione pura
+`intervalloTrimIniziale` (11 casi, compreso `senzaTrim` = tutto il file) e il
+cablaggio del trim spento. **In Chrome vero headless** sulla scheda di *1998
+Freestyle* (50 Cent, 4 stem su disco): 4 player montati e per ognuno
+`trimVisibile: false`, bottone `✂ Trim giallo off`, selezione `[0, 49.006]` =
+durata intera, `loop: "all"`, griglia attiva a **61,5 BPM** (quello della riga nel
+database) e onda disegnata.
 
 ## MIDI Studio (porta 5080) — estrai MIDI da un audio e confronta due MIDI
 
@@ -884,6 +941,17 @@ Da tenere presente nelle sessioni di lavoro successive:
   etichette si correggono in blocco **con lo stesso pannello** «✏️ Rinomina in
   massa» del tab Database (voce **🏷 Etichetta stem**), quindi con lo stesso ↩️
   Undo. `DELETE /db/stems/<id>` toglie una sessione e manda i file in `.trash/`.
+- **🎛 Un player per OGNI stem, senza il trim giallo (19/09/2026).** Nel riquadro
+  ✂️ **Tracce di cui è composta** di `/scheda` ogni traccia ha il suo player: è lo
+  **stesso sampler FL-Studio** della pagina principale (onda, griglia del BPM,
+  metronomo), servito dalla rotta nuova **`GET /sampler`** — che serve il documento
+  preso dalla textarea di `index (2).html`, così la sorgente resta una sola — e
+  caricato con **`trim: false`**: niente trim giallo e selezione = **tutto il
+  file**, altrimenti il play si fermerebbe dopo i 30 s di default. Il mixer «▶
+  Suona tutti insieme» resta (il player è in più) e vale il **un solo audio per
+  volta** nei due versi; la scheda non si ridisegna mentre un player suona.
+  ⚠️ Il taglio del sampler lavora su `downloads/`: su uno stem non porta da nessuna
+  parte (e il trim lì non serve). Vedi la sezione *Un player per OGNI stem*.
 - **🔍 Dal modale 🎚 si cercano i campionamenti che mancano (18/09/2026).** Se una
   canzone non ha righe in `sample_relations`, il modale «Confronto campione» ha il
   pulsante **🔍 Cerca i campionamenti su WhoSampled** (col testo che dice cosa

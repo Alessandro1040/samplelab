@@ -97,6 +97,7 @@ class TestFunzioniPagina(unittest.TestCase):
             estrai_funzione(src, "urlBackend"),
             estrai_funzione(src, "anticipoRitorno"),
             estrai_funzione(src, "anticipoLoop"),
+            estrai_funzione(src, "intervalloTrimIniziale"),
         ])
         js += """
 // Il documento del sampler vive in un iframe blob:: qui `document` e `window` non
@@ -133,7 +134,21 @@ console.log(JSON.stringify({
   anticipo: [anticipoRitorno(0.024), anticipoRitorno(0), anticipoRitorno(undefined),
              anticipoRitorno(-1), anticipoRitorno('0.024'), anticipoRitorno(0.2)],
   anticipo_loop: [anticipoLoop(0.024, 2), anticipoLoop(0.024, 0.06), anticipoLoop(0.024, 0),
-                  anticipoLoop(0.024, undefined), anticipoLoop(0.024, 10)]
+                  anticipoLoop(0.024, undefined), anticipoLoop(0.024, 10)],
+  // (nome, intervallo) — la selezione iniziale del trim
+  intervallo: [
+    ['default',                 intervalloTrimIniziale(0, 0, 200, false)],
+    ['dal_secondo_100',         intervalloTrimIniziale(100, 0, 200, false)],
+    ['salvato',                 intervalloTrimIniziale(56, 86, 200, false)],
+    ['salvato_oltre_la_fine',   intervalloTrimIniziale(190, 300, 200, false)],
+    ['fine_prima_del_start',    intervalloTrimIniziale(50, 10, 200, false)],
+    ['start_oltre_la_fine',     intervalloTrimIniziale(300, 0, 200, false)],
+    ['senza_durata',            intervalloTrimIniziale(0, 0, 0, false)],
+    ['finestra_5_secondi',      intervalloTrimIniziale(0, 0, 200, false, 5)],
+    ['stem',                    intervalloTrimIniziale(0, 0, 200, true)],
+    ['stem_senza_durata',       intervalloTrimIniziale(0, 0, 0, true)],
+    ['stem_ignora_intervallo',  intervalloTrimIniziale(56, 86, 200, true)]
+  ]
 }));
 """
         cls.risultati = esegui_js(js)
@@ -202,6 +217,35 @@ console.log(JSON.stringify({
         self.assertEqual(al[3], 0, msg="senza lunghezza: nessun anticipo")
         self.assertAlmostEqual(al[4], 0.032, places=6)
 
+    def test_intervallo_iniziale_del_trim(self):
+        # La selezione con cui il file si apre: la finestra di 30 s, oppure
+        # l'intervallo SALVATO nel database (confronto campioni), coi limiti del
+        # file rispettati (mai oltre la durata, mai a rovescio).
+        casi = {nome: iv for nome, iv in self.risultati["intervallo"]}
+        self.assertEqual(casi["default"], {"start": 0, "end": 30, "voluto": False})
+        self.assertEqual(casi["dal_secondo_100"], {"start": 100, "end": 130, "voluto": False})
+        self.assertEqual(casi["salvato"], {"start": 56, "end": 86, "voluto": True})
+        self.assertEqual(casi["salvato_oltre_la_fine"],
+                         {"start": 190, "end": 200, "voluto": True})
+        self.assertEqual(casi["fine_prima_del_start"],
+                         {"start": 50, "end": 80, "voluto": False})
+        self.assertEqual(casi["start_oltre_la_fine"],
+                         {"start": 199.9, "end": 200, "voluto": False})
+        self.assertEqual(casi["senza_durata"], {"start": 0, "end": 0, "voluto": False})
+        self.assertEqual(casi["finestra_5_secondi"], {"start": 0, "end": 5, "voluto": False})
+
+    def test_lo_stem_si_ascolta_tutto_e_senza_trim(self):
+        # `senzaTrim` (19/09/2026): la selezione è TUTTO il file — senza, il play si
+        # fermerebbe dopo i 30 secondi di default. È il caso degli stem di /scheda.
+        casi = {nome: iv for nome, iv in self.risultati["intervallo"]}
+        self.assertEqual(casi["stem"]["start"], 0)
+        self.assertEqual(casi["stem"]["end"], 200)
+        self.assertTrue(casi["stem"]["senzaTrim"])
+        self.assertEqual(casi["stem_senza_durata"]["end"], 0)
+        self.assertEqual(casi["stem_ignora_intervallo"]["end"], 200,
+                         "con senzaTrim l'intervallo salvato nel database non conta")
+        self.assertEqual(casi["stem_ignora_intervallo"]["start"], 0)
+
 
 class TestCablaggio(unittest.TestCase):
     """Pulsante, elementi che spariscono, onda grigia, anticipo e URL assoluta."""
@@ -216,7 +260,9 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn(">✂ Trim giallo on</button>", self.pagina)
         for funzione in ("etichettaTrimGiallo", "aggiornaPulsantiTrim", "toggleTrimGiallo"):
             self.assertRegex(self.pagina, r"function\s+%s\s*\(" % funzione)
-        self.assertIn("trimVisibile: true,", self.pagina)
+        self.assertIn("trimVisibile: opts.senzaTrim ? false : true,", self.pagina,
+                      "il trim nasce visibile; l'unica eccezione è lo stem (senzaTrim)")
+        self.assertIn("senzaTrim: !!opts.senzaTrim,", self.pagina)
         self.assertIn("aggiornaPulsantiTrim(key); // etichetta del pulsante del trim giallo",
                       self.pagina)
         # sparisce DAVVERO: riquadro, ombreggiature, maniglie e area di trascinamento
@@ -225,6 +271,16 @@ class TestCablaggio(unittest.TestCase):
         for pezzo in ("mostra(sl);", "mostra(ss);", "mostra(sr);",
                       "mostra(ths);", "mostra(the_);", "mostra(tda);"):
             self.assertIn(pezzo, self.pagina)
+
+    def test_lo_stem_carica_senza_trim(self):
+        # 19/09/2026 — `/scheda` monta un player su OGNI stem: è lo stesso sampler,
+        # ma col trim SPENTO e la griglia sul BPM della canzone. La selezione è
+        # tutto il file, altrimenti il play si fermerebbe dopo i 30 s di default.
+        self.assertIn("{senzaTrim: e.data.trim === false}", self.pagina)
+        self.assertIn("const iv = intervalloTrimIniziale(p.startSec, p.wantEnd, dur, p.senzaTrim);",
+                      self.pagina)
+        self.assertIn("setLoopMode(key, 'all');", self.pagina)
+        self.assertIn("senzaTrim: !!opts.senzaTrim,", self.pagina)
 
     def test_onda_grigia_col_trim_spento(self):
         # «quando c'è trim giallo off … dovrebbe tornare tutto grigio»: l'onda dentro

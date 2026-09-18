@@ -3652,6 +3652,48 @@ def verifica_pagina():
     database o dal player con `?song=<id>`."""
     return send_file(os.path.join(BASE_DIR, "verifica.html"))
 
+# ── IL SAMPLER COME PAGINA A SÉ STANTE (19/09/2026) ──────────────────────────
+# Il player stile FL Studio (onda, griglia BPM, metronomo, TAP, trim…) è definito
+# DENTRO `index (2).html`, in una <textarea id="audio-editor-src">: la pagina lo
+# monta in un iframe `blob:` (embedAudioEditorX) e lo apre nella finestra modale.
+# Per montarlo anche da un'ALTRA pagina — `/scheda`, dove serve un player per OGNI
+# stem — senza copiare quel documento (sarebbe una copia da tenere allineata a
+# mano, e alla prima modifica del sampler andrebbero fuori sincrono), qui il testo
+# della textarea si serve su `GET /sampler`: la sorgente resta una sola.
+_SAMPLER_CACHE = {}      # percorso del file -> (mtime, testo del sampler)
+
+def sampler_html():
+    """Il documento del sampler, letto dalla textarea di `index (2).html`.
+
+    Il file si rilegge solo quando cambia (mtime): la pagina principale è grande
+    e un iframe per stem farebbe tre o quattro letture per niente.
+    """
+    percorso = os.path.join(BASE_DIR, "index (2).html")
+    mtime = os.path.getmtime(percorso)
+    cache = _SAMPLER_CACHE.get(percorso)
+    if cache and cache[0] == mtime:
+        return cache[1]
+    with open(percorso, encoding="utf-8") as fh:
+        pagina = fh.read()
+    m = re.search(r'<textarea[^>]*id="audio-editor-src"[^>]*>(.*?)</textarea>',
+                  pagina, re.S)
+    testo = (m.group(1).strip() if m else "")
+    if not testo:
+        raise RuntimeError("il documento del sampler non è in index (2).html")
+    _SAMPLER_CACHE[percorso] = (mtime, testo)
+    return testo
+
+@app.route("/sampler")
+def sampler_pagina():
+    """Il sampler come pagina indipendente (per gli iframe: `/scheda` lo monta su
+    ogni stem). Il protocollo dei messaggi è lo stesso della pagina principale:
+    `{action:'load', url, filename, etichetta, startSec, endSec, bpm, grid, trim}`."""
+    try:
+        return Response(sampler_html(), mimetype="text/html")
+    except Exception as e:
+        return Response(f"<p>sampler non disponibile: {e}</p>", status=500,
+                        mimetype="text/html")
+
 # ── STREAMING ────────────────────────────────────────────────────────────────
 def _risposta_audio(path, mime):
     """Risponde con un file audio rispettando l'header `Range`.

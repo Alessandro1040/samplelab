@@ -89,6 +89,14 @@ input[type=range]{width:82px;accent-color:var(--accent)}
 .stem-tools{display:flex;gap:8px;flex-wrap:wrap}
 .stem-tools button{background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;border-radius:8px;padding:8px 12px;cursor:pointer}
 .stem-tools button:hover{border-color:var(--accent);color:var(--accent)}
+/* ── IL PLAYER DI OGNI STEM (19/09/2026) ──────────────────────────────
+   Lo stesso sampler FL-Studio della pagina principale — onda, griglia del BPM,
+   metronomo, cursore — servito da /sampler e montato qui su OGNI traccia, ma
+   col TRIM GIALLO SPENTO: uno stem non ha un intervallo da ritagliare, si
+   ascolta intero. `loading="lazy"` fa aprire i player man mano che si scorre:
+   con 4-6 tracce non si decodificano tutte insieme. */
+.stem-player{margin:0 0 16px}
+.stem-player iframe{display:block;width:100%;height:520px;border:1px solid var(--border);border-radius:10px;background:#0a0a0a}
 </style>
 </head>
 <body>
@@ -103,7 +111,7 @@ input[type=range]{width:82px;accent-color:var(--accent)}
 
   <section class="card" id="card-stem">
     <div class="card-title">✂️ Tracce di cui è composta<span class="count" id="n-stem"></span></div>
-    <div class="card-sub">Gli stem registrati nel database per questa canzone, più quelli eventualmente già su disco. Si creano con <b>Demucs</b> (voce, batteria, basso, altro) oppure si <b>caricano a mano</b> da una cartella di tracce già separate — «canzone - Violino.mp3» entra nel database come <b>violino</b>. Con <b>▶ Suona tutti insieme</b> partono sincronizzati, per sentire il brano ricomposto.</div>
+    <div class="card-sub">Gli stem registrati nel database per questa canzone, più quelli eventualmente già su disco. Si creano con <b>Demucs</b> (voce, batteria, basso, altro) oppure si <b>caricano a mano</b> da una cartella di tracce già separate — «canzone - Violino.mp3» entra nel database come <b>violino</b>. Con <b>▶ Suona tutti insieme</b> partono sincronizzati, per sentire il brano ricomposto. <b>Ogni traccia ha il suo player</b> (onda, griglia del BPM e metronomo: lo stesso sampler di <b>🎛 Sampler</b>) <b>senza il trim giallo</b> — uno stem si ascolta intero.</div>
     <div class="stem-drop" id="stem-drop" ondragover="stemDragOver(event)" ondragleave="stemDragLeave(event)" ondrop="stemDrop(event)">
       <button onclick="apriSceltaStem()">📂 Carica cartella di stem</button>
       <input type="file" id="stem-input" multiple webkitdirectory directory style="display:none" onchange="stemScelti(this.files)">
@@ -420,7 +428,14 @@ function renderStem(){
           <a class="mini" href="${esc(r.download_url)}" title="Scarica la traccia">⬇</a>`:
           `<span class="tag warn">non riproducibile</span>`}
       </div>
-      ${r.esiste?`<audio id="stem-audio-${i}" src="${esc(r.url)}" preload="none" style="display:none"></audio>`:''}
+      ${r.esiste?`<audio id="stem-audio-${i}" src="${esc(r.url)}" preload="none" style="display:none"></audio>
+      <div class="stem-player">
+        <iframe loading="lazy" src="/sampler" onload="stemPlayerMonto(this)"
+                data-url="${esc(r.url)}" data-file="${esc(r.filename)}"
+                data-bpm="${Number(s.bpm)||0}"
+                data-etichetta="${esc(r.etichetta)}${s.title?' · '+esc(s.title):''}"
+                title="Player della traccia ${esc(r.etichetta)}"></iframe>
+      </div>`:''}
     </div>`).join('')+
     (c.stem_missing?`<div class="status">⚠ ${c.stem_missing} file registrati non sono più su disco: la riga lo dice e non fa cliccare a vuoto.</div>`:'')+
     (stemRows.some(r=>!r.registrato)?`<div class="status">Nota: le tracce «solo su disco» sono nella cartella di Demucs ma non hanno una riga in <b>stem_tracks</b>.</div>`:'');
@@ -546,6 +561,7 @@ function stemPlay(i){
   if(!a) return;
   if(!a.paused){ a.pause(); aggiornaBottoniStem(); return; }
   stemRows.forEach((_,j)=>{ if(j!==i&&stemAudio[j]) stemAudio[j].pause(); });
+  pausaSamplerStem();      // e i player degli stem si fermano (un solo audio per volta)
   a.muted=false;
   const b=document.getElementById('stem-mute-'+i);
   if(b){ b.classList.remove('off'); b.textContent='🔊'; }
@@ -585,6 +601,7 @@ function mixerToggle(){
   const t=pronti[0].currentTime||0;
   pronti.forEach(a=>{ try{a.currentTime=t}catch(_){}});
   pronti.forEach(a=>{ a.muted=false; a.play().catch(()=>{}); });
+  pausaSamplerStem();      // il mixer parte → i player degli stem si fermano
   stemRows.forEach((_,i)=>{
     const b=document.getElementById('stem-mute-'+i);
     if(b){ b.classList.remove('off'); b.textContent='🔊'; }
@@ -604,6 +621,62 @@ function mixerStop(){
   document.getElementById('mixer').classList.remove('visible');
   aggiornaBottoniStem();
 }
+// ═══════════════════════════════════════════════════════════════════════
+// IL PLAYER DI OGNI STEM (19/09/2026) — lo stesso sampler FL-Studio della
+// pagina principale (onda, griglia del BPM, metronomo, cursore), servito dalla
+// rotta `/sampler` e montato su OGNI traccia. L'unica differenza dal sampler
+// dei campioni: qui il TRIM GIALLO è SPENTO e resta spento — uno stem non ha un
+// intervallo da ritagliare, si ascolta intero, dall'inizio alla fine.
+// ═══════════════════════════════════════════════════════════════════════
+function stemPlayerMonto(fr){
+  if(!fr || fr.dataset.montato) return;   // ogni iframe si monta una volta sola
+  fr.dataset.montato='1';
+  try{
+    fr.contentWindow.postMessage({
+      action:'load',
+      origin:window.location.origin,      // i percorsi (/stream-stem/…) diventano assoluti
+      url:fr.dataset.url||'',
+      filename:fr.dataset.file||'stem',
+      etichetta:fr.dataset.etichetta||fr.dataset.file||'stem',
+      startSec:0, endSec:0,
+      trim:false,                         // NIENTE trim giallo: si ascolta tutto
+      bpm:Number(fr.dataset.bpm)||0       // la griglia parte sul BPM della canzone
+    },'*');
+  }catch(_){}
+}
+// Un solo audio per volta (la stessa regola della pagina principale): quando
+// parte un player di stem si ferma il mixer, e viceversa. Il sampler avvisa da
+// sé (`parent.postMessage({action:'audioplaying'})`).
+function pausaSamplerStem(){
+  document.querySelectorAll('.stem-player iframe').forEach(fr=>{
+    try{ fr.contentWindow.postMessage({action:'pauseall'},'*'); }catch(_){}
+  });
+}
+function pausaMixer(){
+  let fermato=false;
+  stemRows.forEach((_,i)=>{
+    const a=audioDi(i);
+    if(a&&!a.paused){ a.pause(); fermato=true; }
+  });
+  if(fermato) aggiornaBottoniStem();
+}
+// Un player di stem sta suonando? Gli iframe sono della stessa origine, quindi si
+// può chiedere direttamente al sampler (nessun messaggio in più da inventare).
+// Serve al ridisegno automatico della scheda: ricostruire le righe butterebbe
+// giù gli iframe e la musica si interromperebbe a metà.
+function stemSamplerInRiproduzione(){
+  let n=0;
+  document.querySelectorAll('.stem-player iframe').forEach(fr=>{
+    try{
+      const p=fr.contentWindow&&fr.contentWindow.players&&fr.contentWindow.players.main;
+      if(p&&p.audio&&!p.audio.paused&&!p.audio.ended) n++;
+    }catch(_){}
+  });
+  return n;
+}
+window.addEventListener('message', function(e){
+  if(e.data && e.data.action==='audioplaying') pausaMixer();
+});
 // ═══════════════════════════════════════════════════════════════════════
 // 📂 STEM CARICATI A MANO (una cartella di tracce già separate)
 // Le tracce di Demucs si chiamano vocals/drums/bass/other; quelle che arrivano
@@ -779,12 +852,13 @@ function ricaricaScheda(){ mixerStop(); caricaScheda(); }
 
 // Il database cambia di continuo (download, Verifica, script SQL): la pagina
 // ascolta la firma leggera /db/changed e si ridisegna solo quando cambia.
-// NON si ridisegna mentre gli stem suonano: ricostruirebbe gli <audio> e la
+// NON si ridisegna mentre gli stem suonano — né dal mixer (`<audio>`) né da un
+// player del sampler: ricostruire le righe butterebbe giù gli iframe e la
 // riproduzione si interromperebbe a metà.
 let attesaRicaricamento=false;
 async function autoAggiorna(){
   if(!songId) return;
-  if(stemInRiproduzione().length){ attesaRicaricamento=true; return; }
+  if(stemInRiproduzione().length||stemSamplerInRiproduzione()){ attesaRicaricamento=true; return; }
   try{
     const sig=await fetch('/db/changed').then(r=>r.json());
     const sigStr=JSON.stringify(sig||{});
@@ -800,6 +874,7 @@ async function autoAggiorna(){
 // dentro questa funzione anonima non sarebbero raggiungibili dalla pagina (è lo
 // stesso motivo per cui in browse.html il pulsante ↑/↓ Crescente non risponde).
 Object.assign(window,{mixerToggle,mixerStop,stemPlay,stemMuto,stemVolume,
+                      stemPlayerMonto,
                       avviaSeparazione,ricaricaScheda,
                       apriSceltaStem,stemScelti,svuotaAnteprimaStem,salvaStemManuali,
                       stemDragOver,stemDragLeave,stemDrop});
