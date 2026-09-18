@@ -3538,14 +3538,38 @@ VERIFY_PESI = {1: 3.0,     # ricerca su Genius
                6: 12.0,    # impronta acustica sull'anteprima iTunes
                7: 90.0}    # trascrizione Whisper (e demucs, se a cappella)
 VERIFY_PESO_TOTALE = sum(VERIFY_PESI.values())
+# ⚠️ I passi NON girano in ordine numerico: `verify_song` fa 1 → 2 → **6** (l'audio)
+# → 3 → 4 → 5 → 7. Questo è l'ordine vero, e il conto del lavoro deve usarlo: con la
+# «somma dei passi con numero minore» la percentuale SCENDEVA passando dal 6 al 3
+# (segnalato da Alessandro il 18/09/2026: «ci sono momenti in cui è alta e poi torna
+# più bassa»: dal 30% al 6%). Entrando in un passo si considerano finiti tutti quelli
+# che lo precedono NELL'ORDINE, anche se saltati.
+VERIFY_ORDINE = (1, 2, 6, 3, 4, 5, 7)
 
 
-def _set_verify_status(song_id, step, total, status, frazione=None):
+def _set_verify_status(song_id, step, total, status, frazione=None, misurabile=False):
     """Segna il passo corrente e il testo da mostrare. `frazione` (0-1) è quanto è
-    già stato fatto DENTRO il passo (None = non si sa ancora)."""
+    già stato fatto DENTRO il passo (None = non si sa ancora); `misurabile=True`
+    quando questo passo la frazione la sa dire da sé (Whisper, demucs): lì non si
+    inventa una stima dal tempo.
+
+    Se il passo è lo STESSO si aggiorna solo il testo: la frazione già misurata e il
+    cronometro restano (dentro il 7 ci sono più annunci — «Analisi audio (BPM/Key)…»,
+    «Trascrivo il file locale…»: azzerarli faceva tornare indietro la percentuale).
+    """
+    vecchio = verify_progress.get(song_id) or {}
+    if vecchio.get("step") == step:
+        vecchio["status"] = status
+        vecchio["ts"] = time.time()
+        if misurabile:
+            vecchio["misurabile"] = True
+        return
     verify_progress[song_id] = {"step": step, "total": total, "status": status,
                                 "ts": time.time(), "iniziato": time.time(),
-                                "frazione": frazione}
+                                "frazione": frazione, "misurabile": misurabile,
+                                # il progresso mostrato non torna mai indietro: si
+                                # porta avanti il massimo raggiunto (vedi l'endpoint)
+                                "percento_max": vecchio.get("percento_max") or 0}
 
 
 def _avanza_verify(song_id, frazione):
@@ -3561,18 +3585,35 @@ def _avanza_verify(song_id, frazione):
     st["frazione"] = max(st.get("frazione") or 0.0, f)
 
 
-def _verify_percento(passo, frazione=None, secondi=0.0):
+def _con_il_massimo(vecchio, nuovo):
+    """Funzione PURA. Il progresso mostrato **non torna mai indietro**: fra quello
+    calcolato adesso e il massimo già visto vince il più alto."""
+    try:
+        return max(int(vecchio or 0), int(nuovo))
+    except (TypeError, ValueError):
+        return int(nuovo or 0)
+
+
+def _verify_percento(passo, frazione=None, secondi=0.0, misurabile=False):
     """Funzione PURA. Quanto lavoro è stato fatto, da 0 a 100, sul TOTALE dei passi.
 
-    I passi già passati contano per intero; il passo corrente conta per la sua
-    `frazione` — quella vera se il pezzo la sa dire, altrimenti stimata dal tempo
-    trascorso rispetto al peso del passo, **mai oltre il 90%**: la barra non deve
-    arrivare a 100 prima che la verifica sia finita.
+    Contano per intero i passi che vengono PRIMA di questo nell'ordine di esecuzione
+    (`VERIFY_ORDINE`, che non è 1-2-3…: l'audio, il 6, gira subito dopo il 2); il passo
+    corrente conta per la sua `frazione` — quella VERA se il pezzo la sa dire
+    (`misurabile=True`: lì non si stima niente, meglio un numero fermo che uno
+    inventato), altrimenti stimata dal tempo trascorso sul peso del passo e **mai oltre
+    il 90%**: la barra non deve arrivare a 100 prima della fine.
     """
     peso = VERIFY_PESI.get(passo, 5.0)
-    fatto_prima = sum(p for k, p in VERIFY_PESI.items() if k < passo)
+    ordine = VERIFY_ORDINE if passo in VERIFY_ORDINE else tuple(sorted(VERIFY_PESI))
+    prima = (ordine[:ordine.index(passo)] if passo in ordine
+             else tuple(k for k in ordine if k < passo))
+    fatto_prima = sum(VERIFY_PESI.get(k, 5.0) for k in prima)
     if frazione is None:
-        frazione = 0.9 * min(1.0, max(0.0, (secondi or 0.0) / peso)) if peso else 0.0
+        if misurabile:
+            frazione = 0.0
+        else:
+            frazione = 0.9 * min(1.0, max(0.0, (secondi or 0.0) / peso)) if peso else 0.0
     fattezza = peso * max(0.0, min(1.0, frazione))
     return int(round(100.0 * (fatto_prima + fattezza) / VERIFY_PESO_TOTALE))
 
@@ -3581,18 +3622,22 @@ def _verify_percento(passo, frazione=None, secondi=0.0):
 def verify_status_endpoint(song_id):
     """A che punto è la verifica: passo, testo, e il **progresso totale 0-100%**.
 
-    `percento` è calcolato qui a ogni richiesta (la pagina interroga ogni 1,5 s) e
-    usa `secondi` per far avanzare la stima dentro il passo corrente.
+    Il valore restituito è il MASSIMO fra il calcolo di adesso e quello già mostrato:
+    la percentuale **non può scendere** (segnalato il 18/09/2026, quando calava dal 30%
+    al 6% cambiando passo e dal 56% al 38% quando arrivava la frazione vera di demucs).
     """
     st = verify_progress.get(song_id)
     if not st:
         return jsonify({"active": False, "song_id": song_id})
     secondi = max(0.0, time.time() - st.get("iniziato", st["ts"]))
+    percento = _verify_percento(st["step"], st.get("frazione"), secondi,
+                                bool(st.get("misurabile")))
+    percento = _con_il_massimo(st.get("percento_max"), percento)
+    st["percento_max"] = percento
     return jsonify({"active": True, "song_id": song_id, "step": st["step"],
                     "total": st["total"], "status": st["status"],
                     "secondi": round(secondi, 1),
-                    "frazione": st.get("frazione"),
-                    "percento": _verify_percento(st["step"], st.get("frazione"), secondi)})
+                    "frazione": st.get("frazione"), "percento": percento})
 
 @app.route("/db/songs/<song_id>/verify", methods=["POST"])
 def verify_song(song_id):
@@ -4108,7 +4153,8 @@ def verify_song(song_id):
     if not bpmkey_done and (eff_bpm in (None, "") or eff_key in (None, "")) and s.get("local_file"):
         fp = os.path.join(DL_DIR, s["local_file"])
         if os.path.exists(fp):
-            _set_verify_status(song_id, 7, VERIFY_TOTALE, "Analisi audio (BPM/Key)…")
+            _set_verify_status(song_id, 7, VERIFY_TOTALE, "Analisi audio (BPM/Key)…",
+                               misurabile=True)
             try:
                 # Analisi audio VELOCE e SICURA: prima ffmpeg via os.posix_spawn
                 # (niente fork) + numpy vettorizzato (rilascia il GIL → il server
@@ -4145,15 +4191,18 @@ def verify_song(song_id):
             if liriche_rif:
                 risultato_testo = verifica_testo_riferimento(
                     percorso_locale, liriche_rif, tipo="liriche", sorgente=sorgente_testo,
-                    status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo),
+                    status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo,
+                                                            misurabile=True),
                     soglie=soglie_testo, avanza=lambda f: _avanza_verify(song_id, f))
             else:
-                _set_verify_status(song_id, 7, VERIFY_TOTALE, "🗣 Cerco un audio di riferimento…")
+                _set_verify_status(song_id, 7, VERIFY_TOTALE,
+                                   "🗣 Cerco un audio di riferimento…", misurabile=True)
                 info_rif = cerca_anteprima_itunes(search_artist, search_title)
                 audio_rif = scarica_anteprima(info_rif) if info_rif else None
                 risultato_testo = verifica_testo_riferimento(
                     percorso_locale, audio_rif or "", tipo="audio", sorgente=sorgente_testo,
-                    status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo),
+                    status=lambda testo: _set_verify_status(song_id, 7, VERIFY_TOTALE, testo,
+                                                            misurabile=True),
                     soglie=soglie_testo, avanza=lambda f: _avanza_verify(song_id, f))
             updates.update(campi_dal_risultato_testo(risultato_testo))
             messages.append(risultato_testo["messaggio"])

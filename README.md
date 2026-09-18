@@ -2059,31 +2059,64 @@ Da tenere presente nelle sessioni di lavoro successive:
   più lungo — sembrava ferma. Ora:
   - i passi hanno un **peso in secondi** (`VERIFY_PESI`, misurati sul Mac di origine:
     Genius 3, testo/copertina 6, YouTube 8, WhoSampled 20, Tunebat 4, audio 12,
-    **trascrizione 90**; totale 143) e `_verify_percento(passo, frazione, secondi)`
-    (funzione pura) dice a che punto è il lavoro TOTALE;
-  - il passo corrente porta la sua **frazione vera** quando il pezzo la sa dire:
-    **Whisper** dai suoi segmenti (`trascrivi` legge `seg.end / durata`: la frazione di
-    audio già trascritto è una misura, non una stima) e **demucs** dall'avanzamento che
-    stampa da sé (le sue percentuali lette dallo stderr: `a_cappella` ora usa `Popen` +
-    `select` per non perdere né l'avanzamento né il `timeout`);
-  - per gli altri passi la frazione è **stimata dal tempo trascorso** sul peso del passo e
-    non supera mai il 90% (`_verify_percento`): la barra non arriva a 100 prima della fine;
-    `_avanza_verify` tiene il massimo, così una misura che arriva dopo un'altra non fa
-    tornare indietro la barra;
+    **trascrizione 90**; totale 143) e `_verify_percento(passo, frazione, secondi,
+    misurabile)` (funzione pura) dice a che punto è il lavoro TOTALE;
+  - ⚠️ **I passi non girano in ordine numerico**: `verify_song` fa **1 → 2 → 6 → 3 → 4 →
+    5 → 7** (l'audio, il 6, viene subito dopo il 2). Il conto usa `VERIFY_ORDINE`:
+    entrando in un passo si considerano finiti quelli che lo precedono NELL'ORDINE. Con la
+    «somma dei passi con numero minore» la percentuale **scendeva dal 30% al 6%** passando
+    dal 6 al 3 (segnalato da Alessandro: «ci sono momenti in cui è alta e poi torna più
+    bassa»);
+  - il passo corrente porta la sua **frazione vera** quando il pezzo la sa dire
+    (`misurabile=True`): **Whisper** dai suoi segmenti (`trascrivi` legge `seg.end /
+    durata`, cioè quanto audio ha già trascritto) e **demucs** dall'avanzamento che
+    stampa da sé (percentuali lette dallo stderr: `a_cappella` usa `Popen` + `select` per
+    non perdere né l'avanzamento né il `timeout`). In quei passi **non si stima niente**:
+    meglio un numero fermo che uno inventato, che poi scenderebbe quando arriva la misura;
+  - per gli altri passi la frazione è stimata dal tempo trascorso sul peso del passo, mai
+    oltre il 90% (`_verify_percento`); **due guardie** contro il tornare indietro: un nuovo
+    annuncio dentro lo STESSO passo non azzera frazione e cronometro (dentro il 7 ci sono
+    «Analisi audio (BPM/Key)…» e «Trascrivo il file locale…»), e l'endpoint restituisce il
+    **massimo** fra il valore calcolato adesso e quello già mostrato (`_con_il_massimo`,
+    salvato in `percento_max`);
   - in pagina: **percentuale grande** in verde, **barra** con transizione lunga (0,9 s
     lineare) e **rotella** che gira (`@keyframes gira`), più «Passo x/7» e i secondi spesi
     nel passo corrente; la pagina interroga `verify_status` ogni 1,2 s (prima 1,5) e a
     fine verifica mette 100% e ferma la rotella.
-  - Verifiche del 18/09/2026: **5 test nuovi** (`TestProgressoVerifica`: il conto del
-    lavoro totale, la monotonia e i limiti 0-100, la frazione che non torna indietro, il
-    progresso vero dei due pezzi lunghi nel codice, l'endpoint e la pagina) e **411 test
-    di suite**; **misurata la curva vera** su *21 Questions* con un `POST /verify` completo
-    (136,2 s in tutto) campionando `verify_status` ogni 4 s: il passo 7 entra a **38%**, la
-    frazione sale **0,007 → 0,343** durante demucs (~85 s: è il suo avanzamento mappato
-    sulla prima metà del passo), si ferma ~12 s mentre il modello di Whisper si carica, poi
-    i segmenti portano **0,418 → 0,658** (Whisper all'88% dell'audio) e a 132 s la verifica
-    chiude con «Testo confermato: 82,6%». La barra in pagina è passata da 38% a 78% **senza
-    mai saltare a 100 prima della fine**.
+  - ⚠️ **La percentuale scendeva: tre difetti, corretti (seconda segnalazione del
+    18/09/2026).** Alessandro: «è strutturata molto male quella percentuale, ci sono
+    momenti in cui è alta e poi torna più bassa anziché aumentare». Erano tre cose
+    insieme: (1) **i passi non girano in ordine numerico** (1 → 2 → **6** → 3 → 4 → 5 → 7,
+    l'audio viene subito dopo il 2) e il conto era la somma dei passi con numero minore:
+    dal 6 (≈29%) al 3 (≈6%) la percentuale **crollava** — ora c'è `VERIFY_ORDINE` ed
+    entrando in un passo si considerano finiti quelli che lo precedono nell'ordine, anche
+    se saltati; (2) dentro il passo 7 ci sono più annunci («Analisi audio (BPM/Key)…»,
+    «🗣 Cerco un audio di riferimento…», «Trascrivo il file locale…») e ognuno **azzzerava
+    frazione e cronometro** — ora un annuncio sullo stesso passo aggiorna solo il testo;
+    (3) la **stima dal tempo** arrivava prima della **misura vera** (nella trascrizione
+    con demucs cresceva fino a ~56%, poi demucs riportava 0,007 e il numero tornava a
+    ~38%) — ora il passo 7 è `misurabile=True` e lì **non si stima niente**: si muove solo
+    con i segmenti di Whisper e le percentuali di demucs. In più c'è una **rete di
+    sicurezza**: l'endpoint restituisce il **massimo** fra il valore calcolato e quello già
+    mostrato (`_con_il_massimo`, in `percento_max`), quindi il numero non può scendere
+    nemmeno se in futuro si cambiano pesi o passi.
+  - Verifiche del 18/09/2026: **9 test** in `TestProgressoVerifica` (4 nuovi: l'ordine dei
+    passi coi numeri attesi 0-2-6-15-20-34-37 e la monotonia lungo l'ordine, il passo
+    «misurabile» che non si inventa la stima, l'annuncio sullo stesso passo che non azzera
+    niente, `_con_il_massimo`) e **415 test di suite** (`OK`); **misurata la curva vera**
+    su *21 Questions* con un `POST /verify` completo campionando `verify_status` ogni 3 s e
+    **segnalando ogni calo**: 2% (passo 1) → **37%** (passo 7: i passi 2-6 sono saltati
+    perché già a posto) → 38 → 39 → … → **78%**, con la frazione vera di demucs
+    (0,007 → 0,343) e di Whisper (0,418 → 0,66), 144,3 s in tutto e **「cali della
+    percentuale: 0」**: mai scesa. Prima del fix la stessa misura dava cali netti (dal 6 al
+    3 e dall'arrivo della misura di demucs).
+  - **In CHROME VERO** (la pagina, con 🗣 voce e 🎤 a cappella spuntati): la percentuale è
+    salita **38 → 39 → 42 → 44 → 46 → 49 → 51 → 53 → 55 → 58 → 59 → 61 → 65 → 68 → 70 →
+    75 → 78%** dentro il passo 7, con la **rotella** che girava e i «secondi in questo
+    passo» che salivano, e solo alla fine è passata a **100%** con «Verifica conclusa» e la
+    rotella ferma (193 s: la macchina era carica per i test in parallelo). Nei messaggi
+    **non compare** nessun «✏️ Metadati aggiornati» spurio: è anche la prova che il fix di
+    `esc()` sui Produttori tiene.
   - **In CHROME VERO** (la pagina, con 🗣 voce e 🎤 a cappella spuntati): la percentuale è
     salita **38 → 39 → 42 → 44 → 46 → 49 → 51 → 53 → 55 → 58 → 59 → 61 → 65 → 68 → 70 →
     75 → 78%** dentro il passo 7, con la **rotella** che girava e i «secondi in questo

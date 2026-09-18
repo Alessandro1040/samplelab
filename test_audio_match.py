@@ -44,6 +44,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -1084,10 +1085,11 @@ class TestProgressoVerifica(unittest.TestCase):
         self.assertEqual(APP._verify_percento(2, None, 0), 2)          # dopo il passo 1
 
     def test_cresce_sempre_e_non_esce_dai_limiti(self):
-        passi = sorted(APP.VERIFY_PESI)
-        valori = [APP._verify_percento(k, None, 0) for k in passi]
+        # ⚠️ la monotonia si controlla NELL'ORDINE DI ESECUZIONE, non 1-2-3…: il 6
+        # (audio) viene prima di 3-4-5, e il conto tiene conto di questo.
+        valori = [APP._verify_percento(k, None, 0) for k in APP.VERIFY_ORDINE]
         self.assertEqual(valori, sorted(valori), "il progresso non torna indietro")
-        for passo in passi:
+        for passo in sorted(APP.VERIFY_PESI):
             for frazione in (None, 0, 0.5, 1):
                 for secondi in (0, 10, 10000):
                     p = APP._verify_percento(passo, frazione, secondi)
@@ -1110,6 +1112,68 @@ class TestProgressoVerifica(unittest.TestCase):
         finally:
             APP.verify_progress.pop(chiave, None)
 
+    def test_il_progresso_non_scende_cambiando_passo(self):
+        """Il 18/09/2026 la percentuale SCENDEVA («ci sono momenti in cui è alta e poi
+        torna più bassa»): i passi non girano in ordine numerico (l'audio, il 6, viene
+        subito dopo il 2) e il conto era «somma dei passi con numero minore», così dal
+        6 (≈30%) si passava al 3 (≈6%). Ora si usa l'ORDINE vero."""
+        self.assertEqual(tuple(APP.VERIFY_ORDINE), (1, 2, 6, 3, 4, 5, 7))
+        # entrando in un passo, quelli che lo precedono NELL'ORDINE sono finiti
+        self.assertEqual(APP._verify_percento(1, None, 0), 0)
+        self.assertEqual(APP._verify_percento(2, None, 0), 2)          # dopo 1 (3)
+        self.assertEqual(APP._verify_percento(6, None, 0), 6)          # dopo 1, 2 (9)
+        self.assertEqual(APP._verify_percento(3, None, 0), 15)         # dopo 1, 2, 6 (21)
+        self.assertEqual(APP._verify_percento(4, None, 0), 20)         # + 3 (29)
+        self.assertEqual(APP._verify_percento(5, None, 0), 34)         # + 4 (49)
+        self.assertEqual(APP._verify_percento(7, None, 0), 37)         # + 5 (53)
+        # e in nessun passaggio intermedio la percentuale può calare
+        valori = []
+        for passo in APP.VERIFY_ORDINE:
+            valori.append(APP._verify_percento(passo, None, 10 ** 6))  # passo "finito"
+        self.assertEqual(valori, sorted(valori), valori)
+        self.assertGreaterEqual(APP._verify_percento(3, None, 0),
+                                APP._verify_percento(6, None, 10 ** 6))
+
+    def test_un_passo_che_sa_la_sua_frazione_non_se_la_inventa(self):
+        """Nei passi «misurabili» (trascrizione) la stima dal tempo non si usa: meglio
+        un numero fermo che uno inventato che poi scende quando arriva la misura vera."""
+        self.assertEqual(APP._verify_percento(7, None, 100000, True), 37)
+        self.assertEqual(APP._verify_percento(7, None, 100000, False), 94)
+        # e la misura vera (metà trascrizione) vale più della stima
+        self.assertGreater(APP._verify_percento(7, 0.5, 0, True),
+                           APP._verify_percento(7, None, 100000, True))
+
+    def test_lo_stesso_passo_non_azzera_quello_che_ha_fatto(self):
+        """Dentro il passo 7 ci sono più annunci («Analisi audio (BPM/Key)…», «Trascrivo
+        il file locale…»): un nuovo annuncio non deve azzerare la frazione già misurata
+        né il cronometro (era un'altra causa del tornare indietro)."""
+        chiave = "song_test_stesso_passo"
+        try:
+            APP._set_verify_status(chiave, 7, 7, "Analisi audio (BPM/Key)…", misurabile=True)
+            APP._avanza_verify(chiave, 0.5)
+            inizio = APP.verify_progress[chiave]["iniziato"]
+            time.sleep(0.05)
+            APP._set_verify_status(chiave, 7, 7, "🗣 Trascrivo il file locale…",
+                                   misurabile=True)
+            stato = APP.verify_progress[chiave]
+            self.assertAlmostEqual(stato["frazione"], 0.5)
+            self.assertEqual(stato["iniziato"], inizio)          # cronometro non azzerato
+            self.assertIn("Trascrivo", stato["status"])          # ma il testo sì
+            # cambiando passo la frazione riparte (è un altro lavoro)
+            APP._set_verify_status(chiave, 6, 7, "🔊 Confronto…")
+            self.assertIsNone(APP.verify_progress[chiave]["frazione"])
+            self.assertEqual(APP.verify_progress[chiave]["step"], 6)
+        finally:
+            APP.verify_progress.pop(chiave, None)
+
+    def test_il_massimo_non_torna_indietro(self):
+        self.assertEqual(APP._con_il_massimo(30, 6), 30)
+        self.assertEqual(APP._con_il_massimo(None, 6), 6)
+        self.assertEqual(APP._con_il_massimo("boh", 6), 6)
+        self.assertEqual(APP._con_il_massimo(0, 0), 0)
+        self.assertIn("percento = _con_il_massimo(st.get(\"percento_max\"), percento)",
+                      leggi(APP_PATH))
+
     def test_il_progresso_vero_dei_due_pezzi_lunghi(self):
         trascrivi = estrai_funzione_py(self.app_src, "trascrivi")
         self.assertIn("avanza=None", trascrivi)
@@ -1124,7 +1188,9 @@ class TestProgressoVerifica(unittest.TestCase):
         self.assertEqual(corpo.count("avanza=lambda f: _avanza_verify(song_id, f)"), 2)
 
     def test_l_endpoint_lo_dice_alla_pagina(self):
-        self.assertIn('"percento": _verify_percento(', self.app_src)
+        self.assertIn("percento = _verify_percento(st[\"step\"], st.get(\"frazione\"), secondi,",
+                      self.app_src)
+        self.assertIn('"percento": percento', self.app_src)
         self.assertIn('"secondi": round(secondi, 1)', self.app_src)
         for pezzo in ('id="percento"', 'id="rotella"', 'id="secondi"',
                       'st.percento', 'classList.add("ferma")', "1200"):
