@@ -416,6 +416,22 @@ Da tenere presente nelle sessioni di lavoro successive:
   La trascrizione richiede **`faster-whisper`** (opzionale, ~1,5 GB fra pacchetti e
   modello): senza, la pagina funziona e il controllo voce dice "non verificabile" col
   motivo. «Verifica tutto» continua a lavorare in blocco (percorso inline).
+- **Confronto voce (`/verifica`, 18/09/2026).** Sotto la pastiglia 🗣 c'è **📄 Confronta
+  testi e audio**: i due testi affiancati (trascrizione | liriche, con le **parole in
+  comune evidenziate**) e **due player** (il file locale o l'a-cappella · l'anteprima
+  ufficiale) — estetica del sampler ma **senza trim giallo, griglia e BPM**. I testi e i
+  due file si **salvano** nel database (`testo_trascrizione`, `testo_riferimento`,
+  `testo_parole_uniche`, `testo_audio_nostro`, `testo_audio_riferimento`,
+  `anteprima_file`) e si leggono da `GET /db/songs/<id>/confronto`; le anteprime si
+  sentono da `GET /anteprima/<file>` (cartella `anteprime/`, non versionata). ⚠️ Il
+  pannello è «pronto» solo per le verifiche fatte **da questa versione in poi**: sulle
+  righe verificate prima il testo trascritto non c'è (basta rifare il passo 🗣).
+- **Attenzione ai campi con doppi apici.** I Produttori sono JSON (`["Dirty Swift"]`) e
+  in `verifica.html` `esc()` non scappava `"`: la casella si troncava a `'['` e la
+  Verifica riscriveva quel troncato nel database (bug vero del 18/09/2026 sulla riga
+  *21 Questions*; in libreria 68 righe hanno i Produttori in JSON e 6 un doppio apice
+  negli artisti). Ora `esc()` scappa `"` e `'`, e i Produttori si mostrano come lista
+  leggibile e si riscrivono in JSON come nell'✏️ Edit di `index (2).html`.
 - **`remote_components=["ejs:github"]` rimosso** dai download (`_do_download`,
   `do_download_playlist`): con yt-dlp recenti provocava "Video unavailable"/403.
 - **FORTISSIMO COMPARE (11/09/2026).** Aggiunti `fortissimo_compare_v3.py`, la
@@ -1903,6 +1919,75 @@ Da tenere presente nelle sessioni di lavoro successive:
      confronto con l'anteprima va bene solo se il riferimento è lungo (brano intero
      scaricato, non i 30 s del negozio). Nessuna modifica necessaria: la guardia ha
      fatto esattamente il suo lavoro, meglio nessun verdetto che un verdetto casuale.
+
+- **📄 CONFRONTO VOCE: I DUE TESTI E I DUE AUDIO — E UN DATO CORROTTO TROVATO PER
+  STRADA (18/09/2026, sera).** Richiesta di Alessandro: «mi spieghi come viene fatto il
+  confronto con la voce? … potresti modificare l'app e fare in modo che ci sia un
+  pulsante sotto 🗣 voce: ✓ confermato · 77.2% · 268 parole che permetta di vedere i
+  testi a confronto, cioè a sinistra il testo estratto e a destra il testo "vero"? e
+  anche i due audio che confronta: vorrei poterli sentire entrambi a destra e a
+  sinistra, magari usando lo stesso player stile FL Studio che sta nel campionatore
+  (ovviamente senza trim giallo)». Prima d'ora **non si poteva**: il passo 🗣 salvava
+  solo i NUMERI (`testo_esito`/`testo_voti`/`testo_parole`/`testo_fonte`), il testo
+  trascritto da Whisper andava perso, i due file non erano registrati da nessuna parte
+  e `anteprime/` non era servita da nessuna rotta.
+  - **Colonne nuove** (migrazione automatica come le altre): `testo_trascrizione`
+    (quello che si sente), `testo_riferimento` (il testo vero usato: le liriche di
+    Genius, o la trascrizione dell'anteprima quando le liriche mancavano),
+    `testo_parole_uniche` (il **denominatore vero** della percentuale: `testo_parole`
+    conta la LISTA, che coi ritornelli ripetuti è più lunga — misurato: 273 parole in
+    lista ma 153 uniche, e il 75,8% è 116/153, non 116/273), `testo_audio_nostro` e
+    `testo_audio_riferimento` (i DUE file davvero confrontati, relativi:
+    `downloads/…` o `anteprime/acapella_…/htdemucs/<file>/vocals.mp3`) e
+    `anteprima_file` (quale anteprima iTunes è stata confrontata: prima si sapeva solo
+    dal testo di `audio_match_fonte`).
+  - **Rotte nuove**: `GET /db/songs/<id>/confronto` (i due testi, le **parole in
+    comune calcolate con le stesse funzioni del verdetto**, i numeri e gli URL dei due
+    audio) e `GET /anteprima/<path:…>` (serve `anteprime/` col `Range`, come
+    `/stream`). `/stream` e `/anteprima` passano ora da `_risposta_audio` e rifiutano
+    un `../` (`_dentro_la_cartella`).
+  - **In pagina** (`/verifica`): sotto la pastiglia 🗣 c'è **📄 Confronta testi e
+    audio**. Si apre un pannello con i due testi affiancati — sinistra la trascrizione,
+    destra le liriche — con le **parole in comune evidenziate** in verde, e sotto **due
+    player a forma d'onda** (sinistra il file locale o l'a-cappella, destra l'anteprima
+    ufficiale): ▶/⏸, ⏹, **click sull'onda per andare al punto**, «▶ avvia entrambi».
+    Estetica del sampler ma **senza trim giallo, griglia e BPM** — qui non si taglia,
+    si ascolta — e i picchi si calcolano una volta sola (`picchiDaBuffer`, come
+    `extractPeaks` del sampler). Sopra, i numeri per rifare il conto a mano: parole
+    attese · sentite · **uniche** · in comune · fonte.
+  - 🐛 **Il dato corrotto trovato per strada.** Confrontando il database di lavoro con
+    quello in HEAD è saltato fuori che su *21 Questions* `producers` era diventato
+    **`'['`** (in HEAD: `["Dirty Swift"]`) con `updated_at = testo_at`, cioè scritto da
+    una Verifica. Causa: in `verifica.html` `esc()` non metteva al sicuro il doppio
+    apice (tutte le altre pagine — index, browse, scheda — lo fanno), quindi
+    `value="${esc(s[campo])}"` **si chiudeva al primo `"`** e la casella si riempiva con
+    il solo `[`; `metadatiDiversi()` lo vedeva diverso dal valore in database e la
+    Verifica lo **riscriveva troncato**. Non serviva toccare nulla: bastava premere 🔎
+    Verifica su una riga con doppi apici — in libreria **68 righe** hanno i Produttori in
+    JSON, **6** un doppio apice negli artisti, 3 nei titoli, 3 nei compositori. Ora
+    `esc()` scappa `"` e `'`, i **Produttori** si mostrano come lista leggibile
+    (`["Dr. Dre", "Mel-Man"]` → `Dr. Dre, Mel-Man`) e si **riscrivono in JSON** come fa
+    l'✏️ Edit di `index (2).html`.
+  - Verifiche del 18/09/2026: **13 test nuovi** (`TestConfrontoVoce`: `esc`,
+    `producersTesto`/`producersJson`, `evidenzia`, `formattaTempo`, `frazioneDaClick` in
+    **JavaScriptCore**; `percorso_relativo`, `campi_dal_risultato_testo`,
+    `_audio_del_confronto`, `_dentro_la_cartella`, rotta e legenda; e sull'**app viva**
+    `/db/songs/<id>/confronto`, 404 su id inesistente, `/anteprima/…` col `Range` → 206
+    con `Content-Range: bytes 0-1023/994898` e 404 su `../`) e **403 test di suite**
+    (`OK`, erano 390); sul caso vero
+    `POST /db/songs/song_abf47df2aae9/audio_check` → **1230 hash allineati a 76,0 s**
+    con `anteprima_file` = `anteprime/6811474800_21_Questions__feat__Nate_Dogg_.m4a`.
+    Poi il passo 🗣 con l'a-cappella (85 s in tutto): «✅ Testo confermato: **75,8%**
+    delle parole è nel testo atteso (273 parole riconosciute · liriche (152 parole) ·
+    trascrizione a cappella)», e nel database sono finiti **i testi**: 2.922 caratteri
+    di `testo_trascrizione`, `testo_parole_uniche` = **153** e `testo_audio_nostro` =
+    `anteprime/acapella_9ew21rk6/htdemucs/…/vocals.mp3` (cioè quello che Whisper ha
+    davvero sentito). `GET /confronto` restituisce i due testi, **116 parole in
+    comune** e i due audio pronti per i player. Nota onesta: la stessa canzone aveva
+    dato **77,2%** nella verifica precedente (268 parole): fra due esecuzioni demucs +
+    Whisper non danno la stessa trascrizione parola per parola — il verdetto resta
+    "confermato" in entrambe. Backup del database **prima** di scrivere in
+    `/tmp/samplelab_backup_18set2026_pre_confronto.db`.
 
 
 

@@ -364,7 +364,28 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               ("testo_parole", "INTEGER"),
                               ("testo_fonte", "TEXT"),
                               ("testo_motivo", "TEXT"),
-                              ("testo_at", "TEXT")):
+                              ("testo_at", "TEXT"),
+                              # ── Confronto voce: i TESTI e i DUE AUDIO (18/09/2026) ──
+                              # La pagina /verifica fa VEDERE il confronto (due colonne:
+                              # «quello che si sente» / «il testo vero») e SENTIRE i due
+                              # audio. Prima si salvavano solo i numeri: il testo
+                              # trascritto andava perso e non c'era niente da mostrare.
+                              # `testo_parole_uniche` è il denominatore VERO della
+                              # percentuale (`testo_parole` conta la lista, che con i
+                              # ritornelli ripetuti è più lunga): senza, il 77,2% non si
+                              # ricontava a mano.
+                              ("testo_trascrizione", "TEXT"),
+                              ("testo_riferimento", "TEXT"),
+                              ("testo_parole_uniche", "INTEGER"),
+                              # i DUE file confrontati, relativi alla cartella dell'app
+                              # ('downloads/…' oppure 'anteprime/acapella_…/vocals.mp3')
+                              ("testo_audio_nostro", "TEXT"),
+                              ("testo_audio_riferimento", "TEXT"),
+                              # l'anteprima ufficiale usata dal controllo audio: senza
+                              # questa non si sa QUALE file è stato confrontato (la
+                              # cartella `anteprime/` non è versionata e il nome del file
+                              # cambia con l'id iTunes)
+                              ("anteprima_file", "TEXT")):
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
 
@@ -2589,15 +2610,14 @@ def verifica_pagina():
     return send_file(os.path.join(BASE_DIR, "verifica.html"))
 
 # ── STREAMING ────────────────────────────────────────────────────────────────
-@app.route("/stream/<path:filename>")
-def stream_file(filename):
-    path = os.path.join(DL_DIR, filename)
-    if not os.path.exists(path):
-        return jsonify({"error": "File non trovato"}), 404
-    ext = filename.rsplit(".", 1)[-1].lower()
-    mime = MIME_MAP.get(ext, "audio/mpeg")
-    rh = request.headers.get("Range")
+def _risposta_audio(path, mime):
+    """Risponde con un file audio rispettando l'header `Range`.
+
+    Serve ai player (`/stream`, `/anteprima`): senza la risposta 206 il browser
+    scarica tutto il file prima di poter scorrere avanti/indietro con la barra.
+    """
     fs = os.path.getsize(path)
+    rh = request.headers.get("Range")
     if rh:
         m = re.match(r"bytes=(\d+)-(\d*)", rh)
         if m:
@@ -2622,6 +2642,44 @@ def stream_file(filename):
             })
             return resp
     return send_file(path, mimetype=mime)
+
+
+def _dentro_la_cartella(cartella, percorso):
+    """Funzione PURA. Il file sta (davvero) dentro la cartella indicata?
+
+    I nomi dei file della libreria sono liberi (parentesi, virgole, `]`) e arrivano
+    dall'URL: senza questo controllo un `../` nella richiesta uscirebbe dalla
+    cartella. Si confrontano i percorsi RISOLTI.
+    """
+    try:
+        base = os.path.realpath(cartella) + os.sep
+        return os.path.realpath(percorso).startswith(base)
+    except Exception:
+        return False
+
+
+@app.route("/stream/<path:filename>")
+def stream_file(filename):
+    path = os.path.join(DL_DIR, filename)
+    if not os.path.exists(path) or not _dentro_la_cartella(DL_DIR, path):
+        return jsonify({"error": "File non trovato"}), 404
+    ext = filename.rsplit(".", 1)[-1].lower()
+    return _risposta_audio(path, MIME_MAP.get(ext, "audio/mpeg"))
+
+
+# ── ANTEPRIME UFFICIALI (e a cappella) ───────────────────────────────────────
+# `anteprime/` (non versionata) non era servita da nessuna rotta: la pagina
+# /verifica ora fa ASCOLTARE i due audio del confronto — l'anteprima ufficiale di
+# iTunes che è stata confrontata col file locale e la voce estratta da demucs
+# (`anteprime/acapella_…/htdemucs/<file>/vocals.mp3`, cioè quello che Whisper ha
+# davvero trascritto).
+@app.route("/anteprima/<path:filename>")
+def anteprima_file(filename):
+    path = os.path.join(ANTEPRIME_DIR, filename)
+    if not os.path.isfile(path) or not _dentro_la_cartella(ANTEPRIME_DIR, path):
+        return jsonify({"error": "Anteprima non trovata"}), 404
+    ext = filename.rsplit(".", 1)[-1].lower()
+    return _risposta_audio(path, MIME_MAP.get(ext, "audio/mpeg"))
 
 @app.route("/stream-stem/<folder>/<filename>")
 def stream_stem(folder, filename):
@@ -4121,6 +4179,75 @@ def audio_check_song(song_id):
                     "success": bool(aggiornamenti)})
 
 
+# ── CONFRONTO VOCE: I TESTI E I DUE AUDIO ─────────────────────────────────────
+# La pagina /verifica mostra il confronto a due colonne: a sinistra quello che si
+# SENTE (la trascrizione di Whisper del file locale o dell'a-cappella), a destra il
+# testo VERO usato come riferimento (le liriche di Genius; la trascrizione
+# dell'anteprima ufficiale quando le liriche non c'erano), e sotto i due file da
+# ascoltare — il nostro e l'anteprima ufficiale. Le parole in comune si calcolano
+# con le STESSE funzioni del verdetto (`parole_contenuto`), così l'evidenziazione
+# in pagina è esattamente quello che ha prodotto la percentuale.
+def _audio_del_confronto(rel, etichetta, default_rel=""):
+    """Funzione PURA. Dal percorso salvato nel database all'URL del player:
+    `/stream/<file>` per la libreria (`downloads/…`) e `/anteprima/<file>` per le
+    anteprime e per la voce estratta da demucs (`anteprime/…`). None se non c'è."""
+    rel = (rel or default_rel or "").strip().replace(os.sep, "/")
+    if not rel:
+        return None
+    if rel.startswith("downloads/"):
+        url = "/stream/" + urllib.parse.quote(rel[len("downloads/"):])
+    elif rel.startswith("anteprime/"):
+        url = "/anteprima/" + urllib.parse.quote(rel[len("anteprime/"):])
+    else:
+        return None
+    return {"percorso": rel, "url": url, "etichetta": etichetta,
+            "esiste": os.path.exists(os.path.join(BASE_DIR, rel))}
+
+
+@app.route("/db/songs/<song_id>/confronto", methods=["GET"])
+def db_song_confronto(song_id):
+    """📄 I due testi e i due audio del confronto voce (pagina /verifica)."""
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return jsonify({"error": "Non trovata"}), 404
+
+    trascrizione = (s.get("testo_trascrizione") or "").strip()
+    rif = (s.get("testo_riferimento") or "").strip() or (s.get("lyrics") or "").strip()
+    tipo = "audio" if (s.get("testo_audio_riferimento") or "").strip() else "liriche"
+
+    attese = parole_contenuto(rif)
+    sentite = parole_contenuto(trascrizione)
+    comuni = sorted(set(attese) & set(sentite))
+
+    nostro_rel = s.get("testo_audio_nostro") or ""
+    nostro = _audio_del_confronto(
+        nostro_rel,
+        "a cappella (demucs)" if "acapella_" in nostro_rel else "il file locale",
+        default_rel=("downloads/" + s["local_file"]) if s.get("local_file") else "")
+    riferimento_audio = _audio_del_confronto(
+        s.get("testo_audio_riferimento") or s.get("anteprima_file") or "",
+        "anteprima ufficiale (iTunes)")
+
+    return jsonify({
+        "song_id": s["id"], "titolo": s.get("title") or s.get("local_file") or "",
+        "artista": s.get("artist") or "",
+        # `pronto` = c'è un testo trascritto da mostrare; se è falso la pagina
+        # spiega che va lanciato 🗣 Controlla voce (il testo si salva da adesso).
+        "pronto": bool(trascrizione),
+        "tipo": tipo, "esito": s.get("testo_esito"), "copertura": s.get("testo_voti"),
+        "fonte": s.get("testo_fonte"), "motivo": s.get("testo_motivo"),
+        "trascrizione": trascrizione, "riferimento": rif,
+        "parole_attese": len(set(attese)), "parole_attese_totali": len(attese),
+        "parole_sentite": len(sentite),
+        "parole_sentite_uniche": (s.get("testo_parole_uniche")
+                                  if s.get("testo_parole_uniche") is not None
+                                  else len(set(sentite))),
+        "comuni": comuni, "comuni_quanti": len(comuni),
+        "audio_nostro": nostro, "audio_riferimento": riferimento_audio,
+    })
+
+
 # ── DB: MASS RENAME ───────────────────────────────────────────────────────────
 # ── DB: MODIFICHE IN BLOCCO (✏️ Rinomina in massa / ➡️ Sposta) ────────────────
 # Campi su cui possono lavorare gli strumenti "in blocco" della tab Database:
@@ -4674,6 +4801,12 @@ COLUMN_DOCS = {"songs": {
     "testo_fonte": "testo usato per il confronto (pagina Genius) e come è stato trascritto (mix o a cappella)",
     "testo_motivo": "PERCHÉ il confronto dal parlato non si è potuto fare (vuoto se è stato fatto)",
     "testo_at": "quando è stato fatto il confronto dal parlato",
+    "testo_trascrizione": "QUEL CHE SI SENTE: il testo trascritto da Whisper (è la colonna sinistra del confronto in /verifica)",
+    "testo_riferimento": "il testo VERO usato come riferimento: le liriche di Genius, o la trascrizione dell'anteprima ufficiale quando le liriche non c'erano",
+    "testo_parole_uniche": "parole UNICHE riconosciute: è il denominatore della percentuale (testo_parole conta anche i ritornelli ripetuti)",
+    "testo_audio_nostro": "il file che è stato trascritto, relativo ('downloads/…' o 'anteprime/acapella_…/vocals.mp3'): si ascolta nel confronto in /verifica",
+    "testo_audio_riferimento": "l'audio di riferimento confrontato (anteprima ufficiale), relativo a 'anteprime/'",
+    "anteprima_file": "l'anteprima ufficiale di iTunes usata dal controllo audio (in 'anteprime/', cartella non versionata)",
     "created_at": "quando è stata aggiunta",
     "updated_at": "ultima modifica",
 }}
@@ -5271,9 +5404,11 @@ def verifica_audio_riferimento(percorso, artista, titolo, status=None, soglie=No
     /verifica; None = quelle dell'app.
 
     Restituisce {"esito", "voti", "offset", "comuni", "fonte", "messaggio",
-    "confronto", "motivo"}: `confronto` dice se il confronto è stato eseguito
-    davvero (False = nessuna anteprima ufficiale, file illeggibile…), perché un
-    dato mancante NON è un no. `motivo` ∈ {'ok','file','anteprima','download','calcolo'}.
+    "confronto", "motivo", "file_riferimento"}: `confronto` dice se il confronto è
+    stato eseguito davvero (False = nessuna anteprima ufficiale, file illeggibile…),
+    perché un dato mancante NON è un no; `file_riferimento` è il file dell'anteprima
+    (None se non si è potuto scaricare) e serve a farlo ASCOLTARE nella pagina.
+    `motivo` ∈ {'ok','file','anteprima','download','calcolo'}.
     """
     def segnala(testo):
         if status:
@@ -5287,7 +5422,7 @@ def verifica_audio_riferimento(percorso, artista, titolo, status=None, soglie=No
         e nel messaggio: la riga si spiega da sé)."""
         return {"esito": "non verificabile", "voti": None, "offset": None, "comuni": None,
                 "fonte": None, "messaggio": f"{emoji} {motivo_testo}", "confronto": False,
-                "motivo": codice, "motivo_testo": motivo_testo}
+                "motivo": codice, "motivo_testo": motivo_testo, "file_riferimento": None}
 
     if not percorso or not os.path.exists(percorso):
         return senza_confronto("file", "audio non verificabile: manca il file locale in downloads/")
@@ -5325,7 +5460,10 @@ def verifica_audio_riferimento(percorso, artista, titolo, status=None, soglie=No
     return {"esito": esito, "voti": voti, "comuni": comuni,
             "offset": round(offset, 3) if offset is not None else None,
             "fonte": fonte[:200], "messaggio": messaggio, "confronto": True,
-            "motivo": "ok", "motivo_testo": None}
+            "motivo": "ok", "motivo_testo": None,
+            # il file dell'anteprima che è stata confrontata: si salva nel dato
+            # (`anteprima_file`) così la pagina può farla SENTIRE
+            "file_riferimento": anteprima_path}
 
 
 def campi_dal_risultato_audio(risultato, prefisso="audio_match_"):
@@ -5365,7 +5503,14 @@ def conferma_audio(song, status=None, soglie=None):
         artista = ""
     risultato = verifica_audio_riferimento(percorso, artista, song.get("title") or "",
                                            status, soglie)
-    return campi_dal_risultato_audio(risultato), risultato["messaggio"]
+    aggiornamenti = campi_dal_risultato_audio(risultato)
+    # QUALE anteprima è stata confrontata si scrive nel dato: la pagina la fa
+    # risentire accanto al nostro file (e nessuno deve indovinare il nome del file,
+    # che contiene l'id iTunes).
+    anteprima = percorso_relativo(risultato.get("file_riferimento"))
+    if anteprima:
+        aggiornamenti["anteprima_file"] = anteprima
+    return aggiornamenti, risultato["messaggio"]
 
 
 
@@ -5526,7 +5671,11 @@ def trascrivi(percorso, sorgente="mix", modello=None):
         return None
     return {"testo": testo, "parole": parole_contenuto(testo),
             "durata": getattr(info, "duration", None),
-            "lingua": getattr(info, "language", ""), "fonte": nota}
+            "lingua": getattr(info, "language", ""), "fonte": nota,
+            # QUALE file è stato trascritto: se la sorgente è 'a cappella' è la voce
+            # estratta da demucs (dentro `anteprime/`), non il file locale. Serve al
+            # confronto in pagina: si ascolta esattamente quello che Whisper ha sentito.
+            "file": da_trascrivere}
 
 
 def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="mix",
@@ -5535,7 +5684,11 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
 
     `riferimento` è il TESTO delle liriche (`tipo='liriche'`) oppure il percorso di
     un AUDIO ufficiale (`tipo='audio'`, es. l'anteprima iTunes). Restituisce
-    {"esito", "copertura", "parole", "fonte", "motivo", "confronto", "messaggio"}.
+    {"esito", "copertura", "parole", "fonte", "motivo", "confronto", "messaggio"} più
+    quello che serve a MOSTRARE il confronto nella pagina (`/db/songs/<id>/confronto`):
+    `trascrizione` (quello che si sente), `riferimento_testo` (il testo vero usato),
+    `file_nostro` (il file trascritto: mix o a cappella) e `file_riferimento` (l'audio
+    ufficiale, quando il riferimento è un audio).
 
     La direzione della misura è scelta perché sia informativa in entrambi i casi:
     - con le LIRICHE (più lunghe di ciò che si sente) si misura quanta parte delle
@@ -5553,9 +5706,13 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
                 pass
 
     def senza_confronto(codice, testo):
+        # Anche quando il confronto non si fa, i campi del confronto esistono: la
+        # pagina mostra il MOTIVO, non un pannello mezzo vuoto.
         return {"esito": "non verificabile", "copertura": None, "parole": None,
                 "fonte": None, "motivo": testo, "confronto": False,
-                "messaggio": f"⚪ {testo}", "codice": codice}
+                "messaggio": f"⚪ {testo}", "codice": codice,
+                "trascrizione": None, "riferimento_testo": None, "parole_uniche": None,
+                "file_nostro": None, "file_riferimento": None}
 
     if not HAS_WHISPER:
         return senza_confronto("whisper", "conferma dal parlato non disponibile "
@@ -5569,6 +5726,7 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
         return senza_confronto("trascrizione", "trascrizione del file locale non riuscita")
     nota_sorgente = f"trascrizione {nostro['fonte']}"
 
+    testo_rif, file_riferimento = "", None
     if tipo == "audio":
         if not riferimento or not os.path.exists(riferimento):
             return senza_confronto("riferimento", "nessun audio di riferimento da trascrivere")
@@ -5582,6 +5740,9 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
         # il confronto non è affidabile nemmeno se il nostro file ne ha tante.
         n_guardia = min(len(parole_rif), len(nostro["parole"]))
         fonte = f"audio di riferimento ({altro['fonte']}, {len(parole_rif)} parole) · {nota_sorgente}"
+        # il "testo vero" è la trascrizione dell'anteprima ufficiale: si salva anche
+        # quella, altrimenti la colonna di destra del confronto resterebbe vuota
+        testo_rif, file_riferimento = altro["testo"], riferimento
     else:
         parole_rif = set(parole_contenuto(riferimento or ""))
         if not parole_rif:
@@ -5589,11 +5750,20 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
         copertura = copertura_testo(nostro["parole"], parole_rif)
         n_guardia = len(nostro["parole"])
         fonte = f"liriche ({len(parole_rif)} parole) · {nota_sorgente}"
+        testo_rif = riferimento or ""
 
     conferma, rifiuto = soglie or (TESTI_SOGLIA_CONFERMA, TESTI_SOGLIA_RIFIUTO)
     esito = esito_testo(copertura, n_guardia, conferma, rifiuto, min_parole)
     base = {"esito": esito, "copertura": copertura, "parole": n_guardia, "fonte": fonte[:200],
-            "confronto": True, "codice": "ok", "motivo": None}
+            "confronto": True, "codice": "ok", "motivo": None,
+            # Per la schermata «📄 Confronta»: i due testi e i DUE file da ascoltare.
+            # `parole_uniche` è il denominatore vero della percentuale (i ritornelli
+            # ripetuti gonfiano la lista delle parole riconosciute).
+            "trascrizione": nostro.get("testo") or "",
+            "riferimento_testo": testo_rif or "",
+            "parole_uniche": len(set(nostro.get("parole") or [])),
+            "file_nostro": nostro.get("file"),
+            "file_riferimento": file_riferimento}
     if esito == "confermato":
         base["messaggio"] = (f"✅ Testo confermato: {copertura}% delle parole è nel testo atteso "
                              f"({n_guardia} parole riconosciute · {fonte})")
@@ -5609,9 +5779,26 @@ def verifica_testo_riferimento(percorso, riferimento, tipo="liriche", sorgente="
     return base
 
 
+def percorso_relativo(percorso):
+    """Funzione PURA. Il percorso da salvare nel database, relativo alla cartella
+    dell'app: 'downloads/<file>' oppure 'anteprime/acapella_…/vocals.mp3'. Serve a
+    ritrovare il file per farlo ASCOLTARE (rotta /stream o /anteprima) e a restare
+    valido anche se la cartella dell'app viene spostata. None se è fuori o assente."""
+    if not percorso:
+        return None
+    try:
+        rel = os.path.relpath(percorso, BASE_DIR)
+    except Exception:
+        return None
+    if rel.startswith(".."):
+        return None
+    return rel.replace(os.sep, "/")
+
+
 def campi_dal_risultato_testo(risultato):
     """Funzione PURA. Dai campi di `verifica_testo_riferimento` alle colonne del
-    database (`testo_*`)."""
+    database (`testo_*`), testi compresi: senza il testo trascritto e il riferimento
+    la pagina non può mostrare il confronto (e i due file non si possono ascoltare)."""
     return {
         "testo_esito": risultato["esito"],
         "testo_voti": risultato["copertura"],
@@ -5619,6 +5806,11 @@ def campi_dal_risultato_testo(risultato):
         "testo_fonte": risultato["fonte"],
         "testo_motivo": risultato["motivo"],
         "testo_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "testo_trascrizione": risultato.get("trascrizione"),
+        "testo_riferimento": risultato.get("riferimento_testo"),
+        "testo_parole_uniche": risultato.get("parole_uniche"),
+        "testo_audio_nostro": percorso_relativo(risultato.get("file_nostro")),
+        "testo_audio_riferimento": percorso_relativo(risultato.get("file_riferimento")),
     }
 
 

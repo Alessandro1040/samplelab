@@ -61,6 +61,30 @@ details{margin-top:22px;background:var(--surface);border:1px solid var(--border)
 summary{cursor:pointer;font-family:'Space Mono',monospace;font-size:12px;color:var(--text2)}
 iframe{width:100%;height:640px;border:1px solid var(--border);border-radius:10px;margin-top:12px;background:var(--bg)}
 .hint{color:var(--muted);font-size:11px;font-family:'Space Mono',monospace;margin-top:8px}
+/* ── Confronto voce: i due testi e i due audio (18/09/2026) ───────────────── */
+button.confronta{background:var(--surface2);border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:8px 13px;font-family:'Space Mono',monospace;font-size:11px;cursor:pointer;letter-spacing:.03em}
+button.confronta:hover{background:var(--accent);color:#080808}
+.confronto{display:none;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:16px}
+.confronto.on{display:block}
+.numeri{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-family:'Space Mono',monospace;font-size:11px;color:var(--text2);margin-bottom:14px}
+.numeri .n{border:1px solid var(--border2);border-radius:20px;padding:4px 11px}
+.numeri .n b{color:var(--accent)}
+.colonne{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:820px){.colonne{grid-template-columns:1fr}}
+.colonna{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:13px;min-width:0}
+.colonna h3{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.testo{font-size:12.5px;line-height:1.8;max-height:330px;overflow:auto;white-space:pre-wrap;color:var(--text2);word-break:break-word}
+.testo mark{background:rgba(200,240,0,.16);color:var(--accent);border-radius:3px;padding:0 2px}
+.testo.vuoto{color:var(--muted);font-family:'Space Mono',monospace;font-size:11px;line-height:1.6}
+.player{border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface);margin-bottom:12px}
+.player .riga{display:flex;align-items:center;gap:8px}
+.player button{background:transparent;border:1px solid var(--border2);color:var(--text);border-radius:6px;min-width:30px;height:26px;cursor:pointer;font-size:11px}
+.player button:hover{border-color:var(--accent);color:var(--accent)}
+.player .nome{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.player .tempo{font-family:'Space Mono',monospace;font-size:10px;color:var(--text2);min-width:78px;text-align:right}
+.player canvas{display:block;width:100%;height:56px;margin-top:9px;cursor:pointer}
+.player .vuoto{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);padding:4px 0}
+.entrambi{display:flex;gap:8px;align-items:center;margin-top:12px}
 </style>
 </head>
 <body>
@@ -133,6 +157,28 @@ iframe{width:100%;height:640px;border:1px solid var(--border);border-radius:10px
     <div class="verdicts" id="verdicts"></div>
   </div>
 
+  <div class="confronto" id="confrontoBox">
+    <div class="numeri" id="confrontoNumeri"></div>
+    <div class="colonne">
+      <div class="colonna">
+        <h3>🎧 Quello che si sente</h3>
+        <div id="playerNostro"></div>
+        <div class="testo" id="testoTrascrizione"></div>
+      </div>
+      <div class="colonna">
+        <h3>📄 Il testo vero (<span id="confrontoTipo">Genius</span>)</h3>
+        <div id="playerRiferimento"></div>
+        <div class="testo" id="testoRiferimento"></div>
+      </div>
+    </div>
+    <div class="entrambi">
+      <button class="confronta" onclick="avviaEntrambi()">▶ avvia entrambi</button>
+      <button class="confronta" onclick="fermaEntrambi()">⏹ ferma entrambi</button>
+      <span class="hint">Le parole <mark>evidenziate</mark> sono quelle che compaiono in
+        entrambi i testi: sono loro a fare la percentuale del verdetto 🗣.</span>
+    </div>
+  </div>
+
   <details>
     <summary>📄 Scheda della canzone (campioni, remix, cover, stem) — si aggiorna da sola</summary>
     <iframe id="scheda" src="about:blank" loading="lazy"></iframe>
@@ -182,13 +228,52 @@ function etichettaVerdetto(esito) {
   return mappa[esito] || ["mut", esito || "—"];
 }
 
+// L'escape serve anche per gli ATTRIBUTI (`value="…"`), non solo per il testo:
+// senza le virgolette un valore che ne contiene una — i Produttori sono JSON
+// (`["Dirty Swift"]`) — chiudeva l'attributo e la casella si riempiva con il solo
+// primo carattere ('['). La Verifica riscriveva poi quel valore TRONCATO nel
+// database: bug vero del 18/09/2026 sulla riga *21 Questions* (68 righe in
+// libreria hanno i Produttori in JSON, 6 hanno un doppio apice negli artisti).
 function esc(s) {
-  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+
+// I Produttori sono un JSON nel database (`["Dirty Swift"]`): nell'✏️ Edit di index
+// si mostrano come lista leggibile, e qui si fa lo stesso. Senza questa conversione
+// il campo mostrava (e riscriveva) il JSON grezzo, e un nome scritto a mano
+// finiva nella colonna come stringa semplice ('Raedius'), fuori formato.
+function producersTesto(valore) {
+  if (valore == null) return "";
+  try {
+    const a = JSON.parse(valore);
+    if (Array.isArray(a)) return a.join(", ");
+  } catch (_) {}
+  return String(valore);
+}
+
+function producersJson(valore) {
+  const testo = String(valore == null ? "" : valore).trim();
+  if (!testo) return "";
+  if (testo.charAt(0) === "[") return testo;          // è già JSON: si lascia com'è
+  return JSON.stringify(testo.split(",").map(x => x.trim()).filter(Boolean));
+}
+
+// Come si legge e come si riscrive ogni campo con un formato speciale.
+const CONVERTI = {
+  producers: {da: producersTesto, a: producersJson},
+};
 
 function valoreCampo(campo) {
   const el = document.getElementById("m_" + campo);
   return el ? el.value.trim() : "";
+}
+
+// Come si MOSTRA un campo nel modulo (stessa forma usata per capire se è cambiato).
+function valoreMostrato(campo, s) {
+  const v = s ? s[campo] : "";
+  const conv = CONVERTI[campo];
+  return (conv ? conv.da(v) : (v == null ? "" : String(v))).trim();
 }
 
 function mostraVerdetti(s) {
@@ -208,6 +293,10 @@ function mostraVerdetti(s) {
     const extra = (s.testo_voti != null) ? ` · ${Number(s.testo_voti).toFixed(1)}%` : "";
     const par = (s.testo_parole != null) ? ` · ${s.testo_parole} parole` : "";
     pezzi.push(`<div class="v ${cl}">🗣 voce: ${tx}${extra}${par}</div>`);
+    // Il pulsante che apre il confronto: col verdetto 🗣 davanti si capisce DA DOVE
+    // viene quel numero (i due testi e i due audio), ed è l'unico posto in cui il
+    // pulsante ha senso (senza trascrizione non c'è niente da confrontare).
+    pezzi.push(`<button class="confronta" onclick="apriConfronto(true)">📄 Confronta testi e audio</button>`);
   }
   document.getElementById("verdicts").innerHTML = pezzi.join("");
 }
@@ -228,9 +317,12 @@ async function carica() {
     (s.genius_escluso ? '<span class="tag no">🚫 non su Genius</span>' : "") +
     (s.genius_url ? `<a class="tag" href="${esc(s.genius_url)}" target="_blank">Genius ↗</a>` : "") +
     (s.whosampled_url ? `<a class="tag" href="${esc(s.whosampled_url)}" target="_blank">WhoSampled ↗</a>` : "");
+  // I campi si riempiono nella forma "leggibile" (Produttori: lista, non JSON) e
+  // l'escape delle virgolette è obbligatorio: senza, `["Dirty Swift"]` troncava
+  // l'attributo `value` a '[' e la Verifica riscriveva il troncato nel database.
   document.getElementById("metadati").innerHTML = CAMPI.map(([campo, etichetta]) =>
     `<div><label class="f">${etichetta}</label>` +
-    `<input type="text" id="m_${campo}" value="${esc(s[campo] == null ? "" : s[campo])}"></div>`).join("");
+    `<input type="text" id="m_${campo}" value="${esc(valoreMostrato(campo, s))}"></div>`).join("");
   document.getElementById("optNoGenius").checked = !!s.genius_escluso;
   mostraVerdetti(s);
   if (!s.local_file) {
@@ -242,9 +334,15 @@ async function carica() {
 function metadatiDiversi() {
   const out = {};
   CAMPI.forEach(([campo]) => {
-    const nuovo = valoreCampo(campo);
-    const vecchio = canzone && canzone[campo] != null ? String(canzone[campo]) : "";
-    if (nuovo !== vecchio) out[campo] = nuovo;
+    const nuovo = valoreCampo(campo);                   // come si legge nel campo
+    const vecchio = valoreMostrato(campo, canzone);      // com'è nel database
+    if (nuovo !== vecchio) {
+      // Si confronta quello che si VEDE (Produttori: "Dirty Swift"), ma nel
+      // database si scrive il formato giusto (JSON): altrimenti una modifica
+      // apparentemente identica riscriverebbe il campo a ogni verifica.
+      const conv = CONVERTI[campo];
+      out[campo] = conv ? conv.a(nuovo) : nuovo;
+    }
   });
   return out;
 }
@@ -304,6 +402,11 @@ async function avviaVerifica() {
       scheda.src = `/scheda?song=${encodeURIComponent(idCanzone)}&t=${Date.now()}`;
     }
     await carica();
+    // Se il pannello del confronto è già aperto si ricarica: il testo trascritto è
+    // appena stato salvato (se 🗣 era spuntato) e i due audio possono essere nuovi.
+    if (document.getElementById("confrontoBox").classList.contains("on")) {
+      await apriConfronto(true);
+    }
   } catch (e) {
     clearInterval(poll);
     document.getElementById("stato").textContent = "❌ " + e.message;
@@ -311,6 +414,231 @@ async function avviaVerifica() {
     btn.disabled = false; btn.textContent = "🔎 Verifica";
   }
 }
+
+// ── CONFRONTO VOCE: I DUE TESTI E I DUE AUDIO ───────────────────────────────
+// Da VEDERE: a sinistra quello che si sente (trascrizione di Whisper del file
+// locale, o dell'a-cappella), a destra il testo vero usato come riferimento (le
+// liriche di Genius; la trascrizione dell'anteprima quando le liriche mancavano).
+// Le parole presenti in ENTRAMBI sono evidenziate: sono esattamente quelle che
+// fanno la percentuale del verdetto 🗣.
+// Da SENTIRE: due player a forma d'onda con l'estetica del sampler della pagina
+// principale, ma SENZA trim giallo, griglia e BPM — qui non si taglia niente, si
+// ascoltano i due file che il confronto ha davvero usato.
+let caricatoConfronto = false;
+let playerConfronto = [null, null];
+
+// Funzione PURA: "1:07" da 67 secondi.
+function formattaTempo(secondi) {
+  const s = Math.max(0, Math.floor(Number(secondi) || 0));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+// Funzione PURA: quale frazione della forma d'onda ha toccato il click (0-1).
+function frazioneDaClick(clientX, sinistra, larghezza) {
+  const l = Number(larghezza) || 0;
+  if (l <= 0) return 0;
+  return Math.min(1, Math.max(0, (Number(clientX) - Number(sinistra)) / l));
+}
+
+// Funzione PURA: la parola ridotta come la riduce il backend (`parole_contenuto`),
+// così l'evidenziazione corrisponde al verdetto: minuscole, apostrofi uniformati,
+// via quello che non è lettera o numero (gli accenti restano).
+function normalizzaParola(parola) {
+  return String(parola == null ? "" : parola).toLowerCase()
+    .replace(/[\u2019`]/g, "'").replace(/[\u2013\u2014]/g, " ")
+    .replace(/[^0-9a-z'\u00e0-\u00ff]+/g, "");
+}
+
+// Funzione PURA: il testo con le parole in comune evidenziate. Si conservano gli
+// spazi e gli a capo originali (il testo si legge com'è stato trascritto/scritto).
+function evidenzia(testo, comuni) {
+  const insieme = new Set(comuni || []);
+  return String(testo == null ? "" : testo).split(/(\s+)/).map(pezzo => {
+    if (!pezzo || /^\s+$/.test(pezzo)) return esc(pezzo);
+    const n = normalizzaParola(pezzo);
+    return (n && insieme.has(n)) ? "<mark>" + esc(pezzo) + "</mark>" : esc(pezzo);
+  }).join("");
+}
+
+function coloreVerdetto(esito) {
+  if (esito === "confermato") return "var(--green)";
+  if (esito === "non confermato" || esito === "scartato") return "var(--red)";
+  if (esito === "ambiguo") return "var(--amber)";
+  return "var(--muted)";
+}
+
+// Il mini-player: play/pausa, ferma, forma d'onda coi picchi veri del file e
+// playhead che avanza; click sull'onda = vai a quel punto. Niente selezione IN/OUT.
+function creaPlayer(contenitoreId, dati) {
+  const box = document.getElementById(contenitoreId);
+  if (!box) return null;
+  if (!dati || !dati.url) {
+    box.innerHTML = '<div class="vuoto">nessun audio salvato per questo confronto</div>';
+    return null;
+  }
+  box.innerHTML =
+    '<div class="player">' +
+      '<div class="riga">' +
+        '<button data-r="play" title="Play / pausa">▶</button>' +
+        '<button data-r="stop" title="Ferma e torna all\'inizio">⏹</button>' +
+        '<span class="nome" title="' + esc(dati.percorso || "") + '">' +
+          esc(dati.etichetta || "") + (dati.esiste ? "" : " ⚠ file assente sul disco") + '</span>' +
+        '<span class="tempo" data-r="tempo">0:00 / 0:00</span>' +
+      '</div>' +
+      '<canvas data-r="onda"></canvas>' +
+    '</div>';
+  const audio = new Audio(dati.url);
+  audio.preload = "metadata";
+  const canvas = box.querySelector('[data-r="onda"]');
+  const tempo = box.querySelector('[data-r="tempo"]');
+  const bottone = box.querySelector('[data-r="play"]');
+  let picchi = null;
+
+  function disegna() {
+    const W = Math.max(160, canvas.clientWidth || 320), H = 56;
+    canvas.width = W; canvas.height = H;
+    const g = canvas.getContext("2d");
+    g.clearRect(0, 0, W, H);
+    g.strokeStyle = "#2a2a2a"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+    const durata = audio.duration || 0;
+    const frazione = durata ? (audio.currentTime / durata) : 0;
+    if (picchi) {
+      const larghezza = Math.max(1, W / picchi.length);
+      for (let i = 0; i < picchi.length; i++) {
+        const h = picchi[i] * (H / 2 - 4);
+        g.fillStyle = (i / picchi.length) <= frazione
+          ? "rgba(200,240,0,.75)" : "rgba(120,120,120,.45)";
+        g.fillRect((i / picchi.length) * W, H / 2 - h, larghezza, h * 2);
+      }
+    }
+    tempo.textContent = formattaTempo(audio.currentTime) + " / " + formattaTempo(durata);
+  }
+
+  // I picchi come nel sampler della pagina principale: il massimo assoluto per
+  // colonna, calcolato una volta sola (lì l'onda si ridisegna a ogni zoom).
+  function picchiDaBuffer(buffer) {
+    const datiCanale = buffer.getChannelData(0);
+    const quanti = Math.max(120, Math.min(1200, Math.round(canvas.clientWidth || 600)));
+    const passo = Math.max(1, Math.floor(datiCanale.length / quanti));
+    const out = new Float32Array(quanti);
+    for (let i = 0; i < quanti; i++) {
+      let massimo = 0;
+      for (let j = i * passo; j < Math.min((i + 1) * passo, datiCanale.length); j++) {
+        const v = Math.abs(datiCanale[j]);
+        if (v > massimo) massimo = v;
+      }
+      out[i] = massimo;
+    }
+    return out;
+  }
+
+  fetch(dati.url)
+    .then(r => r.arrayBuffer())
+    .then(buf => new Promise((ok, ko) => {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      ctx.decodeAudioData(buf, ok, ko);
+    }))
+    .then(buffer => { picchi = picchiDaBuffer(buffer); disegna(); })
+    .catch(() => disegna());
+
+  function anima() {
+    disegna();
+    if (!audio.paused && !audio.ended) requestAnimationFrame(anima);
+  }
+  audio.addEventListener("play", () => { bottone.textContent = "⏸"; anima(); });
+  audio.addEventListener("pause", () => { bottone.textContent = "▶"; disegna(); });
+  audio.addEventListener("ended", () => { bottone.textContent = "▶"; disegna(); });
+  audio.addEventListener("loadedmetadata", disegna);
+  audio.addEventListener("error", () => { tempo.textContent = "audio non leggibile"; });
+  bottone.addEventListener("click", () => {
+    if (audio.paused) audio.play().catch(() => {}); else audio.pause();
+  });
+  box.querySelector('[data-r="stop"]').addEventListener("click", () => {
+    audio.pause(); audio.currentTime = 0; disegna();
+  });
+  canvas.addEventListener("click", ev => {
+    const r = canvas.getBoundingClientRect();
+    if (audio.duration) {
+      audio.currentTime = frazioneDaClick(ev.clientX, r.left, r.width) * audio.duration;
+      disegna();
+    }
+  });
+  window.addEventListener("resize", disegna);
+  disegna();
+  return {audio: audio, disegna: disegna,
+          ferma: function () { audio.pause(); audio.currentTime = 0; disegna(); },
+          daCapo: function () { audio.pause(); audio.currentTime = 0; return audio.play(); }};
+}
+
+function mostraConfronto(d) {
+  document.getElementById("confrontoBox").classList.add("on");
+  document.getElementById("confrontoTipo").textContent = (d.tipo === "audio") ? "anteprima" : "Genius";
+
+  // I numeri per ricontare a mano il verdetto: attese = parole del testo vero,
+  // sentite = quelle riconosciute nella trascrizione (uniche = il denominatore
+  // VERO della percentuale), in comune = quelle presenti in entrambi.
+  const pezzi = [];
+  if (d.copertura != null) {
+    const etichetta = etichettaVerdetto(d.esito)[1];
+    pezzi.push('<span class="n" style="color:' + coloreVerdetto(d.esito) + '">🗣 ' + etichetta +
+      ' · <b>' + Number(d.copertura).toFixed(1) + '%</b></span>');
+  }
+  pezzi.push('<span class="n">parole attese <b>' + d.parole_attese + '</b></span>');
+  pezzi.push('<span class="n">parole sentite <b>' + d.parole_sentite + '</b> · uniche <b>' +
+    d.parole_sentite_uniche + '</b></span>');
+  pezzi.push('<span class="n">in comune <b>' + d.comuni_quanti + '</b></span>');
+  if (d.fonte) pezzi.push('<span class="n">' + esc(d.fonte) + '</span>');
+  document.getElementById("confrontoNumeri").innerHTML = pezzi.join("");
+
+  const sinistra = document.getElementById("testoTrascrizione");
+  if (d.trascrizione) {
+    sinistra.className = "testo";
+    sinistra.innerHTML = evidenzia(d.trascrizione, d.comuni);
+  } else {
+    sinistra.className = "testo vuoto";
+    sinistra.innerHTML = "Il testo trascritto non è ancora salvato per questa canzone." +
+      (d.motivo ? " (" + esc(d.motivo) + ")" : "") +
+      " Spunta 🗣 <b>Controlla voce</b> e lancia 🔎 Verifica: da adesso il testo resta" +
+      " nel database e si confronta qui, parola per parola.";
+  }
+  const destra = document.getElementById("testoRiferimento");
+  if (d.riferimento) {
+    destra.className = "testo";
+    destra.innerHTML = evidenzia(d.riferimento, d.comuni);
+  } else {
+    destra.className = "testo vuoto";
+    destra.innerHTML = "Nessun testo di riferimento: la canzone non ha liriche nel database.";
+  }
+  playerConfronto = [creaPlayer("playerNostro", d.audio_nostro),
+                     creaPlayer("playerRiferimento", d.audio_riferimento)];
+}
+
+async function apriConfronto(ricarica) {
+  const box = document.getElementById("confrontoBox");
+  box.classList.add("on");
+  if (!idCanzone) return;
+  if (caricatoConfronto && !ricarica) {
+    box.scrollIntoView({behavior: "smooth", block: "start"});
+    return;
+  }
+  try {
+    const d = await fetch("/db/songs/" + encodeURIComponent(idCanzone) + "/confronto")
+      .then(r => r.json());
+    if (d && !d.error) { mostraConfronto(d); caricatoConfronto = true; }
+    box.scrollIntoView({behavior: "smooth", block: "start"});
+  } catch (e) {
+    document.getElementById("confrontoNumeri").innerHTML =
+      '<span class="n">⚠ confronto non caricabile: ' + esc(e.message) + "</span>";
+  }
+}
+
+// I due audio si sentono anche uno per volta (player indipendenti): questo bottone
+// li fa partire insieme dall'inizio, per ascoltarli davvero a confronto.
+function avviaEntrambi() {
+  playerConfronto.forEach(p => { if (p) p.daCapo().catch(() => {}); });
+}
+function fermaEntrambi() { playerConfronto.forEach(p => { if (p) p.ferma(); }); }
 
 document.querySelector("details").addEventListener("toggle", function () {
   const scheda = document.getElementById("scheda");

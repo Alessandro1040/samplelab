@@ -828,6 +828,180 @@ def estrai_funzione_py(src, nome):
     return "".join(corpo)
 
 
+class TestConfrontoVoce(unittest.TestCase):
+    """Il confronto voce: i due testi affiancati e i due audio da sentire (18/09/2026).
+
+    Richiesta di Alessandro: «un pulsante sotto 🗣 voce … che permetta di vedere i
+    testi a confronto, a sinistra il testo estratto e a destra quello vero, e anche
+    i due audio che confronta, magari usando lo stesso player stile FL Studio del
+    campionatore (senza trim giallo)». Per MOSTRARE i testi bisogna salvarli: prima
+    la Verifica scriveva solo i numeri. Colonne nuove `testo_trascrizione`,
+    `testo_riferimento`, `testo_parole_uniche`, i due file (`testo_audio_nostro`,
+    `testo_audio_riferimento`) e `anteprima_file`, più la rotta `/anteprima/…`.
+
+    Qui si prova anche il fix che ha reso possibile tutto questo: `esc()` non metteva
+    al sicuro il doppio apice, quindi un valore come `["Dirty Swift"]` (Produttori)
+    troncava l'attributo `value` e la Verifica riscriveva nel database il troncato
+    ('[') — dato corrotto vero, trovato il 18/09/2026 sulla riga *21 Questions*.
+    """
+
+    def setUp(self):
+        self.verifica = leggi(VERIFICA_PATH)
+        self.app_src = leggi(APP_PATH)
+
+    # ── la pagina: il pulsante e il pannello ─────────────────────────────────
+    def test_il_pulsante_sta_sotto_il_verdetto_voce(self):
+        verdetti = estrai_funzione(self.verifica, "mostraVerdetti")
+        self.assertIn("if (s.testo_esito)", verdetti)
+        self.assertIn("apriConfronto(true)", verdetti)
+        self.assertIn("📄 Confronta testi e audio", verdetti)
+
+    def test_la_pagina_ha_il_pannello(self):
+        for pezzo in ('id="confrontoBox"', 'id="confrontoNumeri"', 'id="playerNostro"',
+                      'id="playerRiferimento"', 'id="testoTrascrizione"', 'id="testoRiferimento"',
+                      "apriConfronto(", "avviaEntrambi()", "fermaEntrambi()", "/confronto"):
+            self.assertIn(pezzo, self.verifica, pezzo)
+        # dopo una verifica il pannello aperto si aggiorna da solo (testo appena salvo)
+        corpo = estrai_funzione(self.verifica, "avviaVerifica")
+        self.assertIn("apriConfronto(true)", corpo)
+
+    def test_i_due_player_non_hanno_il_trim_giallo(self):
+        corpo = estrai_funzione(self.verifica, "creaPlayer")
+        for vietato in ("trimStart", "trimEnd", "Trim giallo", "toggleTrimGiallo", "Battute"):
+            self.assertNotIn(vietato, corpo)
+        self.assertIn("frazioneDaClick(", corpo)     # click sull'onda = vai a quel punto
+        self.assertIn("picchiDaBuffer(", corpo)      # forma d'onda vera, come il sampler
+
+    def test_lo_script_compila(self):
+        script = re.search(r"<script>(.*?)</script>", self.verifica, re.S).group(1)
+        esito = esegui_js("try { new Function(%s); JSON.stringify('ok'); }"
+                          " catch (e) { JSON.stringify('ERRORE: ' + e.message); }"
+                          % json.dumps(script), "/tmp/test_confronto_sintassi.js")
+        self.assertEqual(esito, "ok")
+
+    # ── le funzioni pure, eseguite davvero in JavaScriptCore ─────────────────
+    def test_escape_delle_virgolette(self):
+        codice = (estrai_funzione(self.verifica, "esc") + "\n"
+                  "JSON.stringify([esc('[\\\"Dirty Swift\\\"]'),"
+                  " esc(\"Royce Da 5'9\\\"\"), esc('a & b <c>')]);")
+        d = esegui_js(codice, "/tmp/test_confronto_esc.js")
+        self.assertEqual(d[0], "[&quot;Dirty Swift&quot;]")
+        self.assertEqual(d[1], "Royce Da 5&#39;9&quot;")
+        self.assertEqual(d[2], "a &amp; b &lt;c&gt;")
+        # le caselle dei dati si riempiono con l'escape (era la riga del bug)
+        self.assertIn('value="${esc(valoreMostrato(campo, s))}"', self.verifica)
+
+    def test_i_produttori_si_leggono_e_si_riscrivono(self):
+        codice = (estrai_funzione(self.verifica, "producersTesto") + "\n"
+                  + estrai_funzione(self.verifica, "producersJson") + "\n"
+                  "JSON.stringify([producersTesto('[\\\"Dr. Dre\\\", \\\"Mel-Man\\\"]'),"
+                  " producersTesto('Raedius'), producersTesto(null),"
+                  " producersJson('Dirty Swift'), producersJson('Dr. Dre, Mel-Man'),"
+                  " producersJson('[\\\"Dirty Swift\\\"]'),"
+                  " producersJson(producersTesto('[\\\"Dr. Dre\\\", \\\"Mel-Man\\\"]'))]);")
+        d = esegui_js(codice, "/tmp/test_confronto_producers.js")
+        self.assertEqual(d[0], "Dr. Dre, Mel-Man")
+        self.assertEqual(d[1], "Raedius")
+        self.assertEqual(d[2], "")
+        self.assertEqual(d[3], '["Dirty Swift"]')
+        self.assertEqual(d[4], '["Dr. Dre","Mel-Man"]')
+        self.assertEqual(d[5], '["Dirty Swift"]')          # già JSON: resta com'è
+        self.assertEqual(d[6], '["Dr. Dre","Mel-Man"]')     # andata e ritorno
+
+
+    def test_le_parole_in_comune_sono_evidenziate(self):
+        codice = ("function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;')"
+                  ".replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;')"
+                  ".replace(/'/g,'&#39;')}\n"
+                  + estrai_funzione(self.verifica, "normalizzaParola") + "\n"
+                  + estrai_funzione(self.verifica, "evidenzia") + "\n"
+                  "JSON.stringify([evidenzia('Girl, it\\'s easy to love me \\n[Chorus: Nate Dogg]',"
+                  " ['easy','love']), evidenzia('niente', []), normalizzaParola('Love,'),"
+                  " normalizzaParola('LOVE\\u2019s')]);")
+        d = esegui_js(codice, "/tmp/test_confronto_evidenzia.js")
+        self.assertIn("<mark>easy</mark>", d[0])
+        self.assertIn("<mark>love</mark>", d[0])
+        self.assertNotIn("<mark>Girl</mark>", d[0])         # non è in comune
+        self.assertIn("\n", d[0])                           # gli a capo restano
+        self.assertEqual(d[1], "niente")                    # senza comuni: nessun mark
+        self.assertEqual(d[2], "love")
+        self.assertEqual(d[3], "love's")
+
+    def test_i_numeri_del_confronto(self):
+        codice = (estrai_funzione(self.verifica, "formattaTempo") + "\n"
+                  + estrai_funzione(self.verifica, "frazioneDaClick") + "\n"
+                  "JSON.stringify([formattaTempo(0), formattaTempo(67), formattaTempo(258.6),"
+                  " frazioneDaClick(150, 100, 100), frazioneDaClick(50, 100, 100),"
+                  " frazioneDaClick(999, 100, 100), frazioneDaClick(100, 100, 0)]);")
+        d = esegui_js(codice, "/tmp/test_confronto_numeri.js")
+        self.assertEqual(d[0], "0:00")
+        self.assertEqual(d[1], "1:07")
+        self.assertEqual(d[2], "4:18")          # 258,6 s = la durata di *21 Questions*
+        self.assertEqual(d[3], 0.5)
+        self.assertEqual(d[4], 0)               # prima dell'onda: si ferma a 0
+        self.assertEqual(d[5], 1)               # oltre la fine: si ferma a 1
+        self.assertEqual(d[6], 0)               # larghezza zero: niente divisione per zero
+
+    # ── il backend ────────────────────────────────────────────────────────────
+    def test_i_testi_e_i_file_finiscono_nel_database(self):
+        campi = APP.campi_dal_risultato_testo({
+            "esito": "confermato", "copertura": 77.2, "parole": 268,
+            "fonte": "liriche (152 parole) · trascrizione a cappella", "motivo": None,
+            "trascrizione": "New York City", "riferimento_testo": "[Intro] New York City",
+            "parole_uniche": 207,
+            "file_nostro": os.path.join(APP.DL_DIR, "brano.mp3"),
+            "file_riferimento": os.path.join(APP.ANTEPRIME_DIR, "6811474800_21_Questions.m4a")})
+        self.assertEqual(campi["testo_trascrizione"], "New York City")
+        self.assertEqual(campi["testo_riferimento"], "[Intro] New York City")
+        self.assertEqual(campi["testo_parole_uniche"], 207)
+        self.assertEqual(campi["testo_audio_nostro"], "downloads/brano.mp3")
+        self.assertEqual(campi["testo_audio_riferimento"],
+                         "anteprime/6811474800_21_Questions.m4a")
+        self.assertEqual(campi["testo_esito"], "confermato")
+        # un confronto che non si è potuto fare: campi vuoti, non chiavi mancanti
+        vuoto = APP.campi_dal_risultato_testo({
+            "esito": "non verificabile", "copertura": None, "parole": None, "fonte": None,
+            "motivo": "faster-whisper non è installato", "trascrizione": None,
+            "riferimento_testo": None, "parole_uniche": None,
+            "file_nostro": None, "file_riferimento": None})
+        self.assertIsNone(vuoto["testo_trascrizione"])
+        self.assertIsNone(vuoto["testo_audio_nostro"])
+
+    def test_percorso_relativo_solo_dentro_la_cartella(self):
+        self.assertIsNone(APP.percorso_relativo(""))
+        self.assertIsNone(APP.percorso_relativo("/etc/passwd"))
+        self.assertEqual(APP.percorso_relativo(os.path.join(APP.DL_DIR, "x.mp3")),
+                         "downloads/x.mp3")
+
+    def test_url_dei_due_audio(self):
+        self.assertEqual(APP._audio_del_confronto("downloads/a b.mp3", "x")["url"],
+                         "/stream/a%20b.mp3")
+        self.assertEqual(
+            APP._audio_del_confronto("anteprime/acapella_1/htdemucs/f/vocals.mp3", "x")["url"],
+            "/anteprima/acapella_1/htdemucs/f/vocals.mp3")
+        self.assertIsNone(APP._audio_del_confronto("", "x"))
+        self.assertIsNone(APP._audio_del_confronto("stems/f.mp3", "x"))
+        # righe verificate prima del 18/09/2026: senza il campo si ripiega sul file locale
+        d = APP._audio_del_confronto("", "x", default_rel="downloads/brano.mp3")
+        self.assertEqual(d["url"], "/stream/brano.mp3")
+
+    def test_dalla_cartella_non_si_esce(self):
+        self.assertTrue(APP._dentro_la_cartella(APP.DL_DIR, os.path.join(APP.DL_DIR, "x.mp3")))
+        self.assertFalse(APP._dentro_la_cartella(
+            APP.DL_DIR, os.path.join(APP.DL_DIR, "..", "app (2).py")))
+
+    def test_rotta_colonne_e_legenda(self):
+        self.assertIn('@app.route("/anteprima/<path:filename>")', self.app_src)
+        self.assertIn('@app.route("/db/songs/<song_id>/confronto", methods=["GET"])', self.app_src)
+        for colonna in ("testo_trascrizione", "testo_riferimento", "testo_parole_uniche",
+                        "testo_audio_nostro", "testo_audio_riferimento", "anteprima_file"):
+            self.assertIn('"%s"' % colonna, self.app_src)
+            self.assertIn('"%s":' % colonna, self.app_src)      # anche nella legenda
+        # i testi e i file del confronto sono salvati dal passo 🗣 e dai due 🔇/🔊
+        self.assertIn("percorso_relativo(risultato.get(\"file_riferimento\"))",
+                      estrai_funzione_py(self.app_src, "conferma_audio"))
+
+
 class TestCablaggio(unittest.TestCase):
     """Il passo 🔊 è agganciato al posto giusto: dentro la Verifica (prima di
     BPM/Key), con endpoint dedicato, migrazione, legenda e interfaccia."""
@@ -1010,6 +1184,73 @@ class TestAppViva(unittest.TestCase):
 
 
 
+
+
+    def test_confronto_della_canzone_vera(self):
+        """Il pannello «📄 Confronta» ha quello che gli serve per *21 Questions*:
+        i due testi, i numeri (attese/sentite/uniche/in comune) e i due audio."""
+        with urllib.request.urlopen(
+                SAMPLELAB_URL + "/db/songs/%s/confronto" % ID_21_QUESTIONS, timeout=60) as r:
+            d = json.load(r)
+        for campo in ("pronto", "tipo", "trascrizione", "riferimento", "parole_attese",
+                      "parole_sentite", "parole_sentite_uniche", "comuni", "comuni_quanti",
+                      "audio_nostro", "audio_riferimento"):
+            self.assertIn(campo, d)
+        self.assertTrue(d["riferimento"], "le liriche ci sono")
+        self.assertEqual(d["tipo"], "liriche")
+        self.assertEqual(d["parole_attese"], 152)        # il numero che cita la fonte
+        # il nostro audio: il file locale (`/stream/…`) o l'a-cappella (`/anteprima/…`,
+        # quando la verifica è stata fatta con 🎤: è la voce che Whisper ha trascritto)
+        self.assertTrue(d["audio_nostro"]["url"].startswith(("/stream/", "/anteprima/")),
+                        d["audio_nostro"]["url"])
+        self.assertTrue(d["audio_nostro"]["percorso"].startswith(("downloads/", "anteprime/")),
+                        d["audio_nostro"]["percorso"])
+        # il testo trascritto c'è solo dalle verifiche fatte col salvataggio nuovo
+        if d["pronto"]:
+            self.assertTrue(d["trascrizione"])
+            self.assertTrue(d["comuni"])
+            self.assertLessEqual(d["comuni_quanti"], d["parole_attese"])
+            self.assertLessEqual(d["comuni_quanti"], d["parole_sentite_uniche"])
+
+    def test_confronto_canzone_inesistente(self):
+        try:
+            urllib.request.urlopen(SAMPLELAB_URL + "/db/songs/song_non_esiste/confronto",
+                                   timeout=20)
+            self.fail("atteso HTTP 404")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
+
+    def test_anteprima_servita_col_range(self):
+        """La rotta nuova `/anteprima/…`: serve i file di `anteprime/` (cartella NON
+        versionata, quindi il test si salta se il file non c'è) e risponde 206 al
+        Range, che è quello che fa scorrere la barra dei due player."""
+        nome = "6811474800_21_Questions__feat__Nate_Dogg_.m4a"
+        percorso = os.path.join(APP.ANTEPRIME_DIR, nome)
+        if not os.path.exists(percorso):
+            self.skipTest("anteprima non presente (cartella non versionata)")
+        req = urllib.request.Request(SAMPLELAB_URL + "/anteprima/" + nome,
+                                     headers={"Range": "bytes=0-1023"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            self.assertEqual(r.status, 206)
+            self.assertEqual(r.headers.get("Content-Range", "").split("/")[-1],
+                             str(os.path.getsize(percorso)))
+            self.assertEqual(len(r.read()), 1024)
+
+    def test_anteprima_inesistente_e_fuori_cartella(self):
+        for brutto in ("/anteprima/non_esiste.m4a", "/anteprima/..%2F..%2Fetc%2Fpasswd"):
+            try:
+                urllib.request.urlopen(SAMPLELAB_URL + brutto, timeout=20)
+                self.fail("atteso HTTP 404 per %s" % brutto)
+            except urllib.error.HTTPError as e:
+                self.assertEqual(e.code, 404, brutto)
+
+    def test_pagina_verifica_col_confronto(self):
+        with urllib.request.urlopen(
+                SAMPLELAB_URL + "/verifica?song=" + ID_21_QUESTIONS, timeout=30) as r:
+            html = r.read().decode("utf-8", "replace")
+        for pezzo in ('id="confrontoBox"', "apriConfronto(", "avviaEntrambi()",
+                      "/db/songs/", "playerRiferimento"):
+            self.assertIn(pezzo, html)
 
 
 class TestAnteprimaItunes(unittest.TestCase):
