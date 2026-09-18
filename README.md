@@ -420,15 +420,25 @@ Da tenere presente nelle sessioni di lavoro successive:
   testi e audio** (lo stesso pulsante è anche nella sezione **3 · Confronto voce** in
   fondo alla pagina, sempre raggiungibile: quello dentro il blocco del progresso resta
   invisibile finché non lanci una verifica): i due testi affiancati (trascrizione |
-  liriche, con le **parole in comune evidenziate**) e **due player** (il file locale o
-  l'a-cappella · l'anteprima ufficiale) — estetica del sampler ma **senza trim giallo,
-  griglia e BPM**. I testi e i
+  liriche, con le **parole in comune evidenziate**) e **un player** — quello che Whisper
+  ha davvero sentito, con l'**interruttore a cappella ↔ file locale** — estetica del
+  sampler ma **senza trim giallo, griglia e BPM**. I testi e i
   due file si **salvano** nel database (`testo_trascrizione`, `testo_riferimento`,
   `testo_parole_uniche`, `testo_audio_nostro`, `testo_audio_riferimento`,
   `anteprima_file`) e si leggono da `GET /db/songs/<id>/confronto`; le anteprime si
   sentono da `GET /anteprima/<file>` (cartella `anteprime/`, non versionata). ⚠️ Il
   pannello è «pronto» solo per le verifiche fatte **da questa versione in poi**: sulle
   righe verificate prima il testo trascritto non c'è (basta rifare il passo 🗣).
+- ⚠️ **Il passo 🗣 NON confronta due audio** (l'altro è la trascrizione col TESTO): a
+  destra del pannello c'è un player solo se il riferimento È un audio (liriche
+  mancanti). Il confronto fra due audio è il passo 🔊 e ha la sua sezione **4 · Confronto
+  audio (impronta)** in fondo a `/verifica`: due file che **non** devono corrispondere
+  (l'anteprima di 30 s sta DENTRO il brano di 4 minuti), quindi si ascolta lo stesso
+  passaggio — il nostro file **dall'offset trovato** (`audio_match_offset`, 76,0 s su
+  *21 Questions*) e l'anteprima da zero, con «▶ avvia i due dal punto allineato».
+  Messa così la prima volta l'anteprima era finita accanto all'a-cappella della
+  trascrizione: sembrava un confronto che non esisteva (segnalato da Alessandro il
+  18/09/2026).
 - **Attenzione ai campi con doppi apici.** I Produttori sono JSON (`["Dirty Swift"]`) e
   in `verifica.html` `esc()` non scappava `"`: la casella si troncava a `'['` e la
   Verifica riscriveva quel troncato nel database (bug vero del 18/09/2026 sulla riga
@@ -1957,13 +1967,30 @@ Da tenere presente nelle sessioni di lavoro successive:
     irraggiungibile. La sezione scrive anche il verdetto in una riga («verdetto: ✓
     confermato · 75.8% · 273 parole») o perché non c'è ancora.
     Il pannello mostra i due testi affiancati (sinistra la trascrizione,
-    destra le liriche — con le **parole in comune evidenziate** in verde, e sotto **due
-    player a forma d'onda** (sinistra il file locale o l'a-cappella, destra l'anteprima
-    ufficiale): ▶/⏸, ⏹, **click sull'onda per andare al punto**, «▶ avvia entrambi».
-    Estetica del sampler ma **senza trim giallo, griglia e BPM** — qui non si taglia,
-    si ascolta — e i picchi si calcolano una volta sola (`picchiDaBuffer`, come
-    `extractPeaks` del sampler). Sopra, i numeri per rifare il conto a mano: parole
-    attese · sentite · **uniche** · in comune · fonte.
+    destra le liriche — con le **parole in comune evidenziate** in verde) e **un solo
+    player a forma d'onda**: quello che Whisper ha davvero sentito, con un
+    **interruttore «a cappella ↔ file locale»** per sentire la stessa canzone con e
+    senza musica. ▶/⏸, ⏹, **click sull'onda per andare al punto**. Estetica del
+    sampler ma **senza trim giallo, griglia e BPM** — qui non si taglia, si ascolta —
+    e i picchi si calcolano una volta sola (`picchiDaBuffer`, come `extractPeaks` del
+    sampler). Sopra, i numeri per rifare il conto a mano: parole attese · sentite ·
+    **uniche** · in comune · fonte.
+  - ⚠️ **「Non ha senso confrontare quei due audio」 — la lezione del 18/09/2026.** Nella
+    prima versione il pannello voce metteva l'a-cappella di TUTTO il brano (4:18) a
+    sinistra e l'anteprima iTunes di 30 s a destra, perché il player di destra prendeva
+    l'anteprima dal passo 🔊 (`anteprima_file`) quando il passo 🗣 non aveva usato un
+    audio. Segnalazione di Alessandro: «non corrisponderanno mai… non ha senso che
+    confronti quei due audio». Giusto: **il passo 🗣 non confronta due audio**, confronta
+    la trascrizione con il TESTO (`testo_audio_riferimento` era `None`). Erano due
+    controlli diversi messi nella stessa vetrina. Ora: a destra c'è un player **solo se
+    il riferimento È un audio** (liriche mancanti), altrimenti una nota che lo dice; e il
+    confronto fra due audio ha il suo pannello dedicato (**4 · Confronto audio
+    (impronta)**) dove i due file non devono corrispondere: l'impronta dell'anteprima è
+    stata cercata **DENTRO** il nostro file e `offset` dice dove comincia (misurato
+    76,0 s su *21 Questions*). Per ascoltarli «a confronto» il nostro file parte **da lì**
+    e l'anteprima da zero (`puntoAllineato`, funzione pura: se l'offset manca o è oltre la
+    durata si parte dall'inizio) e il bottone **▶ avvia i due dal punto allineato** li fa
+    sentire insieme: è lo stesso passaggio musicale, non due cose scollegate.
   - 🐛 **Il dato corrotto trovato per strada.** Confrontando il database di lavoro con
     quello in HEAD è saltato fuori che su *21 Questions* `producers` era diventato
     **`'['`** (in HEAD: `["Dirty Swift"]`) con `updated_at = testo_at`, cioè scritto da
@@ -1977,12 +2004,14 @@ Da tenere presente nelle sessioni di lavoro successive:
     `esc()` scappa `"` e `'`, i **Produttori** si mostrano come lista leggibile
     (`["Dr. Dre", "Mel-Man"]` → `Dr. Dre, Mel-Man`) e si **riscrivono in JSON** come fa
     l'✏️ Edit di `index (2).html`.
-  - Verifiche del 18/09/2026: **13 test nuovi** (`TestConfrontoVoce`: `esc`,
-    `producersTesto`/`producersJson`, `evidenzia`, `formattaTempo`, `frazioneDaClick` in
-    **JavaScriptCore**; `percorso_relativo`, `campi_dal_risultato_testo`,
-    `_audio_del_confronto`, `_dentro_la_cartella`, rotta e legenda; e sull'**app viva**
-    `/db/songs/<id>/confronto`, 404 su id inesistente, `/anteprima/…` col `Range` → 206
-    con `Content-Range: bytes 0-1023/994898` e 404 su `../`) e **404 test di suite**
+  - Verifiche del 18/09/2026: **16 test nuovi** (`TestConfrontoVoce`: `esc`,
+    `producersTesto`/`producersJson`, `evidenzia`, `formattaTempo`, `frazioneDaClick`,
+    `puntoAllineato` in **JavaScriptCore**; `percorso_relativo`,
+    `campi_dal_risultato_testo`, `_audio_del_confronto`, `_dentro_la_cartella`, rotta e
+    legenda; il pannello voce che NON presta l'audio di un altro controllo; e sull'**app
+    viva** `/db/songs/<id>/confronto` con `audio_riferimento = None` e
+    `impronta.offset = 76,0`, 404 su id inesistente, `/anteprima/…` col `Range` → 206
+    con `Content-Range: bytes 0-1023/994898` e 404 su `../`) e **406 test di suite**
     (`OK`, erano 390); sul caso vero
     `POST /db/songs/song_abf47df2aae9/audio_check` → **1230 hash allineati a 76,0 s**
     con `anteprima_file` = `anteprime/6811474800_21_Questions__feat__Nate_Dogg_.m4a`.
@@ -1997,17 +2026,19 @@ Da tenere presente nelle sessioni di lavoro successive:
     Whisper non danno la stessa trascrizione parola per parola — il verdetto resta
     "confermato" in entrambe. Backup del database **prima** di scrivere in
     `/tmp/samplelab_backup_18set2026_pre_confronto.db`.
-  - **In CHROME VERO** (undetected_chromedriver, `/verifica?song=song_abf47df2aae9`):
-    il pulsante della sezione §3 apre il pannello (`pannello: true`), la nota dice
-    «verdetto: ✓ confermato · 75.8% · 273 parole», i numeri sono
-    «parole attese 152 · sentite 273 · uniche 153 · in comune 116», i due testi sono lì
-    (2.922 caratteri la trascrizione, 3.078 le liriche) con **229 parole evidenziate**
-    nella trascrizione e **234** nelle liriche, **2 canvas** con **7.802 pixel** di onda
-    disegnati davvero (Web Audio + canvas: la sola parte che JavaScriptCore non può
-    provare) e le due etichette «a cappella (demucs)» / «anteprima ufficiale (iTunes)»
-    con le durate giuste (**0:00 / 4:18** e **0:00 / 0:30**). Premendo ▶ il tempo
-    AVANZA davvero («0:00 → **0:02** / 4:18» dopo 3 s, il pulsante diventa ⏸ e ⏹ torna
-    a «0:00 / 4:18»): è la prova che i due file si possono ascoltare affiancati.
+  - **In CHROME VERO** (undetected_chromedriver, `/verifica?song=song_abf47df2aae9`, dopo
+    la correzione del pannello): nel pannello **3** c'è **un solo canvas**
+    (`voceCanvas: 1`) e a destra **nessun player** (`playerInRiferimento: 0`), con la
+    nota «Il riferimento di questo confronto è il testo (le liriche di Genius), non un
+    audio»; l'interruttore mostra «a cappella (demucs) [on]» / «file locale (con la
+    musica)» e cliccando il secondo l'etichetta del player diventa «file locale (con la
+    musica)»; i numeri sono «parole attese 152 · sentite 273 · uniche 153 · in comune
+    116» e nei due testi le parole evidenziate sono **229** (trascrizione) e **234**
+    (liriche). Nel pannello **4** i due player si presentano con i tempi **1:16 / 4:18**
+    (il nostro file, dall'offset 76,0 s) e **0:00 / 0:30** (l'anteprima), l'onda ha
+    **13.280 pixel** disegnati, e dopo «▶ avvia i due dal punto allineato» sono a
+    **1:18 / 4:18** e **0:02 / 0:30**: i due file si sentono **insieme, allineati sullo
+    stesso passaggio** (Web Audio + canvas: la parte che JavaScriptCore non può provare).
 
 
 

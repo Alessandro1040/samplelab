@@ -4206,7 +4206,22 @@ def _audio_del_confronto(rel, etichetta, default_rel=""):
 
 @app.route("/db/songs/<song_id>/confronto", methods=["GET"])
 def db_song_confronto(song_id):
-    """📄 I due testi e i due audio del confronto voce (pagina /verifica)."""
+    """📄 I testi e gli audio del confronto, per la pagina /verifica.
+
+    Restituisce DUE cose che non vanno confuse (lezione del 18/09/2026, quando
+    l'anteprima del passo 🔊 era finita accanto all'a-cappella del passo 🗣 e
+    sembrava che il confronto voce confrontasse quei due file — non è così):
+
+    1. il confronto **voce**: `trascrizione` (quello che si sente) contro
+       `riferimento` (il TESTO delle liriche, o l'audio ufficiale quando le liriche
+       mancavano). `audio_nostro` è il file che Whisper ha trascritto (a cappella o
+       mix), `audio_mix` lo stesso brano con la musica, `audio_riferimento` c'è SOLO
+       se il riferimento era davvero un audio;
+    2. il confronto **audio** (impronta acustica, passo 🔊) in `impronta`: l'anteprima
+       ufficiale cercata DENTRO il file locale, con `offset` = dove comincia. Lì i due
+       file non devono corrispondere: per ascoltarli a confronto il nostro si fa
+       partire da `offset` e l'anteprima da zero.
+    """
     with get_db() as conn:
         s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
     if not s:
@@ -4220,14 +4235,33 @@ def db_song_confronto(song_id):
     sentite = parole_contenuto(trascrizione)
     comuni = sorted(set(attese) & set(sentite))
 
+    # L'audio che Whisper ha DAVVERO trascritto e, quando è diverso, il mix: la pagina
+    # fa sentire l'uno o l'altro con un interruttore (stessa canzone con e senza
+    # musica: questo sì è un confronto che ha senso sentire).
     nostro_rel = s.get("testo_audio_nostro") or ""
+    mix_rel = ("downloads/" + s["local_file"]) if s.get("local_file") else ""
     nostro = _audio_del_confronto(
         nostro_rel,
         "a cappella (demucs)" if "acapella_" in nostro_rel else "il file locale",
-        default_rel=("downloads/" + s["local_file"]) if s.get("local_file") else "")
+        default_rel=mix_rel)
+    mix = _audio_del_confronto(mix_rel, "file locale (con la musica)") if mix_rel else None
+    # Solo se il riferimento del passo voce ERA un audio (liriche mancanti): quando il
+    # riferimento è il TESTO a destra non si ascolta niente.
     riferimento_audio = _audio_del_confronto(
-        s.get("testo_audio_riferimento") or s.get("anteprima_file") or "",
-        "anteprima ufficiale (iTunes)")
+        s.get("testo_audio_riferimento") or "", "audio di riferimento (anteprima ufficiale)")
+
+    # ── Il confronto audio (impronta acustica, passo 🔊) ───────────────────────
+    impronta = None
+    if s.get("audio_match_esito") or s.get("audio_match_offset") is not None:
+        impronta = {
+            "esito": s.get("audio_match_esito"), "voti": s.get("audio_match_voti"),
+            "comuni": s.get("audio_match_comuni"), "offset": s.get("audio_match_offset"),
+            "fonte": s.get("audio_match_fonte"), "motivo": s.get("audio_match_motivo"),
+            "at": s.get("audio_match_at"),
+            "audio_nostro": _audio_del_confronto(mix_rel or nostro_rel, "il file locale"),
+            "audio_anteprima": _audio_del_confronto(s.get("anteprima_file") or "",
+                                                    "anteprima ufficiale (iTunes)"),
+        }
 
     return jsonify({
         "song_id": s["id"], "titolo": s.get("title") or s.get("local_file") or "",
@@ -4244,7 +4278,8 @@ def db_song_confronto(song_id):
                                   if s.get("testo_parole_uniche") is not None
                                   else len(set(sentite))),
         "comuni": comuni, "comuni_quanti": len(comuni),
-        "audio_nostro": nostro, "audio_riferimento": riferimento_audio,
+        "audio_nostro": nostro, "audio_mix": mix, "audio_riferimento": riferimento_audio,
+        "impronta": impronta,
     })
 
 

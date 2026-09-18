@@ -859,12 +859,33 @@ class TestConfrontoVoce(unittest.TestCase):
     def test_la_pagina_ha_il_pannello(self):
         for pezzo in ('id="confrontoBox"', 'id="confrontoNumeri"', 'id="playerNostro"',
                       'id="playerRiferimento"', 'id="testoTrascrizione"', 'id="testoRiferimento"',
-                      'id="btnConfronto"', 'id="confrontoNota"',
-                      "apriConfronto(", "avviaEntrambi()", "fermaEntrambi()", "/confronto"):
+                      'id="btnConfronto"', 'id="confrontoNota"', 'id="switchVoce"',
+                      'id="improntaBox"', 'id="improntaNumeri"', 'id="improntaNota"',
+                      'id="playerImprontaNostro"', 'id="playerImprontaAnteprima"',
+                      'id="btnImpronta"', "avviaImpronta()", "fermaImpronta()",
+                      "apriConfronto(", "apriImpronta(", "avviaEntrambi()", "fermaEntrambi()",
+                      "/confronto"):
             self.assertIn(pezzo, self.verifica, pezzo)
-        # dopo una verifica il pannello aperto si aggiorna da solo (testo appena salvo)
+        # dopo una verifica i pannelli aperti si aggiornano da soli (dati appena salvi)
         corpo = estrai_funzione(self.verifica, "avviaVerifica")
         self.assertIn("apriConfronto(true)", corpo)
+        self.assertIn("apriImpronta(true)", corpo)
+
+    def test_il_pannello_voce_non_presta_l_audio_di_un_altro_controllo(self):
+        """Lezione del 18/09/2026: la preview del passo 🔊 (30 s di iTunes) era finita
+        accanto all'a-cappella del passo 🗣 (tutto il brano), come se il confronto voce
+        confrontasse quei due file. Non è così: il passo voce confronta TRASCRIZIONE e
+        TESTO. A destra c'è un player solo quando il riferimento È un audio; il
+        confronto fra due audio ha il suo pannello (4 · impronta), con l'offset."""
+        corpo = estrai_funzione(self.verifica, "mostraConfronto")
+        self.assertIn("if (d.audio_riferimento)", corpo)
+        self.assertNotIn("anteprima_file", corpo)
+        self.assertIn("mostraInterruttoreVoce(d)", corpo)
+        interruttore = estrai_funzione(self.verifica, "mostraInterruttoreVoce")
+        self.assertIn("d.audio_mix", interruttore)
+        impronta = estrai_funzione(self.verifica, "mostraImpronta")
+        self.assertIn("imp.offset", impronta)
+        self.assertIn("inizio: imp.offset", impronta)
 
     def test_il_pulsante_e_raggiungibile_anche_a_pagina_ricaricata(self):
         """Il pulsante dentro il blocco del progresso resta invisibile finché non si
@@ -957,6 +978,23 @@ class TestConfrontoVoce(unittest.TestCase):
         self.assertEqual(d[4], 0)               # prima dell'onda: si ferma a 0
         self.assertEqual(d[5], 1)               # oltre la fine: si ferma a 1
         self.assertEqual(d[6], 0)               # larghezza zero: niente divisione per zero
+
+    def test_il_punto_allineato_del_confronto_audio(self):
+        """Il nostro file parte da dove l'impronta ha trovato l'anteprima (misurato:
+        76,022 s su *21 Questions*); se l'offset non ha senso si parte dall'inizio."""
+        codice = (estrai_funzione(self.verifica, "puntoAllineato") + "\n"
+                  "JSON.stringify([puntoAllineato(76.022, 258.6), puntoAllineato(0, 258.6),"
+                  " puntoAllineato(-5, 258.6), puntoAllineato(300, 258.6),"
+                  " puntoAllineato('', 258.6), puntoAllineato(76, NaN),"
+                  " puntoAllineato(null, null)]);")
+        d = esegui_js(codice, "/tmp/test_confronto_punto.js")
+        self.assertAlmostEqual(d[0], 76.022, places=3)
+        self.assertEqual(d[1], 0)       # senza offset: dall'inizio
+        self.assertEqual(d[2], 0)       # negativo: dall'inizio
+        self.assertEqual(d[3], 0)       # oltre la durata del file: dall'inizio
+        self.assertEqual(d[4], 0)
+        self.assertEqual(d[5], 76)      # durata sconosciuta: ci si fida dell'offset
+        self.assertEqual(d[6], 0)
 
     # ── il backend ────────────────────────────────────────────────────────────
     def test_i_testi_e_i_file_finiscono_nel_database(self):
@@ -1227,6 +1265,18 @@ class TestAppViva(unittest.TestCase):
             self.assertTrue(d["comuni"])
             self.assertLessEqual(d["comuni_quanti"], d["parole_attese"])
             self.assertLessEqual(d["comuni_quanti"], d["parole_sentite_uniche"])
+        # il pannello voce NON deve ricevere l'anteprima del passo 🔊 (incoerenza del
+        # 18/09/2026: il riferimento qui è il TESTO, non un audio)
+        self.assertIsNone(d["audio_riferimento"])
+        # ...e il confronto audio ha i suoi dati, con l'offset: il nostro file parte da lì
+        self.assertIsNotNone(d["impronta"])
+        self.assertEqual(d["impronta"]["esito"], "confermato")
+        self.assertGreaterEqual(d["impronta"]["voti"], 50)
+        self.assertAlmostEqual(d["impronta"]["offset"], 76.0, delta=1.0)
+        self.assertTrue(d["impronta"]["audio_anteprima"]["url"].startswith("/anteprima/"))
+        self.assertTrue(d["impronta"]["audio_nostro"]["url"].startswith("/stream/"))
+        if d["audio_mix"]:      # l'interruttore mix/a-cappella del pannello voce
+            self.assertTrue(d["audio_mix"]["url"].startswith("/stream/"))
 
     def test_confronto_canzone_inesistente(self):
         try:

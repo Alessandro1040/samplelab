@@ -90,6 +90,15 @@ button.confronta:hover{background:var(--accent);color:#080808}
    una canzone verificata in una sessione precedente. */
 .confronto-voce{margin-top:4px}
 .confronto-voce .hint{margin-left:10px;display:inline-block}
+/* L'interruttore mix / a cappella del pannello voce: la trascrizione è di quello
+   che Whisper ha sentito (a cappella), il mix è la stessa canzone con la musica. */
+.interruttore{display:flex;gap:6px;align-items:center;margin-bottom:9px;flex-wrap:wrap}
+.interruttore button{background:transparent;border:1px solid var(--border2);color:var(--muted);border-radius:20px;padding:4px 11px;font-family:'Space Mono',monospace;font-size:10px;cursor:pointer}
+.interruttore button:hover{border-color:var(--accent);color:var(--accent)}
+.interruttore button.attivo{background:var(--accent);border-color:var(--accent);color:#080808;font-weight:700}
+.interruttore .nota{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted)}
+.numeri .buono{color:var(--green)}
+.numeri .cattivo{color:var(--red)}
 </style>
 </head>
 <body>
@@ -173,6 +182,7 @@ button.confronta:hover{background:var(--accent);color:#080808}
     <div class="colonne">
       <div class="colonna">
         <h3>🎧 Quello che si sente</h3>
+        <div class="interruttore" id="switchVoce"></div>
         <div id="playerNostro"></div>
         <div class="testo" id="testoTrascrizione"></div>
       </div>
@@ -183,10 +193,36 @@ button.confronta:hover{background:var(--accent);color:#080808}
       </div>
     </div>
     <div class="entrambi">
-      <button class="confronta" onclick="avviaEntrambi()">▶ avvia entrambi</button>
-      <button class="confronta" onclick="fermaEntrambi()">⏹ ferma entrambi</button>
+      <button class="confronta" onclick="avviaEntrambi()">▶ avvia</button>
+      <button class="confronta" onclick="fermaEntrambi()">⏹ ferma</button>
       <span class="hint">Le parole <mark>evidenziate</mark> sono quelle che compaiono in
         entrambi i testi: sono loro a fare la percentuale del verdetto 🗣.</span>
+    </div>
+  </div>
+
+  <div class="confronto-voce" style="margin-top:26px">
+    <h2>4 · Confronto audio (impronta acustica)</h2>
+    <button class="confronta" id="btnImpronta" onclick="apriImpronta(true)">📈 Apri il confronto audio</button>
+    <span class="hint" id="improntaNota"></span>
+  </div>
+  <div class="confronto" id="improntaBox">
+    <div class="numeri" id="improntaNumeri"></div>
+    <div class="colonne">
+      <div class="colonna">
+        <h3>🎧 Il nostro file (dal punto trovato)</h3>
+        <div id="playerImprontaNostro"></div>
+      </div>
+      <div class="colonna">
+        <h3>🏬 Anteprima ufficiale (iTunes)</h3>
+        <div id="playerImprontaAnteprima"></div>
+      </div>
+    </div>
+    <div class="entrambi">
+      <button class="confronta" onclick="avviaImpronta()">▶ avvia i due dal punto allineato</button>
+      <button class="confronta" onclick="fermaImpronta()">⏹ ferma</button>
+      <span class="hint">I due file <b>non</b> devono corrispondere: l'impronta dell'anteprima
+        è stata cercata DENTRO il nostro file, e il punto trovato è l'offset qui sopra. Per
+        sentirli a confronto il nostro parte da lì e l'anteprima da zero: è lo stesso passaggio.</span>
     </div>
   </div>
 
@@ -427,6 +463,9 @@ async function avviaVerifica() {
     if (document.getElementById("confrontoBox").classList.contains("on")) {
       await apriConfronto(true);
     }
+    if (document.getElementById("improntaBox").classList.contains("on")) {
+      await apriImpronta(true);
+    }
   } catch (e) {
     clearInterval(poll);
     document.getElementById("stato").textContent = "❌ " + e.message;
@@ -445,7 +484,10 @@ async function avviaVerifica() {
 // principale, ma SENZA trim giallo, griglia e BPM — qui non si taglia niente, si
 // ascoltano i due file che il confronto ha davvero usato.
 let caricatoConfronto = false;
-let playerConfronto = [null, null];
+let datiConfronto = null;      // l'ultima risposta di /db/songs/<id>/confronto
+let playerVoce = [];           // i player del pannello voce (solo quello di sinistra
+                               // quando il riferimento è il TESTO: vedi il 18/09/2026)
+let playerImpronta = [];       // i due player del confronto audio (impronta)
 
 // Funzione PURA: "1:07" da 67 secondi.
 function formattaTempo(secondi) {
@@ -487,6 +529,18 @@ function coloreVerdetto(esito) {
   return "var(--muted)";
 }
 
+// Funzione PURA: da dove far partire il NOSTRO file per ascoltare lo stesso passaggio
+// dell'anteprima. `offset` è dove l'impronta ha trovato l'anteprima dentro il file
+// locale (misurato: 76,0 s su *21 Questions*); se manca o non ha senso (negativo, o
+// oltre la durata del file) si parte da zero — meglio l'inizio che un punto a caso.
+function puntoAllineato(offset, durata) {
+  const o = Number(offset);
+  if (!isFinite(o) || o <= 0) return 0;
+  const d = Number(durata);
+  if (isFinite(d) && d > 0 && o >= d) return 0;
+  return o;
+}
+
 // Il mini-player: play/pausa, ferma, forma d'onda coi picchi veri del file e
 // playhead che avanza; click sull'onda = vai a quel punto. Niente selezione IN/OUT.
 function creaPlayer(contenitoreId, dati) {
@@ -509,6 +563,10 @@ function creaPlayer(contenitoreId, dati) {
     '</div>';
   const audio = new Audio(dati.url);
   audio.preload = "metadata";
+  // Il "punto di casa" del player: per il confronto audio è l'offset trovato
+  // dall'impronta (il nostro file parte da lì, l'anteprima da zero), altrove è 0.
+  const inizio = puntoAllineato(dati.inizio, 0);
+  let posizionato = false;
   const canvas = box.querySelector('[data-r="onda"]');
   const tempo = box.querySelector('[data-r="tempo"]');
   const bottone = box.querySelector('[data-r="play"]');
@@ -569,13 +627,23 @@ function creaPlayer(contenitoreId, dati) {
   audio.addEventListener("play", () => { bottone.textContent = "⏸"; anima(); });
   audio.addEventListener("pause", () => { bottone.textContent = "▶"; disegna(); });
   audio.addEventListener("ended", () => { bottone.textContent = "▶"; disegna(); });
-  audio.addEventListener("loadedmetadata", disegna);
+  audio.addEventListener("loadedmetadata", () => {
+    // La prima volta si va al punto di casa, controllato con la durata VERA del file
+    // (così un offset oltre la fine non fa partire il player a vuoto: `puntoAllineato`
+    // in quel caso restituisce 0).
+    if (!posizionato) {
+      posizionato = true;
+      const t = puntoAllineato(dati.inizio, audio.duration);
+      if (t > 0) audio.currentTime = t;
+      disegna();
+    }
+  });
   audio.addEventListener("error", () => { tempo.textContent = "audio non leggibile"; });
   bottone.addEventListener("click", () => {
     if (audio.paused) audio.play().catch(() => {}); else audio.pause();
   });
   box.querySelector('[data-r="stop"]').addEventListener("click", () => {
-    audio.pause(); audio.currentTime = 0; disegna();
+    audio.pause(); audio.currentTime = inizio; disegna();
   });
   canvas.addEventListener("click", ev => {
     const r = canvas.getBoundingClientRect();
@@ -586,9 +654,9 @@ function creaPlayer(contenitoreId, dati) {
   });
   window.addEventListener("resize", disegna);
   disegna();
-  return {audio: audio, disegna: disegna,
-          ferma: function () { audio.pause(); audio.currentTime = 0; disegna(); },
-          daCapo: function () { audio.pause(); audio.currentTime = 0; return audio.play(); }};
+  return {audio: audio, disegna: disegna, inizio: inizio,
+          ferma: function () { audio.pause(); audio.currentTime = inizio; disegna(); },
+          daCapo: function () { audio.pause(); audio.currentTime = inizio; return audio.play(); }};
 }
 
 function mostraConfronto(d) {
@@ -630,8 +698,57 @@ function mostraConfronto(d) {
     destra.className = "testo vuoto";
     destra.innerHTML = "Nessun testo di riferimento: la canzone non ha liriche nel database.";
   }
-  playerConfronto = [creaPlayer("playerNostro", d.audio_nostro),
-                     creaPlayer("playerRiferimento", d.audio_riferimento)];
+  // Il player di SINISTRA: quello che Whisper ha davvero sentito (a cappella o mix).
+  // Se ci sono entrambi i file, un interruttore fa sentire l'uno o l'altro: è la
+  // stessa canzone con e senza musica, un confronto che ha senso da ascoltare.
+  mostraInterruttoreVoce(d);
+
+  // Il player di DESTRA c'è SOLO se il confronto voce ha usato un audio (liriche
+  // mancanti): quando il riferimento è il TESTO non c'è nessun secondo audio da
+  // mettere a confronto. Fino al 18/09/2026 qui finiva l'anteprima del passo 🔊 — che
+  // è un altro controllo — e sembrava che il confronto voce confrontasse l'a-cappella
+  // di tutto il brano con i 30 s di iTunes: non è così, e non avrebbe senso.
+  if (d.audio_riferimento) {
+    playerVoce = [creaPlayer("playerNostro", d.audio_nostro),
+                  creaPlayer("playerRiferimento", d.audio_riferimento)];
+  } else {
+    playerVoce = [creaPlayer("playerNostro", d.audio_nostro)];
+    document.getElementById("playerRiferimento").innerHTML =
+      '<div class="vuoto">Il riferimento di questo confronto è il <b>testo</b>' +
+      ' (le liriche di Genius), non un audio: qui non c\'è un secondo file da sentire.' +
+      ' Il confronto fra due audio è nel pannello <b>4 · Confronto audio (impronta)' +
+      '</b>, più sotto.</div>';
+  }
+}
+
+// L'interruttore mix ↔ a cappella del pannello voce: la trascrizione è di quello che
+// Whisper ha sentito, quindi il pulsante attivo parte da lì.
+function mostraInterruttoreVoce(d) {
+  const box = document.getElementById("switchVoce");
+  const mix = d.audio_mix, nostro = d.audio_nostro;
+  if (!nostro) { box.innerHTML = ""; return; }
+  if (!mix || mix.url === nostro.url) {
+    box.innerHTML = '<span class="nota">ascolto: ' + esc(nostro.etichetta) + "</span>";
+    return;
+  }
+  box.innerHTML =
+    '<button data-a="nostro" class="attivo">' + esc(nostro.etichetta) + "</button>" +
+    '<button data-a="mix">' + esc(mix.etichetta) + "</button>" +
+    '<span class="nota">la trascrizione è quella di «' + esc(nostro.etichetta) + "»</span>";
+  box.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    box.querySelectorAll("button").forEach(x => x.classList.toggle("attivo", x === b));
+    playerVoce = [creaPlayer("playerNostro", (b.dataset.a === "mix") ? mix : nostro)];
+  }));
+}
+
+// Un solo punto per prendere i dati del confronto (le due sezioni della pagina usano
+// la stessa risposta di `/db/songs/<id>/confronto`).
+async function datiDelConfronto(ricarica) {
+  if (datiConfronto && !ricarica) return datiConfronto;
+  if (!idCanzone) return null;
+  datiConfronto = await fetch("/db/songs/" + encodeURIComponent(idCanzone) + "/confronto")
+    .then(r => r.json());
+  return datiConfronto;
 }
 
 async function apriConfronto(ricarica) {
@@ -643,8 +760,7 @@ async function apriConfronto(ricarica) {
     return;
   }
   try {
-    const d = await fetch("/db/songs/" + encodeURIComponent(idCanzone) + "/confronto")
-      .then(r => r.json());
+    const d = await datiDelConfronto(true);
     if (d && !d.error) { mostraConfronto(d); caricatoConfronto = true; }
     box.scrollIntoView({behavior: "smooth", block: "start"});
   } catch (e) {
@@ -653,12 +769,74 @@ async function apriConfronto(ricarica) {
   }
 }
 
-// I due audio si sentono anche uno per volta (player indipendenti): questo bottone
-// li fa partire insieme dall'inizio, per ascoltarli davvero a confronto.
-function avviaEntrambi() {
-  playerConfronto.forEach(p => { if (p) p.daCapo().catch(() => {}); });
+// ── Pannello 4: il confronto AUDIO (impronta acustica, passo 🔊) ─────────────
+// Due file che NON devono corrispondere (uno è di 4 minuti, l'altro 30 secondi):
+// l'impronta dell'anteprima è stata cercata DENTRO il nostro file e `offset` dice
+// dove comincia. Per sentirli a confronto il nostro parte da lì e l'anteprima da zero.
+async function apriImpronta(ricarica) {
+  const box = document.getElementById("improntaBox");
+  box.classList.add("on");
+  if (!idCanzone) return;
+  try {
+    const d = await datiDelConfronto(ricarica);
+    if (d && !d.error) mostraImpronta(d);
+    box.scrollIntoView({behavior: "smooth", block: "start"});
+  } catch (e) {
+    document.getElementById("improntaNumeri").innerHTML =
+      '<span class="n">⚠ confronto audio non caricabile: ' + esc(e.message) + "</span>";
+  }
 }
-function fermaEntrambi() { playerConfronto.forEach(p => { if (p) p.ferma(); }); }
+
+function mostraImpronta(d) {
+  const imp = d.impronta;
+  const nota = document.getElementById("improntaNota");
+  const numeri = document.getElementById("improntaNumeri");
+  const invito = "il confronto fra due audio è il passo 🔊: spunta 🔊 Controlla audio" +
+                 " e lancia 🔎 Verifica";
+  if (!imp) {
+    nota.textContent = "nessun controllo audio su questa canzone — " + invito;
+    numeri.innerHTML = "";
+    document.getElementById("playerImprontaNostro").innerHTML = "";
+    document.getElementById("playerImprontaAnteprima").innerHTML = "";
+    playerImpronta = [];
+    return;
+  }
+  const pezzi = [];
+  if (imp.esito) {
+    pezzi.push('<span class="n" style="color:' + coloreVerdetto(imp.esito) + '">🔊 ' +
+      esc(etichettaVerdetto(imp.esito)[1]) +
+      (imp.voti != null ? " · <b>" + imp.voti + "</b> hash" : "") + "</span>");
+  }
+  if (imp.offset != null) {
+    pezzi.push('<span class="n">l\'anteprima sta a <b>' + Number(imp.offset).toFixed(1) +
+               " s</b> dentro il nostro file</span>");
+  }
+  if (imp.comuni != null) pezzi.push('<span class="n">hash in comune <b>' + imp.comuni + "</b></span>");
+  if (imp.fonte) pezzi.push('<span class="n">' + esc(imp.fonte) + "</span>");
+  if (imp.motivo) pezzi.push('<span class="n">' + esc(imp.motivo) + "</span>");
+  if (imp.at) pezzi.push('<span class="n">controllo del ' + esc(imp.at) + " UTC</span>");
+  numeri.innerHTML = pezzi.join("");
+  nota.textContent = imp.esito
+    ? "verdetto: " + etichettaVerdetto(imp.esito)[1] + " (impronta acustica)"
+    : invito;
+  // Il nostro file parte dall'offset trovato, l'anteprima da zero: stesso passaggio.
+  playerImpronta = [
+    creaPlayer("playerImprontaNostro",
+               Object.assign({}, imp.audio_nostro || {}, {inizio: imp.offset})),
+    creaPlayer("playerImprontaAnteprima",
+               Object.assign({}, imp.audio_anteprima || {}, {inizio: 0})),
+  ];
+}
+
+// I player si possono sentire uno per volta (sono indipendenti): questi bottoni li
+// fanno partire insieme dal loro punto di casa (per il confronto audio: il nostro
+// dall'offset, l'anteprima da zero = lo stesso passaggio musicale).
+function avvia(player) { player.forEach(p => { if (p) p.daCapo().catch(() => {}); }); }
+function ferma(player) { player.forEach(p => { if (p) p.ferma(); }); }
+function avviaEntrambi() { avvia(playerVoce); }
+function fermaEntrambi() { ferma(playerVoce); }
+function avviaImpronta() { avvia(playerImpronta); }
+function fermaImpronta() { ferma(playerImpronta); }
 
 document.querySelector("details").addEventListener("toggle", function () {
   const scheda = document.getElementById("scheda");
