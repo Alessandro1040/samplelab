@@ -466,7 +466,8 @@ class TestCablaggio(unittest.TestCase):
     def test_la_migrazione_aggiunge_la_lista_dei_campi(self):
         src = leggi(APP_PATH)
         self.assertIn('("anteprima_file", "TEXT")', src)
-        self.assertIn(") + CAMPI_YOUTUBE:", src)
+        self.assertIn(") + CAMPI_YOUTUBE + (", src)
+        self.assertIn('("video_file", "TEXT"),', src)
 
     def test_ogni_colonna_e_documentata_nella_legenda(self):
         for nome, _ in APP.CAMPI_YOUTUBE:
@@ -476,8 +477,9 @@ class TestCablaggio(unittest.TestCase):
     def test_la_playlist_passa_i_metadati_alla_riga(self):
         src = leggi(APP_PATH)
         self.assertIn("per_id = mappa_metadati_playlist(", src)
-        self.assertIn("campi = per_id.get(id_video_dal_nome_file(f)) or {}", src)
-        self.assertIn("register_local_file(f, campi)", src)
+        self.assertIn("vid = id_video_dal_nome_file(f)", src)
+        self.assertIn("campi = per_id.get(vid) or {}", src)
+        self.assertIn("register_local_file(f, campi, video=video_per_id.get(vid))", src)
         self.assertIn('jobs[job_id]["con_metadati"] = con_metadati', src)
         self.assertIn('jobs[job_id]["con_anno"] = con_anno', src)
 

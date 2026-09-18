@@ -272,7 +272,7 @@ console.log(JSON.stringify(out));
 
     def test_un_campo_per_ogni_voce_della_lista(self):
         self.assertEqual(self.risultati["quanti"], len(self.risultati["campi"]))
-        self.assertEqual(len(self.risultati["campi"]), 26)
+        self.assertEqual(len(self.risultati["campi"]), 27)
 
     def test_i_valori_del_database_finiscono_nel_modale(self):
         self.assertEqual(self.risultati["valoreInput"], "Hip Hop")

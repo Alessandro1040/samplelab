@@ -31,6 +31,9 @@ STEMS_DIR  = os.path.join(BASE_DIR, "stems");      os.makedirs(STEMS_DIR, exist_
 # Copertine delle canzoni (una per brano, servita da /cover/<file>): le immagini
 # non vanno in repo, come downloads/ e stems/ (vedi .gitignore).
 COVERS_DIR = os.path.join(BASE_DIR, "covers");     os.makedirs(COVERS_DIR, exist_ok=True)
+# Video delle canzoni (MP4 da YouTube o caricati dal computer): serviti da
+# /video/<file>, cartella non versionata come downloads/ (vedi .gitignore).
+VID_DIR    = os.path.join(BASE_DIR, "videos");     os.makedirs(VID_DIR, exist_ok=True)
 DB_PATH    = os.path.join(BASE_DIR, "samplelab (2).db")
 # Legacy dataset.json kept for compatibility
 DATASET_PATH = os.path.join(BASE_DIR, "dataset.json")
@@ -42,6 +45,22 @@ DATASET_LOCK = threading.Lock()
 MIME_MAP = {"mp3":"audio/mpeg","wav":"audio/wav","webm":"audio/webm",
             "m4a":"audio/mp4","mp4":"audio/mp4","ogg":"audio/ogg",
             "opus":"audio/opus","flac":"audio/flac"}
+
+# ── VIDEO DELLE CANZONI (18/09/2026) ─────────────────────────────────────────
+# I video (il file MP4 scaricato da YouTube o quello caricato dal computer) NON
+# stanno in `downloads/` con gli audio: hanno la loro cartella `videos/` (non
+# versionata, come `covers/`), il loro streaming `/video/<file>` e il nome del
+# file nella colonna `songs.video_file`. Così la cartella degli audio resta
+# leggibile (il selettore «📁 File locale» non si riempie di video) e si vede
+# subito quali canzoni hanno un video.
+VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi")
+MIME_VIDEO = {"mp4":"video/mp4","webm":"video/webm","mkv":"video/x-matroska",
+              "mov":"video/quicktime","m4v":"video/x-m4v","avi":"video/x-msvideo"}
+
+def mime_video(nome):
+    """Il MIME del file video dal nome (funzione PURA). Default: video/mp4."""
+    ext = str(nome or "").rsplit(".", 1)[-1].lower()
+    return MIME_VIDEO.get(ext, "video/mp4")
 
 def _clean_tag(v):
     if v is None:
@@ -390,7 +409,13 @@ CREATE INDEX IF NOT EXISTS idx_sr_source    ON sample_relations(source_song_id);
                               # La lista sta in `CAMPI_YOUTUBE` per non averla in due
                               # posti: le stesse colonne le usa `resolve_or_create_song`
                               # per filtrare quello che arriva da yt-dlp.
-                              ) + CAMPI_YOUTUBE:
+                              ) + CAMPI_YOUTUBE + (
+                              # ── VIDEO della canzone (18/09/2026) ──
+                              # Il nome del file in `videos/` (MP4 scaricato da YouTube
+                              # o caricato dal computer): non è un metadata del video,
+                              # è il file che la riga ha, come `local_file` per l'audio.
+                              ("video_file", "TEXT"),
+                              ):
             if colonna not in cols:
                 c.execute(f"ALTER TABLE songs ADD COLUMN {colonna} {tipo}")
 
@@ -606,7 +631,7 @@ def find_existing_song(conn, title, artist, youtube_url="", exclude_id=""):
 
 
 def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", duration=None,
-                           extra=None):
+                           extra=None, video_file=None):
     """La riga di questa canzone, creandola solo se non c'è davvero. Ritorna
     `(song_id, creata, come)`: `come` è la prova del riconoscimento.
 
@@ -615,6 +640,10 @@ def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", d
     (un nome fuori lista si ignora, così dall'esterno non si può scegliere una
     colonna qualsiasi) e `year` si riempie **solo se è vuoto**, perché l'anno è
     un campo curato (Genius, o corretto a mano).
+
+    `video_file` è il nome del file video in `videos/` (18/09/2026): come
+    `local_file` si aggancia a QUESTA riga e **solo se è vuoto** — un video
+    scelto a mano non viene sostituito da un download della playlist.
     """
     extra = dict(extra or {})
     anno_yt = extra.pop("year", None) or None
@@ -635,6 +664,10 @@ def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", d
         if duration is not None:
             conn.execute("UPDATE songs SET duration=COALESCE(duration,?), "
                          "updated_at=datetime('now') WHERE id=?", (duration, sid))
+        if video_file:
+            conn.execute("UPDATE songs SET video_file=?, updated_at=datetime('now') "
+                         "WHERE id=? AND (video_file IS NULL OR video_file='')",
+                         (video_file, sid))
         if extra:
             # I dati del video si riscrivono a ogni download riuscito: sono fatti
             # letti da YouTube, non scelte fatte a mano.
@@ -654,6 +687,9 @@ def resolve_or_create_song(conn, title, artist, youtube_url="", local_file="", d
     if anno_yt:
         colonne.append("year")
         valori.append(anno_yt)
+    if video_file:
+        colonne.append("video_file")
+        valori.append(video_file)
     conn.execute("INSERT INTO songs(" + ", ".join(colonne) + ") VALUES(" +
                  ", ".join(["?"] * len(colonne)) + ")", valori)
     return sid, True, "nuova riga"
@@ -699,7 +735,7 @@ def check_pair_exists_loose(data,song_x_meta,song_yi_meta,category):
 
 # ── SONG HELPERS (SQLite) ────────────────────────────────────────────────────
 def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", duration=None,
-                          extra=None):
+                          extra=None, video_file=None):
     """La riga di questa canzone (id), creandola **solo se manca davvero**.
 
     Dal 19/09/2026 passa da `resolve_or_create_song`, cioè dal confronto
@@ -712,7 +748,7 @@ def get_or_create_song_db(conn, title, artist, youtube_url="", local_file="", du
     `title` a NULL e `None.lower()` faceva fallire ogni chiamata con 500.
     """
     sid, _, _ = resolve_or_create_song(conn, title, artist, youtube_url, local_file, duration,
-                                       extra)
+                                       extra, video_file)
     return sid
 
 # ── AUDIO ANALYSIS ────────────────────────────────────────────────────────────
@@ -1905,38 +1941,42 @@ AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".webm", ".mp4", ".ogg", ".opus", ".flac")
 # finivano nello stesso file e la seconda riproduceva l'audio della prima).
 DL_OUTTMPL = "%(title)s [%(id)s].%(ext)s"
 
-def _downloads_snapshot():
-    """Nome file -> (mtime, size) della cartella download.
+def _downloads_snapshot(folder=None):
+    """Nome file -> (mtime, size) della cartella indicata (default: `downloads/`).
 
     Serve a capire quali file ha creato UN determinato job: senza questo
     confronto un download fallito poteva "adottare" il file scritto da un altro
     download in corso (bug del 16/09/2026: il sample "Sam Is Dead" riproduceva
-    l'audio di "Mosh")."""
+    l'audio di "Mosh"). Dal 18/09/2026 la stessa foto si fa anche su `videos/`,
+    per il download video (MP4) di una canzone."""
+    folder = folder or DL_DIR
     snap = {}
     try:
-        names = os.listdir(DL_DIR)
+        names = os.listdir(folder)
     except OSError:
         return snap
     for f in names:
         if f.startswith("."):
             continue
         try:
-            st = os.stat(os.path.join(DL_DIR, f))
+            st = os.stat(os.path.join(folder, f))
         except OSError:
             continue
         snap[f] = (st.st_mtime, st.st_size)
     return snap
 
-def _pick_job_file(before, after, expected_title=""):
-    """Sceglie il file audio creato DA QUESTO job: presente in `after` ma non in
-    `before` (o modificato nel frattempo).
+def _pick_job_file(before, after, expected_title="", exts=AUDIO_EXTS, folder=None):
+    """Sceglie il file creato DA QUESTO job: presente in `after` ma non in
+    `before` (o modificato nel frattempo), con una delle estensioni `exts` e
+    dentro `folder` (default `downloads/`; per il video: `VIDEO_EXTS`, `videos/`).
 
     Se `expected_title` è noto il file deve anche contenerlo (testo normalizzato):
     meglio nessun file — e quindi un errore visibile in pagina — che un audio
     appartenente a un altro brano. Ritorna il nome file oppure None."""
+    folder = folder or DL_DIR
     candidates = []
     for name, state in after.items():
-        if not name.lower().endswith(AUDIO_EXTS):
+        if not name.lower().endswith(tuple(exts)):
             continue
         if before.get(name) == state:
             continue                      # già presente e invariato: non è di questo job
@@ -1980,14 +2020,37 @@ def _convert_download_format(job_id, filename, fmt):
         print(f"[download {job_id}] Errore conversione, uso formato nativo: {conv_err}")
     return filename
 
+def _converti_in_mp3(src_path, out_path, timeout=300):
+    """ffmpeg: un file audio (o un VIDEO) → MP3. True se il file è stato creato.
+
+    Serve alla conversione della playlist: dal 18/09/2026 la playlist può
+    scaricare il video MP4 e da lì si ricava l'mp3 da ascoltare in libreria,
+    senza riscaricare niente.
+    """
+    if not FFMPEG or not os.path.exists(src_path):
+        return False
+    try:
+        cmd = [FFMPEG, "-y", "-i", src_path, "-vn", "-acodec", "libmp3lame",
+               "-q:a", "2", out_path]
+        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        return r.returncode == 0 and os.path.exists(out_path)
+    except Exception as e:
+        print(f"[mp3] conversione non riuscita ({os.path.basename(src_path)}): {e}")
+        return False
+
 def do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="", min_duration=0):
     with DL_SEM:
         _do_download(job_id, query, fmt, quality, expected_title, expected_artist, min_duration)
 
 def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_artist="", min_duration=0):
-    # Foto della cartella download PRIMA di iniziare: alla fine si accettano solo
-    # i file creati da questo job (vedi _pick_job_file), mai file di altri download.
-    before = _downloads_snapshot()
+    # `fmt == "mp4"` (o "video"): si scarica il VIDEO del brano — che va in
+    # `videos/` e non in `downloads/` — invece dell'audio (18/09/2026).
+    video = str(fmt or "").lower() in ("mp4", "video")
+    cartella = VID_DIR if video else DL_DIR
+    estensioni = VIDEO_EXTS if video else AUDIO_EXTS
+    # Foto della cartella PRIMA di iniziare: alla fine si accettano solo i file
+    # creati da questo job (vedi _pick_job_file), mai file di altri download.
+    before = _downloads_snapshot(cartella)
     expected_title = (expected_title or "").strip()
     expected_artist = (expected_artist or "").strip()
     try:
@@ -2041,13 +2104,17 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
                 }
 
         ydl_opts = {
-            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+            # Audio (default) oppure VIDEO: per il video si chiede il meglio
+            # disponibile e si fa unire audio+video in un MP4 (`merge_output_format`).
+            "format": ("bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+                       if video else
+                       "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio"),
             # Il solo titolo YouTube NON distingue i file: due video diversi (es.
             # le cover "8-Bit Misfits" e "Twinkle Twinkle Little Rock Star" di
             # 'Till I Collapse) possono chiamarsi uguale e finire nello STESSO
             # file, così la seconda card riproduceva l'audio della prima.
             # L'[id] del video rende il nome unico (vedi DL_OUTTMPL).
-            "outtmpl": os.path.join(DL_DIR, DL_OUTTMPL),
+            "outtmpl": os.path.join(cartella, DL_OUTTMPL),
             "progress_hooks": [progress_hook],
             "socket_timeout": 20,
             "retries": 3,
@@ -2060,8 +2127,13 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
             # recenti provoca "Video unavailable"/403 su YouTube. Il solver JS integrato
             # (con deno) gestisce da solo le firme.
         }
+        if video:
+            # audio e video in UN SOLO file MP4 (senza questo yt-dlp lascerebbe
+            # i due pezzi separati, es. '... [id].f137.mp4' + '... .f140.m4a').
+            ydl_opts["merge_output_format"] = "mp4"
 
-        print(f"[download {job_id}] Avvio download formato nativo...")
+        print(f"[download {job_id}] Avvio download "
+              f"{'video (MP4)' if video else 'formato nativo'}...")
 
         def _attempt_download(url):
             """Un giro di download (3 tentativi). Ritorna il nome del file creato
@@ -2075,7 +2147,7 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
                         if requested and requested[0].get("filepath"):
                             prepared = requested[0]["filepath"]
                         name = os.path.basename(prepared) if prepared else None
-                    if name and os.path.exists(os.path.join(DL_DIR, name)):
+                    if name and os.path.exists(os.path.join(cartella, name)):
                         return name
                 except Exception as e:
                     print(f"[download {job_id}] Tentativo {attempt}/3 fallito: {e}")
@@ -2115,18 +2187,23 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         # secondi": nei download in parallelo dei sample succedeva che il sample
         # "Sam Is Dead" riproducesse l'audio di "Mosh" (file di un altro job).
         if not filename:
-            filename = _pick_job_file(before, _downloads_snapshot(), expected_title or yt_title)
+            filename = _pick_job_file(before, _downloads_snapshot(cartella),
+                                      expected_title or yt_title,
+                                      exts=estensioni, folder=cartella)
 
         if not filename:
             jobs[job_id]["status"] = "error"
-            jobs[job_id]["error"] = (f"Download non riuscito: nessun file audio per "
-                                     f"'{expected_title or query}' (audio NON sostituito)")
+            jobs[job_id]["error"] = (
+                f"Download non riuscito: nessun file {'video' if video else 'audio'} per "
+                f"'{expected_title or query}' ({'video' if video else 'audio'} NON sostituito)")
             print(f"[download {job_id}] ERRORE: questo job non ha prodotto file "
                   f"(nessun file di altri download riutilizzato)")
             return
 
-        # Conversione esplicita con ffmpeg (se richiesto)
-        filename = _convert_download_format(job_id, filename, fmt)
+        # Conversione esplicita con ffmpeg (se richiesto). Il video non si converte:
+        # è già quello che serve (MP4).
+        if not video:
+            filename = _convert_download_format(job_id, filename, fmt)
 
         print(f"[download {job_id}] Successo: {filename}")
         jobs[job_id]["status"] = "done"
@@ -2140,12 +2217,17 @@ def _do_download(job_id, query, fmt, quality="192", expected_title="", expected_
         jobs[job_id]["error"] = str(e)
 
 # ── PLAYLIST DOWNLOAD ─────────────────────────────────────────────────────────
-def register_local_file(filename, campi=None):
+def register_local_file(filename, campi=None, video=None, local_file=None):
     """Registra un file scaricato nella tabella songs (parsing artista - titolo).
 
     `campi` sono i metadati del video YouTube (vedi `campi_youtube`): la riga
     nasce già con la data di caricamento, l'anno, il canale, la descrizione…
     Senza (`None`) il comportamento è quello di sempre.
+
+    `video` è il nome del file video in `videos/` da agganciare alla stessa riga
+    (18/09/2026), e `local_file` è il file audio da scrivere in tabella: si passa
+    `""` quando il file registrato è SOLO un video (l'audio non c'è — la riga
+    esiste lo stesso, con la sua scheda e il suo video).
     """
     raw = clean_filename(filename)
     # Rimuove il suffisso ' [idYouTube]' aggiunto da yt-dlp nel template
@@ -2153,8 +2235,10 @@ def register_local_file(filename, campi=None):
     parts = base.split(" - ", 1)
     artist = parts[0].strip() if len(parts) == 2 else ""
     title = parts[1].strip() if len(parts) == 2 else base.strip()
+    audio = filename if local_file is None else local_file
     with get_db() as conn:
-        sid = get_or_create_song_db(conn, title, artist, local_file=filename, extra=campi)
+        sid = get_or_create_song_db(conn, title, artist, local_file=audio, extra=campi,
+                                    video_file=video)
     return sid
 
 # ── DOWNLOAD AUTOMATICO DI UNA RIGA DEL DATABASE ─────────────────────────────
@@ -2234,10 +2318,153 @@ def avvia_download_canzone(song_id, forzato=False):
     return jid, ("download avviato (forzato)" if forzato else "download avviato")
 
 
-def do_download_playlist(job_id, url, fmt="mp3"):
+# ── VIDEO DI UNA RIGA DEL DATABASE (18/09/2026) ──────────────────────────────
+# Come `avvia_download_canzone`, ma per il VIDEO (MP4): il file va in `videos/`
+# e si aggancia a QUESTA riga (`video_file`), mai a una riga nuova. Il video si
+# può anche caricare dal computer o scegliere fra quelli già in `videos/`
+# (POST /db/songs/<id>/video) e togliere (DELETE, il file va in `.trash/`).
+_dl_video_lock = threading.Lock()
+_dl_video = {}            # song_id -> job_id del download video in corso
+
+def file_video_valido(nome):
+    """Il file video esiste DAVVERO in `videos/` (non solo il nome in tabella)."""
+    nome = os.path.basename(str(nome or "").strip())
+    return bool(nome) and os.path.exists(os.path.join(VID_DIR, nome))
+
+def nome_video_unico(nome):
+    """Un nome file VIDEO libero dentro `videos/` (non sovrascrive mai niente).
+
+    Funzione pura rispetto al database: guarda solo la cartella. Se il nome è
+    già usato si aggiunge un numero («Brano [id] (1).mp4»).
+    """
+    base = os.path.basename(str(nome or "").strip()) or "video.mp4"
+    nome_base, ext = os.path.splitext(base)
+    ext = ext.lower() if ext.lower() in VIDEO_EXTS else ".mp4"
+    candidato = f"{nome_base}{ext}"
+    i = 1
+    while os.path.exists(os.path.join(VID_DIR, candidato)):
+        candidato = f"{nome_base} ({i}){ext}"
+        i += 1
+    return candidato
+
+def nome_video_sicuro(nome):
+    """Il nome con cui salvare un video caricato dal computer (funzione PURA).
+
+    Niente percorsi (`../` fuori da `videos/`), niente caratteri che Windows o
+    macOS leggono male, e l'estensione deve essere una di quelle video: se manca
+    (o è un'altra) si salva come `.mp4`. Spazi, punti, trattini, parentesi e
+    quadre si tengono: sono normali nei nomi che si vedono in libreria
+    («Artista - Titolo (Live) [id].mp4»).
+    """
+    base = os.path.basename(str(nome or "")).strip()
+    base = re.sub(r"[^\w\-. \[\]()',&]+", "_", base, flags=re.UNICODE).strip(" .")
+    if not base:
+        base = "video.mp4"
+    if os.path.splitext(base)[1].lower() not in VIDEO_EXTS:
+        base += ".mp4"
+    return base
+
+def avvia_download_video_canzone(song_id, forzato=False):
+    """Scarica in `videos/` il VIDEO (MP4) del brano di una riga del database.
+
+    La ricerca è quella degli altri download (il link YouTube della riga, o
+    artista + titolo); il file però va in `videos/` e si scrive in `video_file`.
+    Ritorna `(job_id, motivo)`; `("", motivo)` quando non parte.
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return "", "riga non trovata"
+    if not forzato and file_video_valido(s.get("video_file")):
+        return "", "il video c'è già"
+    query = (s.get("youtube_url") or "").strip()
+    if not query:
+        query = " ".join(x for x in [(s.get("artist") or "").strip(),
+                                     (s.get("title") or "").strip()] if x)
+    if not query:
+        return "", "niente da cercare: la riga non ha né link YouTube né titolo"
+    with _dl_video_lock:
+        attivo = _dl_video.get(song_id)
+        if attivo and jobs.get(attivo, {}).get("status") in _STATI_DOWNLOAD_ATTIVI:
+            return attivo, "download video già in corso"
+        jid = str(uuid.uuid4())[:8]
+        jobs[jid] = {"status": "pending", "progress": {}, "files": [], "filename": None,
+                     "yt_title": "", "error": "", "song_id": song_id, "video": True,
+                     "expected_title": s.get("title") or ""}
+        _dl_video[song_id] = jid
+
+    def run():
+        try:
+            do_download(jid, query, "mp4", "192", s.get("title") or "",
+                        s.get("artist") or "", 0)
+            nome = (jobs.get(jid) or {}).get("filename")
+            if nome:
+                # Il video va su QUESTA riga: nessuna riga nuova, nessun doppione.
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE songs SET video_file=?, "
+                        "youtube_url=CASE WHEN youtube_url IS NULL OR youtube_url='' THEN ? "
+                        "                 ELSE youtube_url END, updated_at=datetime('now') "
+                        "WHERE id=?",
+                        (nome, query if is_youtube_url(query) else "", song_id))
+                print(f"[db {song_id}] video agganciato alla riga: {nome}")
+            else:
+                print(f"[db {song_id}] download video non riuscito: "
+                      f"{(jobs.get(jid) or {}).get('error', '')}")
+        except Exception as e:
+            print(f"[db {song_id}] download video: errore {e}")
+        finally:
+            with _dl_video_lock:
+                _dl_video.pop(song_id, None)
+
+    threading.Thread(target=run, daemon=True).start()
+    return jid, ("download video avviato (forzato)" if forzato
+                 else "download video avviato")
+
+
+def _sposta_video_in_archivio(nome, origine=None):
+    """Sposta un file video in `videos/` (da `downloads/`) e torna il nome finale.
+
+    Serve alla playlist che scarica anche il video: yt-dlp scrive tutto in
+    `downloads/`, ma il video ha la sua cartella. Il nome non si sovrascrive mai
+    (se c'è già, si aggiunge un numero) — mentre un file **identico** già
+    archiviato (stessa dimensione) non viene duplicato: la copia appena scaricata
+    si butta. Ritorna '' se lo spostamento non riesce.
+    """
+    origine = origine or DL_DIR
+    src = os.path.join(origine, nome)
+    if not os.path.isfile(src):
+        return ""
+    base, ext = os.path.splitext(os.path.basename(nome))
+    dest_name = base + ext
+    dest = os.path.join(VID_DIR, dest_name)
+    i = 1
+    while os.path.exists(dest):
+        if os.path.getsize(dest) == os.path.getsize(src):
+            try:
+                os.remove(src)
+            except OSError:
+                pass
+            return dest_name
+        dest_name = f"{base} ({i}){ext}"
+        dest = os.path.join(VID_DIR, dest_name)
+        i += 1
+    try:
+        os.rename(src, dest)
+    except OSError as e:
+        print(f"[video] spostamento non riuscito ({nome}): {e}")
+        return ""
+    return dest_name
+
+
+def do_download_playlist(job_id, url, fmt="mp3", video=False):
+    """Scarica TUTTA la playlist. Con `video=True` (18/09/2026) scarica l'MP4 del
+    video, lo archivia in `videos/` e ne ricava l'mp3 da ascoltare in libreria:
+    la riga porta sia `local_file` (l'audio) sia `video_file` (il video)."""
     jobs[job_id]["status"] = "fetching"
     jobs[job_id]["progress"] = {"percent": 0, "speed": "", "eta": ""}
-    valid_exts = (".mp3", ".wav", ".m4a", ".webm", ".mp4", ".ogg", ".opus", ".flac")
+    valid_exts = (".mp3", ".wav", ".m4a", ".webm", ".mp4", ".mkv", ".ogg",
+                  ".opus", ".flac")
 
     def snapshot():
         snap = {}
@@ -2267,12 +2494,19 @@ def do_download_playlist(job_id, url, fmt="mp3"):
                 }
 
         ydl_opts = {
-            "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+            # Con `video=True` si scarica il VIDEO (audio+video uniti in un MP4):
+            # da lì si ricava l'mp3, così la playlist porta «oltre all'mp3 anche
+            # l'mp4» con UN solo download per brano.
+            "format": ("bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+                       if video else
+                       "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio"),
             "outtmpl": os.path.join(DL_DIR, DL_OUTTMPL),
             "progress_hooks": [progress_hook],
             "ignoreerrors": True,
             "cookiefile": os.path.join(BASE_DIR, "cookies.txt"),
         }
+        if video:
+            ydl_opts["merge_output_format"] = "mp4"
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
 
@@ -2292,28 +2526,47 @@ def do_download_playlist(job_id, url, fmt="mp3"):
             jobs[job_id]["error"] = "Nessun file scaricato dalla playlist (controlla l'URL)"
             return
 
+        # I VIDEO della playlist si tengono da parte: si archiviano in `videos/`
+        # (non sono file audio) e da lì si ricava l'mp3. Solo con l'opzione 🎬:
+        # senza, un `.mp4` scaricato è un file audio come gli altri e si converte.
+        video_files = ([f for f in new_files if f.lower().endswith(tuple(VIDEO_EXTS))]
+                       if video else [])
+
         # Conversione esplicita in MP3 se richiesto
         if fmt == "mp3" and FFMPEG:
             converted = []
             for f in new_files:
+                if f in video_files:
+                    continue
                 ext = f.rsplit(".", 1)[-1].lower()
                 if ext == "mp3":
                     converted.append(f)
                     continue
-                base = os.path.splitext(f)[0]
-                out_name = f"{base}.mp3"
-                out_path = os.path.join(DL_DIR, out_name)
-                src_path = os.path.join(DL_DIR, f)
-                try:
-                    cmd = [FFMPEG, "-y", "-i", src_path, "-acodec", "libmp3lame", "-q:a", "2", out_path]
-                    r = subprocess.run(cmd, capture_output=True, timeout=300)
-                    if r.returncode == 0 and os.path.exists(out_path):
-                        converted.append(out_name)
-                    else:
-                        converted.append(f)
-                except Exception:
+                out_name = f"{os.path.splitext(f)[0]}.mp3"
+                if _converti_in_mp3(os.path.join(DL_DIR, f), os.path.join(DL_DIR, out_name)):
+                    converted.append(out_name)
+                else:
                     converted.append(f)
             new_files = converted
+        # Un video scaricato non è un file audio: fuori dalla lista delle righe.
+        new_files = [f for f in new_files if f not in video_files]
+
+        # Il video va in `videos/` e si aggancia alla riga della sua canzone
+        # (stesso `[id]` nel nome). L'mp3 da ascoltare si ricava dal video, se per
+        # quel brano non c'è già un file audio.
+        video_per_id = {}
+        for f in video_files:
+            src = os.path.join(DL_DIR, f)
+            vid = id_video_dal_nome_file(f)
+            if vid and not any(id_video_dal_nome_file(x) == vid for x in new_files):
+                out_name = f"{os.path.splitext(f)[0]}.mp3"
+                if _converti_in_mp3(src, os.path.join(DL_DIR, out_name)):
+                    new_files.append(out_name)
+                    print(f"[playlist {job_id}] mp3 ricavato dal video: {out_name}")
+            nome_video = _sposta_video_in_archivio(f)
+            if nome_video:
+                video_per_id[id_video_dal_nome_file(nome_video)] = nome_video
+                print(f"[playlist {job_id}] video archiviato: {nome_video}")
 
         # Registra ogni brano nel database. Con i metadati del video, quando ci
         # sono: la riga nasce già con data di caricamento, anno, canale,
@@ -2321,14 +2574,26 @@ def do_download_playlist(job_id, url, fmt="mp3"):
         registered = 0
         con_metadati = 0
         con_anno = 0
+        id_con_audio = set()
         for f in new_files:
-            campi = per_id.get(id_video_dal_nome_file(f)) or {}
+            vid = id_video_dal_nome_file(f)
+            campi = per_id.get(vid) or {}
             if campi:
                 con_metadati += 1
-            if register_local_file(f, campi):
+            if register_local_file(f, campi, video=video_per_id.get(vid)):
                 registered += 1
+                id_con_audio.add(vid)
                 if campi.get("year"):
                     con_anno += 1
+        # I video che sono rimasti senza file audio (la conversione in mp3 non è
+        # riuscita): la riga nasce lo stesso, col video e la sua scheda — senza
+        # `local_file`, perché l'audio non c'è.
+        for vid, nome_video in video_per_id.items():
+            if vid in id_con_audio:
+                continue
+            register_local_file(nome_video, per_id.get(vid) or {}, video=nome_video,
+                                local_file="")
+            print(f"[playlist {job_id}] riga registrata col solo video: {nome_video}")
 
         jobs[job_id]["status"] = "done"
         jobs[job_id]["files"] = new_files
@@ -2336,6 +2601,7 @@ def do_download_playlist(job_id, url, fmt="mp3"):
         jobs[job_id]["registered"] = registered
         jobs[job_id]["con_metadati"] = con_metadati
         jobs[job_id]["con_anno"] = con_anno
+        jobs[job_id]["con_video"] = len(video_per_id)
         jobs[job_id]["playlist_title"] = info.get("title", "") if info else ""
 
     except Exception as e:
@@ -3198,6 +3464,41 @@ def stream_stem(folder, filename):
     mime = MIME_MAP.get(ext, "audio/mpeg")
     return send_file(path, mimetype=mime)
 
+# ── VIDEO DELLE CANZONI (18/09/2026) ─────────────────────────────────────────
+# `songs.video_file` contiene il NOME del file in `videos/` (il MP4 scaricato da
+# YouTube o il video caricato dal computer). Lo stream rispetta l'header `Range`
+# come `/stream`: senza, il lettore video del browser non può avanzare.
+@app.route("/video/<path:filename>")
+def stream_video_file(filename):
+    path = os.path.join(VID_DIR, filename)
+    if not os.path.isfile(path) or not _dentro_la_cartella(VID_DIR, path):
+        return jsonify({"error": "Video non trovato"}), 404
+    return _risposta_audio(path, mime_video(filename))
+
+@app.route("/video-file/<path:filename>")
+def download_video_file(filename):
+    """Scarica il file video (attachment), senza riscrivere i tag (è un video)."""
+    path = os.path.join(VID_DIR, filename)
+    if not os.path.isfile(path) or not _dentro_la_cartella(VID_DIR, path):
+        return jsonify({"error": "Video non trovato"}), 404
+    resp = send_file(path, mimetype=mime_video(filename), as_attachment=True,
+                     download_name=os.path.basename(filename))
+    return resp
+
+@app.route("/videos")
+def list_video_files():
+    """I video già in `videos/` (per il selettore «scegli un video» della riga)."""
+    files = []
+    for f in sorted(os.listdir(VID_DIR)):
+        if f.startswith("."):
+            continue
+        fp = os.path.join(VID_DIR, f)
+        if not os.path.isfile(fp) or not f.lower().endswith(VIDEO_EXTS):
+            continue
+        files.append({"name": f, "size": os.path.getsize(fp),
+                      "ext": f.rsplit(".", 1)[-1].lower()})
+    return jsonify(files)
+
 # ── COPERTINE ────────────────────────────────────────────────────────────────
 # `songs.cover_art_path` contiene il NOME del file (es. 'song_7553a924d202.jpg'),
 # salvato in `covers/` dalla Verifica: qui lo si serve alla pagina, che lo usa
@@ -3406,8 +3707,9 @@ def start_download_playlist():
         "yt_title": "",
         "error": "",
     }
-    threading.Thread(target=do_download_playlist, args=(jid, url, fmt), daemon=True).start()
-    return jsonify({"job_id": jid})
+    video = bool(data.get("video"))
+    threading.Thread(target=do_download_playlist, args=(jid, url, fmt, video), daemon=True).start()
+    return jsonify({"job_id": jid, "video": video})
 
 # ── SEPARATE ─────────────────────────────────────────────────────────────────
 @app.route("/separate", methods=["POST"])
@@ -3778,7 +4080,7 @@ def db_update_song(song_id):
         "title", "artist", "album", "album_artist", "composer", "producers", "genre", "year", "release_date",
         "track_number", "disc_number", "compilation", "rating", "bpm", "musical_key", "play_count",
         "duration", "comment", "lyrics", "analyzed_status", "genius_url", "whosampled_url", "youtube_url",
-        "tunebat_url", "cover_art_path", "local_file", "title_verified", "artist_verified",
+        "tunebat_url", "cover_art_path", "local_file", "video_file", "title_verified", "artist_verified",
         "bpm_verified", "key_verified", "lyrics_verified",
     ]
     with get_db() as conn:
@@ -3805,6 +4107,75 @@ def db_song_ensure_file(song_id):
     forzato = bool((request.json or {}).get("forzato"))
     job, motivo = avvia_download_canzone(song_id, forzato=forzato)
     return jsonify({"avviato": bool(job), "job_id": job, "motivo": motivo, "song_id": song_id})
+
+
+@app.route("/db/songs/<song_id>/ensure_video", methods=["POST"])
+def db_song_ensure_video(song_id):
+    """Scarica in `videos/` il VIDEO (MP4) del brano (pulsante 🎬 Video → «Da YouTube»).
+
+    Come `/db/songs/<id>/ensure_file` ma per il video: la riga resta la stessa e
+    il file le viene agganciato (`video_file`). Si segue con `/status/<job_id>`.
+    """
+    forzato = bool((request.json or {}).get("forzato"))
+    job, motivo = avvia_download_video_canzone(song_id, forzato=forzato)
+    return jsonify({"avviato": bool(job), "job_id": job, "motivo": motivo, "song_id": song_id})
+
+@app.route("/db/songs/<song_id>/video", methods=["POST"])
+def db_song_set_video(song_id):
+    """Aggancia un video alla riga: caricato dal COMPUTER o già in `videos/`.
+
+    Due modi, stessa rotta:
+    - multipart con `file` (il pulsante «📂 Dal computer») → il file si salva in
+      `videos/` con un nome sicuro e unico;
+    - JSON `{"filename": "…"}` → si aggancia un video che è già in `videos/`.
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT id FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return jsonify({"error": "Canzone non trovata"}), 404
+
+    upload = request.files.get("file")
+    if upload:
+        nome = nome_video_unico(nome_video_sicuro(upload.filename))
+        upload.save(os.path.join(VID_DIR, nome))
+        origine = "caricato dal computer"
+    else:
+        richiesto = os.path.basename(str((request.json or {}).get("filename") or "").strip())
+        if not richiesto:
+            return jsonify({"error": "Serve un file (o il nome di un video già in videos/)"}), 400
+        if not file_video_valido(richiesto):
+            return jsonify({"error": f"Video non trovato in videos/: {richiesto}"}), 404
+        nome = richiesto
+        origine = "scelto fra i video dell'app"
+
+    with get_db() as conn:
+        conn.execute("UPDATE songs SET video_file=?, updated_at=datetime('now') WHERE id=?",
+                     (nome, song_id))
+        riga = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    print(f"[db {song_id}] video agganciato ({origine}): {nome}")
+    return jsonify({"ok": True, "video_file": nome, "origine": origine, "song": riga})
+
+@app.route("/db/songs/<song_id>/video", methods=["DELETE"])
+def db_song_delete_video(song_id):
+    """Toglie il video dalla riga: il FILE va in `.trash/` (recuperabile), la
+    colonna `video_file` si svuota. La riga e l'audio non si toccano."""
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT video_file FROM songs WHERE id=?",
+                                  (song_id,)).fetchone())
+        if not s:
+            return jsonify({"error": "Canzone non trovata"}), 404
+        nome = s.get("video_file") or ""
+        spostato = ""
+        percorso = os.path.join(VID_DIR, os.path.basename(nome)) if nome else ""
+        if percorso and os.path.isfile(percorso) and _dentro_la_cartella(VID_DIR, percorso):
+            try:
+                spostato = move_to_trash(percorso)
+            except OSError as e:
+                return jsonify({"error": f"Non riesco a spostare il file: {e}"}), 500
+        conn.execute("UPDATE songs SET video_file=NULL, updated_at=datetime('now') "
+                     "WHERE id=?", (song_id,))
+    print(f"[db {song_id}] video tolto dalla riga ({nome}) → {spostato or 'file già assente'}")
+    return jsonify({"ok": True, "video_file": None, "spostato_in": spostato})
 
 
 # ── DB: UNISCI DUE RIGHE CHE SONO LA STESSA CANZONE ──────────────────────────
@@ -5841,6 +6212,7 @@ COLUMN_DOCS = {"songs": {
     "testo_audio_nostro": "il file che è stato trascritto, relativo ('downloads/…' o 'anteprime/acapella_…/vocals.mp3'): si ascolta nel confronto in /verifica",
     "testo_audio_riferimento": "l'audio di riferimento confrontato (anteprima ufficiale), relativo a 'anteprime/'",
     "anteprima_file": "l'anteprima ufficiale di iTunes usata dal controllo audio (in 'anteprime/', cartella non versionata)",
+    "video_file": "il VIDEO della canzone: nome del file in 'videos/' (MP4 scaricato da YouTube o caricato dal computer); vuoto = la canzone non ha un video",
     "yt_video_id": "l'id del video YouTube (è l'`[id]` nel nome del file in downloads/)",
     "yt_upload_date": "data di CARICAMENTO del video su YouTube ('YYYY-MM-DD'; è quella che dà l'anno della riga)",
     "yt_release_date": "data di uscita dichiarata dal video, quando c'è ('YYYY-MM-DD'; non è l'anno del brano: «Who Knew» è caricato nel 2018 ma è del 2000)",

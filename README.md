@@ -134,6 +134,14 @@ con `(2)` nella cartella locale:
   migrazione delle colonne su un database vecchio e le regole di scrittura
   (anno solo se vuoto, campi fuori lista ignorati, valori vuoti che non spengono i
   dati): `python3 -m unittest -v test_metadati_youtube`
+- `test_video_canzone.py` — test dei **video delle canzoni** (`songs.video_file`,
+  cartella `videos/`): le funzioni pure dei nomi file (`nome_video_sicuro`,
+  `nome_video_unico`, `mime_video`), il download video con un yt-dlp finto (il
+  file va in `videos/` e non in `downloads/`), la playlist col video (mp4 vero
+  fatto con ffmpeg: la riga porta sia l'mp3 sia il video), le rotte del modale 🎬
+  su un database temporaneo (upload dal computer, scelta fra i video già in
+  `videos/`, 🗑 togli col file in `.trash/`) e l'app viva in sola lettura:
+  `python3 -m unittest -v test_video_canzone`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -148,6 +156,10 @@ con `(2)` nella cartella locale:
 ## Cartelle escluse dal versionamento
 
 - `downloads/` — audio scaricati (centinaia di GB)
+- `videos/` — i **video** delle canzoni: il file MP4 scaricato da YouTube
+  (pulsante 🎬 Video o casella «🎬 Anche il video» della playlist) o caricato dal
+  computer. Il database ne tiene il **nome** in `songs.video_file`; si guardano da
+  `/video/<file>` e si scaricano da `/video-file/<file>`
 - `stems/` — tracce separate generate
 - `covers/` — copertine delle canzoni (una per brano, ~1000 px, servite da
   `/cover/<file>`; il database ne tiene il **nome**, non l'URL)
@@ -499,6 +511,76 @@ dei modali ✏️ Edit e 🗄️ Campi del database (`CAMPI_DB_MODALE`, `CAMPI_D
 `allowed` del PUT — le tre liste che `test_onyx_modifica_db.py` confronta), quindi
 non si correggono a mano dalla pagina: è il prossimo passo naturale.
 
+## Video di ogni canzone: MP4 da YouTube o dal computer — 18/09/2026
+
+Richiesta di Alessandro: «riusciresti a fare in modo di lasciare un opzione per
+scaricare oltre al mp3 (oppure wav) anche l'mp4 da youtube? e in generale di ogni
+canzone di avere la possibilità di aggiungere un video dal computer o di
+reperirlo da youtube».
+
+### Dove stanno i video
+
+In una cartella loro, **`videos/`** (non versionata, come `covers/`), e il nome del
+file nella colonna nuova **`songs.video_file`** (migrazione automatica: le colonne
+si aggiungono da sole a un database che c'è già). Non stanno in `downloads/` con
+gli audio: così il selettore «📁 File locale» non si riempie di video e si vede
+subito quali canzoni hanno un video (nella tabella il pulsante 🎬 è colorato e ha
+il ✓).
+
+| | come |
+|---|---|
+| guardarlo | `GET /video/<file>` (streaming con header `Range`, altrimenti la barra del lettore non avanza) |
+| scaricarlo | `GET /video-file/<file>` |
+| sapere cosa c'è | `GET /videos` (elenco dei file) |
+
+### Dalla playlist: «🎬 Anche il video (MP4)»
+
+Nel pannello *📥 Scarica Playlist da YouTube* c'è la casella **🎬 Anche il video
+(MP4)**: con quella, per ogni brano si scarica il **video** (audio+video uniti in
+un unico MP4 con `merge_output_format`), l'MP4 viene **spostato in `videos/`** e da
+lui si ricava l'**mp3** da ascoltare in libreria — con UN solo download per brano,
+non due. La riga che nasce porta quindi sia `local_file` (l'mp3) sia `video_file`
+(l'MP4), e `/status` dice quanti brani hanno preso il video (`con_video`).
+
+Senza la casella non cambia niente: un `.mp4` scaricato è un file audio come gli
+altri e viene convertito in mp3 come prima (c'è un test apposta).
+
+### Su ogni canzone: il pulsante 🎬 Video
+
+Nella tabella del 🗄️ Database ogni riga ha **🎬 Video**, che apre un modale con:
+
+- **🎬 Da YouTube** — `POST /db/songs/<id>/ensure_video`: cerca il video del brano
+  (usa il link YouTube della riga, o artista + titolo), scarica l'MP4 in `videos/`
+  e lo aggancia a **quella** riga (con la barra di avanzamento del job);
+- **📂 Dal computer** — `POST /db/songs/<id>/video` (multipart): il file viene
+  copiato in `videos/` con un nome sicuro (`nome_video_sicuro`: niente percorsi,
+  niente caratteri strani, estensione video garantita) e **unico** (non
+  sovrascrive: «Brano.mp4» → «Brano (1).mp4»);
+- **📁 Video già in `videos/`** — la stessa rotta con `{"filename": …}`: riusa un
+  video già scaricato (per esempio da una playlist) senza ricopiarlo;
+- **▶ Guarda** (il lettore dentro il modale), **⬇ Scarica il file** e
+  **🗑 Togli il video** — `DELETE /db/songs/<id>/video`: il FILE va in `.trash/`
+  (recuperabile) e la colonna si svuota, mentre la canzone e l'audio non si toccano.
+
+Il campo `video_file` è anche nell'editor ✏️ Edit e nella 📖 Legenda dello schema
+(e nelle tre liste dei modali, che `test_onyx_modifica_db.py` confronta).
+
+**Verifiche (18/09/2026):** `test_video_canzone.py` — 31 test OK (funzioni pure dei
+nomi, download video con yt-dlp finto, **playlist col video** con un MP4 vero fatto
+con ffmpeg, rotte del modale su database temporaneo, `.trash/`, cablaggio,
+app viva); **prova su YouTube vero**: «Me at the zoo» scaricato con la funzione
+dell'app in una cartella temporanea → MP4 da 0,51 MB in `videos/` (ffprobe: flusso
+**av1** + **aac**), `downloads/` vuota e mp3 ricavato DAL video; **Chrome vero
+headless** sulla pagina: le 8 funzioni del modale ci sono, il pulsante 🎬 su tutte
+le 897 righe, il modale si apre su una canzone vera («Nessun video agganciato a
+questa canzone»), la casella della playlist c'è, nessun errore JS (solo il favicon
+404 di sempre); app riavviata sulla 5070, `/videos` 200, `/video/…` e
+`/video-file/…` 404 sul file inesistente, `/db/schema` documenta `video_file`.
+
+⚠️ Solo il pulsante 🎬 prende il video di UNA canzone: per il download video non si
+salvano i metadati `yt_*` (data di caricamento, descrizione…), che arrivano con la
+**playlist** — se serve anche lì, è il prossimo passo.
+
 ## Note operative e stato corrente (11/09/2026, aggiornate al 18/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
@@ -582,6 +664,22 @@ Da tenere presente nelle sessioni di lavoro successive:
   mentre svuotare un campo a mano continua a svuotarlo. ⚠️ `duration` era fuori
   dalla lista `allowed` del PUT: la «Durata (s)» dell'editor del Database non si
   salvava (silenziosamente) — corretto il 18/09/2026.
+- **🎬 La playlist YouTube porta i dati del video nella riga (18/09/2026).** Ogni
+  file scaricato da `do_download_playlist` entra in `songs` coi campi `yt_*` (14
+  colonne, migrazione automatica): data di CARICAMENTO (e da lì `year`, **solo se
+  è vuoto**), data di uscita, canale, descrizione intera, viste/like/commenti, tag,
+  categoria, miniatura, durata. Il file si riconosce dall'`[id]` nel nome
+  (`DL_OUTTMPL`), non dal titolo. ⚠️ L'anno che viene dal caricamento può non essere
+  quello del brano («Who Knew»: caricato il 31/07/2018, il disco è del 2000). Dettagli
+  nella sezione «Playlist YouTube: ogni riga porta i dati del video».
+- **🎬 Il video di ogni canzone, in `videos/` (18/09/2026).** Oltre all'audio, la
+  riga può avere il suo **video**: la casella «🎬 Anche il video (MP4)» della
+  playlist lo scarica per ogni brano (e ne ricava l'mp3, un download solo), il
+  pulsante **🎬 Video** di ogni riga lo prende **da YouTube** (`ensure_video`) o lo
+  fa **caricare dal computer**, o lo sceglie fra quelli già in `videos/`, e 🗑 lo
+  toglie (il file va in `.trash/`). Il nome sta in `songs.video_file`; la cartella
+  `videos/` **non è versionata**. Dettagli e verifiche nella sezione «Video di ogni
+  canzone: MP4 da YouTube o dal computer».
 - **⚠️ La suite completa, con l'app attiva, scrive sul database VERO.** Il 18/09/2026
   `python3 -m unittest discover -p 'test_*.py'` ha dato **436 test `OK`** ma ha anche
   aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`

@@ -705,6 +705,10 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
         <option value="mp3">MP3 (consigliato)</option>
         <option value="native">Nativo (m4a/webm)</option>
       </select>
+      <label class="btn-sm" style="cursor:pointer;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:6px 12px;border-radius:6px;font-family:'Space Mono',monospace;font-size:10px;display:flex;align-items:center;gap:6px"
+             title="Scarica anche l'MP4 del video di OGNI brano della playlist: i file finiscono in videos/ e sono agganciati alla canzone (pulsante 🎬 Video nella tabella del database). L'mp3 da ascoltare arriva lo stesso.">
+        <input type="checkbox" id="db-playlist-video"> 🎬 Anche il video (MP4)
+      </label>
       <button class="btn-db-add" id="db-playlist-btn" onclick="dbDownloadPlaylist()">📥 Scarica Playlist</button>
     </div>
     <div id="db-playlist-status" style="margin-top:8px;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)"></div>
@@ -799,6 +803,44 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
     <div class="vol-row">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:var(--text3)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
       <input type="range" class="vol-slider" id="volSlider" min="0" max="100" value="70" oninput="nowCmd({action:'setVolume',volume:parseInt(this.value)})">
+    </div>
+  </div>
+</div>
+
+<!-- 🎬 VIDEO DELLA CANZONE — il file va in `videos/` e resta agganciato a QUESTA
+     riga (`songs.video_file`). Si può prendere da YouTube (MP4), caricare dal
+     computer o scegliere fra i video già in `videos/`. -->
+<div class="editor-modal" id="video-modal">
+  <div class="editor-modal-inner" style="max-width:660px;height:auto;max-height:88vh">
+    <div class="editor-modal-header">
+      <span id="vm-title">🎬 Video della canzone</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="editor-modal-close" onclick="chiudiVideoModal()">✕ Chiudi</button>
+      </div>
+    </div>
+    <div style="padding:16px 20px;overflow-y:auto">
+      <div id="vm-stato" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:12px"></div>
+      <div id="vm-player" style="display:none;margin-bottom:12px">
+        <video id="vm-video-el" controls preload="metadata" style="width:100%;max-height:340px;background:#000;border-radius:8px"></video>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <button class="btn-sm" id="vm-btn-yt" onclick="videoDaYoutube()"
+                title="Cerca il video del brano su YouTube e scarica l'MP4 in videos/: usa il link YouTube della riga, o artista + titolo. Il file resta agganciato a QUESTA canzone">🎬 Da YouTube</button>
+        <label class="btn-sm" style="cursor:pointer;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:6px 12px;border-radius:6px;font-family:'Space Mono',monospace;font-size:10px"
+               title="Scegli un file video dal computer: viene copiato in videos/ con un nome sicuro e agganciato a questa canzone">
+          📂 Dal computer
+          <input type="file" id="vm-upload" accept="video/*,.mp4,.mkv,.webm,.mov,.m4v,.avi" style="display:none" onchange="videoDalComputer(this.files)">
+        </label>
+        <select class="db-add-input" id="vm-archivio" style="flex:1;min-width:180px" onchange="videoDaArchivio(this.value)"
+                title="Un video che è già in videos/ (per esempio scaricato con la playlist): si aggancia a questa canzone"></select>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <a class="btn-sm" id="vm-link-scarica" style="display:none;text-decoration:none"
+           title="Scarica il file video sul computer">⬇ Scarica il file</a>
+        <button class="btn-sm" id="vm-btn-togli" style="display:none;color:var(--accent4)" onclick="togliVideo()"
+                title="Toglie il video dalla canzone: il file va in .trash/ (recuperabile), la riga e l'audio non si toccano">🗑 Togli il video</button>
+      </div>
+      <div id="vm-status" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)"></div>
     </div>
   </div>
 </div>
@@ -3668,7 +3710,7 @@ function scheduleDbReload(){
 const CAMPI_DB_MODALE = ['album_artist','composer','producers','genre','release_date',
   'track_number','disc_number','compilation','rating','bpm','musical_key','play_count',
   'duration','analyzed_status','youtube_url','genius_url','whosampled_url','tunebat_url',
-  'cover_art_path','local_file','comment','title_verified','artist_verified',
+  'cover_art_path','local_file','video_file','comment','title_verified','artist_verified',
   'bpm_verified','key_verified','lyrics_verified'];
 
 function payloadDaBranoPlayer(t){
@@ -5094,6 +5136,7 @@ function renderDbTable(songs){
   <button class="db-stem-btn" onclick="openDbEditor('${s.id}')">✏️ Edit</button>
   ${s.local_file?`<button class="db-stem-btn" onclick="openInSampler('${s.id}')" title="Apri nel sampler FL-Studio: griglia/metronomo/TAP per controllare il BPM vero">🎛 Sampler</button>`:''}
   ${s.local_file?'':`<button class="db-stem-btn" onclick="scaricaInDownload('${s.id}',this)" title="Scarica il brano in downloads/ e aggancia il file a QUESTA riga del database (senza creare un doppione): la riga diventa suonabile e si apre nel sampler">⬇ Scarica</button>`}
+  <button class="db-stem-btn" onclick="apriVideoModal('${s.id}')" ${s.video_file?'style="color:var(--accent2)"':''} title="${s.video_file?'Video già agganciato: '+escA(s.video_file):'Aggiungi un video a questa canzone: dal computer o da YouTube (va in videos/ e resta agganciato alla riga)'}">🎬 Video${s.video_file?' ✓':''}</button>
   <button class="db-stem-btn" onclick="apriConfrontoCampione('${s.id}')" title="Confronto campione: chi campiona e il campionato affiancati, col trim giallo dell'intervallo salvato nel database (se la canzone non ha campionamenti si apre lo stesso, con il collegamento alla scheda completa)">📄 Scheda</button>
 </td>
       <td>${s.relation_count>0?`<span class="db-rel-badge" style="cursor:pointer" onclick="apriConfrontoCampione('${s.id}')" title="Apri il confronto: chi campiona e il campionato, affiancati col trim giallo dell'intervallo salvato">🔗 ${s.relation_count}</span>`:`<span style="color:var(--muted);font-size:10px">—</span>`}</td>
@@ -5975,11 +6018,13 @@ async function dbDownloadPlaylist(){
   const url=urlEl.value.trim();
   if(!url){status.textContent='⚠️ Incolla prima l\'URL della playlist';return}
   const fmt=document.getElementById('db-playlist-fmt').value;
+  const videoEl=document.getElementById('db-playlist-video');
+  const video=!!(videoEl&&videoEl.checked);
   const btn=document.getElementById('db-playlist-btn');
   if(btn){btn.disabled=true;btn.textContent='📥 Scaricando…'}
   status.textContent='⏳ Avvio download playlist…';
   try{
-    const res=await fetch('/download/playlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,format:fmt})}).then(r=>r.json());
+    const res=await fetch('/download/playlist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,format:fmt,video})}).then(r=>r.json());
     if(!res.job_id){status.textContent='✕ '+(res.error||'Errore');return}
     const job_id=res.job_id;
     const poll=setInterval(async()=>{
@@ -5989,7 +6034,7 @@ async function dbDownloadPlaylist(){
         status.textContent=`⏳ ${j.status}…${p.percent!=null?` ${p.percent}%`:''}${p.filename?` · ${p.filename}`:''}`;
         if(j.status==='done'){
           clearInterval(poll);
-          const meta=[j.con_anno?`anno da YouTube per ${j.con_anno}`:'',j.con_metadati?`metadati del video su ${j.con_metadati}`:''].filter(Boolean).join(' · ');
+          const meta=[j.con_anno?`anno da YouTube per ${j.con_anno}`:'',j.con_metadati?`metadati del video su ${j.con_metadati}`:'',j.con_video?`video MP4 per ${j.con_video}`:''].filter(Boolean).join(' · ');
           status.textContent=`✅ ${j.playlist_title?`"${j.playlist_title}" · `:''}${j.count||0} brani scaricati, ${j.registered||0} registrati nel database${meta?` · ${meta}`:''}`;
           urlEl.value='';
           loadDb();
@@ -6222,6 +6267,7 @@ function dbEditFormHTML(s){
     ${inp('duration','Durata (s)','number')}${sel('analyzed_status','Stato analisi',[['none','none'],['analyzing','analyzing'],['done','done'],['error','error']])}
     ${inp('youtube_url','URL YouTube')}${inp('genius_url','URL Genius')}${inp('whosampled_url','URL WhoSampled')}${inp('tunebat_url','URL Tunebat')}${inp('cover_art_path','Cover path')}${v('cover_art_path')?`<label class="dbe-field"><span>Copertina</span>${coverThumb(v('cover_art_path'),72)}</label>`:''}
     ${inp('local_file','File locale')}
+    ${inp('video_file','Video (in videos/)')}
     ${ta('comment','Commento')}${ta('lyrics','Testo')}
   </div>
   <div class="dbe-grid dbe-ver">
@@ -6251,7 +6297,7 @@ function closeDbEditor(){
 
 async function saveDbEditor(){
   if(!dbEditSongId) return;
-  const fields=["title","artist","album","album_artist","composer","producers","genre","year","release_date","track_number","disc_number","compilation","rating","bpm","musical_key","play_count","duration","analyzed_status","youtube_url","genius_url","whosampled_url","tunebat_url","cover_art_path","local_file","comment","lyrics","title_verified","artist_verified","bpm_verified","key_verified","lyrics_verified"];
+  const fields=["title","artist","album","album_artist","composer","producers","genre","year","release_date","track_number","disc_number","compilation","rating","bpm","musical_key","play_count","duration","analyzed_status","youtube_url","genius_url","whosampled_url","tunebat_url","cover_art_path","local_file","video_file","comment","lyrics","title_verified","artist_verified","bpm_verified","key_verified","lyrics_verified"];
   const numFields=new Set(["year","track_number","disc_number","compilation","rating","bpm","play_count","duration"]);
   const chkFields=new Set(["title_verified","artist_verified","bpm_verified","key_verified","lyrics_verified"]);
   const payload={};
@@ -6496,6 +6542,141 @@ function closeConfrontoCampione(){
   const body = document.getElementById('rcm-body');
   if(body) body.innerHTML = '';   // gli iframe escono dal DOM: i player si fermano
 }
+
+// ── 🎬 VIDEO DELLA CANZONE (dal computer o da YouTube) ─────────────────────
+// Il file video va in `videos/` e il suo nome resta nella riga
+// (`songs.video_file`): qui si guarda, si sostituisce e si toglie.
+let videoSongId=null, videoPoll=null;
+
+async function apriVideoModal(id){
+  videoSongId=id;
+  document.getElementById('video-modal').classList.add('visible');
+  document.getElementById('vm-status').textContent='';
+  await aggiornaVideoModale();
+}
+
+function chiudiVideoModal(){
+  const m=document.getElementById('video-modal'); if(m) m.classList.remove('visible');
+  if(videoPoll){ clearInterval(videoPoll); videoPoll=null; }
+  const el=document.getElementById('vm-video-el');
+  if(el){ el.pause(); el.removeAttribute('src'); el.dataset.file=''; }
+  videoSongId=null;
+}
+
+async function aggiornaVideoModale(){
+  if(!videoSongId) return;
+  const s=await fetch(`/db/songs/${videoSongId}`).then(r=>r.json()).catch(()=>({}));
+  const nome=(s&&s.video_file)||'';
+  document.getElementById('vm-title').textContent=`🎬 ${(s&&(s.title||s.local_file))||videoSongId}`;
+  const player=document.getElementById('vm-player');
+  const el=document.getElementById('vm-video-el');
+  const btnTogli=document.getElementById('vm-btn-togli');
+  const linkScarica=document.getElementById('vm-link-scarica');
+  if(nome){
+    document.getElementById('vm-stato').textContent=`Video agganciato: ${nome}`;
+    player.style.display='block';
+    if(el.dataset.file!==nome){ el.src='/video/'+encodeURIComponent(nome); el.dataset.file=nome; }
+    btnTogli.style.display=''; linkScarica.style.display='';
+    linkScarica.href='/video-file/'+encodeURIComponent(nome);
+  }else{
+    document.getElementById('vm-stato').textContent='Nessun video agganciato a questa canzone.';
+    player.style.display='none';
+    if(el){ el.pause(); el.removeAttribute('src'); el.dataset.file=''; }
+    btnTogli.style.display='none'; linkScarica.style.display='none';
+  }
+  await caricaVideoArchivio();
+}
+
+async function caricaVideoArchivio(){
+  const sel=document.getElementById('vm-archivio'); if(!sel) return;
+  try{
+    const files=await fetch('/videos').then(r=>r.json());
+    const cur=sel.value;
+    sel.innerHTML='<option value="">📁 Video già in videos/…</option>'+
+      files.map(f=>`<option value="${escA(f.name)}">${esc(f.name)}${f.size?` (${(f.size/1048576).toFixed(1)} MB)`:''}</option>`).join('');
+    sel.value=cur;
+  }catch(_){}
+}
+
+async function videoDalComputer(files){
+  if(!videoSongId||!files||!files.length) return;
+  const status=document.getElementById('vm-status');
+  status.textContent='⏳ Carico il video dal computer…';
+  const fd=new FormData(); fd.append('file',files[0]);
+  try{
+    const res=await fetch(`/db/songs/${videoSongId}/video`,{method:'POST',body:fd}).then(r=>r.json());
+    if(res&&res.video_file){
+      status.textContent=`✅ Video caricato: ${res.video_file}`;
+      toast('🎬 Video agganciato alla canzone','ok');
+      await aggiornaVideoModale(); loadDb();
+    }else status.textContent='✕ '+((res&&res.error)||'caricamento non riuscito');
+  }catch(e){ status.textContent='✕ '+e.message; }
+  const inp=document.getElementById('vm-upload'); if(inp) inp.value='';
+}
+
+async function videoDaArchivio(nome){
+  if(!videoSongId||!nome) return;
+  const status=document.getElementById('vm-status');
+  status.textContent='⏳ Aggancio il video…';
+  try{
+    const res=await fetch(`/db/songs/${videoSongId}/video`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:nome})}).then(r=>r.json());
+    if(res&&res.video_file){
+      status.textContent=`✅ Agganciato: ${res.video_file}`;
+      toast('🎬 Video agganciato alla canzone','ok');
+      await aggiornaVideoModale(); loadDb();
+    }else status.textContent='✕ '+((res&&res.error)||'non riuscito');
+  }catch(e){ status.textContent='✕ '+e.message; }
+}
+
+async function videoDaYoutube(){
+  if(!videoSongId) return;
+  const btn=document.getElementById('vm-btn-yt');
+  const status=document.getElementById('vm-status');
+  if(btn){ btn.disabled=true; btn.textContent='🎬 Scarico…'; }
+  try{
+    const res=await fetch(`/db/songs/${videoSongId}/ensure_video`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json());
+    if(!res.job_id){
+      status.textContent='✕ '+(res.motivo||res.error||'download non partito');
+    }else{
+      const job=res.job_id;
+      if(videoPoll) clearInterval(videoPoll);
+      videoPoll=setInterval(async()=>{
+        try{
+          const j=await fetch(`/status/${job}`).then(r=>r.json());
+          const p=j.progress||{};
+          status.textContent=`⏳ ${j.status}…${p.percent!=null?` ${p.percent}%`:''}${p.speed?` · ${p.speed}`:''}`;
+          if(j.status==='done'){
+            clearInterval(videoPoll); videoPoll=null;
+            status.textContent=`✅ Video scaricato: ${j.filename||''}`;
+            toast('🎬 Video agganciato alla canzone','ok');
+            await aggiornaVideoModale(); loadDb();
+          }else if(j.status==='error'){
+            clearInterval(videoPoll); videoPoll=null;
+            status.textContent='✕ '+(j.error||'download non riuscito');
+          }
+        }catch(_){}
+      },1200);
+    }
+  }catch(e){ status.textContent='✕ '+e.message; }
+  if(btn){ btn.disabled=false; btn.textContent='🎬 Da YouTube'; }
+}
+
+async function togliVideo(){
+  if(!videoSongId) return;
+  if(!confirm('Togliere il video da questa canzone?\nIl file va in .trash/ (recuperabile); la canzone e l\'audio non si toccano.')) return;
+  const status=document.getElementById('vm-status');
+  try{
+    const res=await fetch(`/db/songs/${videoSongId}/video`,{method:'DELETE'}).then(r=>r.json());
+    if(res&&res.ok){
+      status.textContent='';
+      toast('🗑 Video tolto dalla canzone','info');
+      await aggiornaVideoModale(); loadDb();
+    }else status.textContent='✕ '+((res&&res.error)||'non riuscito');
+  }catch(e){ status.textContent='✕ '+e.message; }
+}
+
 
 // ── 🔍 CERCA I CAMPIONAMENTI DI QUESTA CANZONE (dal modale 🎚) ───────────────
 // Dal modale «Confronto campione» di una canzone SENZA campionamenti si va
