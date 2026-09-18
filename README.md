@@ -2110,20 +2110,15 @@ Da tenere presente nelle sessioni di lavoro successive:
     (0,007 → 0,343) e di Whisper (0,418 → 0,66), 144,3 s in tutto e **「cali della
     percentuale: 0」**: mai scesa. Prima del fix la stessa misura dava cali netti (dal 6 al
     3 e dall'arrivo della misura di demucs).
-  - **In CHROME VERO** (la pagina, con 🗣 voce e 🎤 a cappella spuntati): la percentuale è
-    salita **38 → 39 → 42 → 44 → 46 → 49 → 51 → 53 → 55 → 58 → 59 → 61 → 65 → 68 → 70 →
-    75 → 78%** dentro il passo 7, con la **rotella** che girava e i «secondi in questo
-    passo» che salivano, e solo alla fine è passata a **100%** con «Verifica conclusa» e la
-    rotella ferma (193 s: la macchina era carica per i test in parallelo). Nei messaggi
-    **non compare** nessun «✏️ Metadati aggiornati» spurio: è anche la prova che il fix di
-    `esc()` sui Produttori tiene.
-  - **In CHROME VERO** (la pagina, con 🗣 voce e 🎤 a cappella spuntati): la percentuale è
-    salita **38 → 39 → 42 → 44 → 46 → 49 → 51 → 53 → 55 → 58 → 59 → 61 → 65 → 68 → 70 →
-    75 → 78%** dentro il passo 7, con la **rotella** che girava e i «secondi in questo
-    passo» che salivano, e solo alla fine è passata a **100%** con «Verifica conclusa» e la
-    rotella ferma (193 s: la macchina era carica per i test in parallelo). Nei messaggi
-    **non compare** nessun «✏️ Metadati aggiornati» spurio: è anche la prova che il fix di
-    `esc()` sui Produttori tiene.
+  - **In CHROME VERO** (la pagina, con 🗣 voce e 🎤 a cappella spuntati; due prove, prima e
+    dopo il fix del «tornare indietro»): la prima ha mostrato la barra che avanzava dentro
+    il passo 7 (38 → 39 → 42 → … → 78%) coi «secondi in questo passo» che salivano; la
+    **seconda**, con un controllo automatico che segnala ogni calo, ha dato **「cali della
+    percentuale in pagina: 0」** su questa curva: 38 → 39 → 41 → 43 → 45 → 48 → 50 → 52 →
+    53 → 54 → 55 → 57 → 59 → (pausa di ~40 s, il tempo in cui Whisper non riporta nuovi
+    segmenti) → 67 → 69 → 74 → 78 → 79 → **100%** con «Verifica conclusa» e rotella ferma.
+    Nei messaggi **non compare** nessun «✏️ Metadati aggiornati» spurio: è anche la prova
+    che il fix di `esc()` sui Produttori tiene.
 
 
 
