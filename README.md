@@ -1390,3 +1390,46 @@ Da tenere presente nelle sessioni di lavoro successive:
   in `scheda.html`. Come per gli altri giri di dati, il
   database resta da committare a parte (è binario).
 
+- **COVER NELLA NOWBAR (18/09/2026).** Richiesta di Alessandro: «si va bene ma la
+  cover dovrebbe comparire anche nel player in basso a sinistra». Il riquadro
+  56×56 di quella barra mostrava **sempre l'icona ♪** — nel codice c'era perfino
+  scritto «Gradiente della cover generata (nessun artwork nel database)» — perché
+  `renderNowBar(t)` scriveva solo titolo e artista e **`#nowArt` non veniva mai
+  toccato**. Ora la copertina salvata dalla Verifica arriva anche lì, con due
+  funzioni **PURE** identiche nelle due pagine (il player vero è su `/onyx`,
+  dentro l'iframe; sugli altri tab si vede la barra **copiata** di
+  `index (2).html`): `coverDaBrano(track, brani)` sceglie l'URL — prima la
+  copertina scritta sul brano (`cover`), poi la ricerca nella lista del database
+  per **id** della canzone (`dbSongId`/`song_id`) o per **nome del file**
+  (`localFile`/`local_file`) — e `mostraArtNowbar(el, url)` disegna l'`<img>`
+  oppure rimette l'icona ♪; se l'immagine è **già quella giusta non la ricrea**
+  (lo stato del player arriva più volte al secondo e ricrearla la farebbe
+  sfarfallare) e con `onerror` torna all'icona quando il file non c'è più. Il
+  nome della copertina viaggia **col brano**: `applyDbSync` copia
+  `cover: s.cover_art_path` nei brani nuovi e in quelli già presenti (anche nel
+  confronto che decide il salvataggio in IndexedDB) e `getPlaybackState()` manda
+  ora anche **`song_id`** e **`cover`** — così la barra del tab principale, che
+  riceve lo stato dal player o lo rilegge da `/playback/state`, sa quale canzone
+  sta suonando — mentre la barra si aggiorna anche quando la lista del database
+  arriva dopo (`if(nbState) renderNowbar(nbState);` in `autoLoadDb`: all'avvio può
+  comparire prima di `/db/songs`). Verifiche del 18/09/2026: **9 test nuovi**
+  (`test_verify_cover.py` — `coverDaBrano` in **JavaScriptCore** su 14 casi e su
+  *entrambe* le copie, più il confronto che le due copie restino identiche; 4 di
+  cablaggio; 2 sull'app viva, compresa la catena funzione → URL → immagine) e
+  **272 test di suite** (erano 263, `OK`); in **Chrome vero** (ricetta
+  `make_driver()`) con *In My Baggie* (Chris Webby) il riquadro `#nowArt` mostra
+  `<img src="/cover/song_0770e7f756d0.png">` **1000×1000 naturali dentro 56×56
+  px** e `complete: true`, senza icona, sia nella barra copiata
+  (`/?tab=database`) sia in quella del player (`/onyx`), mentre richiamando le
+  funzioni con un brano **senza** copertina torna l'`<svg>` ♪ senza nessun
+  `<img>`; `/playback/state` POST→GET porta davvero `song_id`; pagine `/` e
+  `/onyx` → **200** e **nessun riavvio** (il backend non è stato toccato: le due
+  pagine si leggono dal disco a ogni richiesta). Mappa del codice (dal file
+  vero): `getPlaybackState` 2678, `ICONA_NOWART` 2805, `coverDaBrano` 2811,
+  `mostraArtNowbar` 2831, `renderNowBar` 2847, `applyDbSync` 3287 in
+  `onyx_whosampled.html`; `if(nbState) renderNowbar(nbState)` 4769,
+  `ICONA_NOWART` 5741, `coverDaBrano` 5746, `mostraArtNowbar` 5765,
+  `renderNowbar` 5781 in `index (2).html`.
+  (Nella stessa sessione la Verifica è stata usata anche dal vivo su *My Life*
+  di 50 Cent: `covers/song_3f702a0aa998.png`, 327 KB.)
+

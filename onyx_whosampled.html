@@ -2686,6 +2686,10 @@ function getPlaybackState(){
     position: audio.currentTime || 0,
     duration: audio.duration || (t ? (t.dur||0) : 0) || 0,
     volume: Math.round((audio.volume!=null ? audio.volume : 0.7) * 100),
+    // Chi riceve lo stato (la barra copiata di index (2).html, il database in
+    // playback_state) sa così QUALE canzone suona e quale copertina mostrare.
+    song_id: t ? (t.dbSongId || '') : '',
+    cover: t ? (t.cover || '') : '',
     shuffle: !!shuffle,
     repeat: !!repeat
   };
@@ -2792,9 +2796,59 @@ function updatePlayUI() {
   document.getElementById("eqBars").classList.toggle("playing", isPlaying);
 }
 
+// ── COVER NELLA NOWBAR (il riquadro 56×56 in basso a sinistra) ──────────────
+// Fino al 18/09/2026 quel riquadro mostrava SEMPRE l'icona ♪, perché nel
+// database non c'era nessun artwork. Ora la Verifica salva la copertina in
+// `covers/` e scrive il NOME del file in `songs.cover_art_path`: il nome viaggia
+// col brano (`cover`, riempito da applyDbSync) e qui diventa l'URL servito da
+// `/cover/<file>`.
+const ICONA_NOWART = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+
+// URL della copertina del brano in ascolto ('' se non ne ha): la copertina
+// scritta sul brano ha la precedenza; in mancanza si cerca la canzone nella
+// lista passata, per id del database o per nome del file locale. Funzione PURA
+// (test_verify_cover.py la esegue in JavaScriptCore su entrambe le pagine).
+function coverDaBrano(track, brani){
+  if(!track) return '';
+  const diretto = track.cover || track.cover_art_path || '';
+  if(diretto) return '/cover/' + encodeURIComponent(diretto);
+  const id = String(track.dbSongId || track.song_id || '');
+  const file = String(track.localFile || track.local_file || '');
+  if(!id && !file) return '';
+  for(const s of (brani || [])){
+    if(!s || !s.cover_art_path) continue;
+    if((id && s.id === id) || (file && s.local_file === file)){
+      return '/cover/' + encodeURIComponent(s.cover_art_path);
+    }
+  }
+  return '';
+}
+
+// Disegna il riquadro della nowbar: la copertina se c'è, altrimenti l'icona ♪.
+// Lo stato del player arriva più volte al secondo: ricreare l'<img> ogni volta
+// la farebbe sfarfallare, quindi se è già quella giusta non si tocca niente. Se
+// l'immagine non si carica (cover non più su disco) si torna all'icona.
+function mostraArtNowbar(el, url){
+  if(!el) return;
+  if((el.dataset.cover || '') === (url || '')) return;
+  el.dataset.cover = url || '';
+  if(!url){ el.innerHTML = ICONA_NOWART; return; }
+  el.innerHTML = '';
+  const img = document.createElement('img');
+  img.alt = '';
+  img.src = url;
+  img.addEventListener('error', function(){
+    el.dataset.cover = '';
+    el.innerHTML = ICONA_NOWART;
+  });
+  el.appendChild(img);
+}
+
 function renderNowBar(t) {
   document.getElementById("nowTrack").textContent  = t.name;
   document.getElementById("nowArtist").textContent = t.artist;
+  // riquadro in basso a sinistra: la copertina trovata dalla Verifica
+  mostraArtNowbar(document.getElementById("nowArt"), coverDaBrano(t, tracks));
 }
 
 // Indice di un brano nella lista passata (cercato per id), -1 se non c'è.
@@ -3255,7 +3309,9 @@ async function applyDbSync(songs){
           dur: s.duration || 0, playlists: [], lyrics: s.lyrics || '',
           sampleSources: [], sampleUsages: [], analyzed: s.analyzed_status || 'none',
           geniusUrl: s.genius_url || '', whosampledUrl: s.whosampled_url || '',
-          _origName: (s.title || 'audio'), dbSongId: s.id, localFile: s.local_file
+          _origName: (s.title || 'audio'), dbSongId: s.id, localFile: s.local_file,
+          // copertina della Verifica (nome del file in covers/, per la nowbar)
+          cover: s.cover_art_path || ''
         };
         tracks.push(tr);
         try{ await dbPut('tracks', tr); }catch(_){}
@@ -3266,7 +3322,7 @@ async function applyDbSync(songs){
     const prev = { name:t.name, artist:t.artist, album:t.album||'', album_artist:t.album_artist||'',
                   year:t.year||'', release_date:t.release_date||'', composer:t.composer||'', genre:t.genre||'', track_number:t.track_number||'',
                   bpm:t.bpm||'', musical_key:t.musical_key||'', comment:t.comment||'',
-                  lyrics:t.lyrics||'', dur:t.dur||0 };
+                  lyrics:t.lyrics||'', dur:t.dur||0, cover:t.cover||'' };
     if(s.title) t.name = s.title;
     if(s.artist) t.artist = s.artist;
     if(s.album !== undefined && s.album !== null && s.album !== '') t.album = s.album;
@@ -3282,12 +3338,14 @@ async function applyDbSync(songs){
     if(s.lyrics) t.lyrics = s.lyrics;
     if(s.duration) t.dur = s.duration;
     if(!t.dbSongId) t.dbSongId = s.id;
+    // la copertina salvata dalla Verifica arriva nel player con la canzone
+    if(s.cover_art_path) t.cover = s.cover_art_path;
     if(prev.name!==t.name || prev.artist!==t.artist || prev.album!==(t.album||'') ||
        prev.album_artist!==(t.album_artist||'') || String(prev.year)!==String(t.year||'') ||
        prev.composer!==(t.composer||'') || prev.genre!==(t.genre||'') ||
        prev.track_number!==(t.track_number||'') || String(prev.bpm)!==String(t.bpm||'') ||
        prev.musical_key!==(t.musical_key||'') || prev.comment!==(t.comment||'') ||
-       prev.lyrics!==(t.lyrics||'') || prev.dur!==(t.dur||0)){
+       prev.lyrics!==(t.lyrics||'') || prev.dur!==(t.dur||0) || prev.cover!==(t.cover||'')){
       await dbPut('tracks', t);
       changed = true;
     }

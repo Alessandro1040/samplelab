@@ -4764,6 +4764,9 @@ async function autoLoadDb(){
     if(q) filterDb(q); else renderDbTable(allDbSongs);
     renderRelations(allDbRels);
     pushDbToPlayer();
+    // La barra in basso può comparire PRIMA che la lista del database arrivi:
+    // qui la copertina si aggiorna appena i dati ci sono (lo stato è nbState).
+    if(nbState) renderNowbar(nbState);
   }catch(_){}
 }
 
@@ -5729,6 +5732,52 @@ setInterval(autoLoadDb, 2000);
 // ════════════════════════════════════════════════════════════
 let nbState=null;
 let hasLivePlayerState=false; // vero appena il player invia uno stato live (fonte di verità)
+
+// ── COVER NELLA NOWBAR (copia della barra del player: riquadro 56×56) ───────
+// stesse funzioni del player Onyx (onyx_whosampled.html): la Verifica salva la
+// copertina in covers/ e ne scrive il NOME in songs.cover_art_path, il nome
+// viaggia nello stato del player (`cover`) o si ritrova qui per id/file locale
+// nella lista del database. Prima del 18/09/2026 il riquadro restava con l'icona ♪.
+const ICONA_NOWART = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>';
+
+// URL della copertina del brano ('' se non ne ha): prima quella scritta sul
+// brano, poi la ricerca nella lista per id del database o file locale.
+// Funzione PURA (test_verify_cover.py la esegue in JavaScriptCore).
+function coverDaBrano(track, brani){
+  if(!track) return '';
+  const diretto = track.cover || track.cover_art_path || '';
+  if(diretto) return '/cover/' + encodeURIComponent(diretto);
+  const id = String(track.dbSongId || track.song_id || '');
+  const file = String(track.localFile || track.local_file || '');
+  if(!id && !file) return '';
+  for(const s of (brani || [])){
+    if(!s || !s.cover_art_path) continue;
+    if((id && s.id === id) || (file && s.local_file === file)){
+      return '/cover/' + encodeURIComponent(s.cover_art_path);
+    }
+  }
+  return '';
+}
+
+// Disegna il riquadro: la copertina se c'è, altrimenti l'icona ♪. Lo stato del
+// player arriva più volte al secondo: se l'immagine è già quella giusta non si
+// ricrea (sfarfallerebbe). Se non si carica si torna all'icona.
+function mostraArtNowbar(el, url){
+  if(!el) return;
+  if((el.dataset.cover || '') === (url || '')) return;
+  el.dataset.cover = url || '';
+  if(!url){ el.innerHTML = ICONA_NOWART; return; }
+  el.innerHTML = '';
+  const img = document.createElement('img');
+  img.alt = '';
+  img.src = url;
+  img.addEventListener('error', function(){
+    el.dataset.cover = '';
+    el.innerHTML = ICONA_NOWART;
+  });
+  el.appendChild(img);
+}
+
 function renderNowbar(s){
   nbState=s||null;
   const bar=document.getElementById('onyx-nowbar');
@@ -5739,6 +5788,8 @@ function renderNowbar(s){
   }
   bar.style.display='flex';
   document.getElementById('nowTrack').textContent = nbState.title || nbState.local_file || '—';
+  // riquadro in basso a sinistra: la copertina del brano in ascolto
+  mostraArtNowbar(document.getElementById('nowArt'), coverDaBrano(nbState, allDbSongs));
   const naEl=document.getElementById('nowArtist');
   const artistStr=nbState.artist || (nbState.local_file ? 'File locale' : '');
   naEl.innerHTML = nowbarArtistChips(artistStr) || esc(artistStr);

@@ -23,8 +23,10 @@ da soli se Genius/l'app non ci sono; `SAMPLELAB_URL` sovrascrive l'indirizzo.
 import importlib.util
 import json
 import os
+import re
 import shutil
 import struct
+import subprocess
 import tempfile
 import unittest
 import urllib.error
@@ -36,8 +38,10 @@ from unittest import mock
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_PATH = os.path.join(BASE_DIR, "app (2).py")
 INDEX_PATH = os.path.join(BASE_DIR, "index (2).html")
+ONYX_PATH = os.path.join(BASE_DIR, "onyx_whosampled.html")
 SCHEDA_PATH = os.path.join(BASE_DIR, "scheda.html")
 DL_DIR = os.path.join(BASE_DIR, "downloads")
+HA_OSASCRIPT = shutil.which("osascript") is not None
 SAMPLELAB_URL = os.environ.get("SAMPLELAB_URL", "http://localhost:5070")
 
 
@@ -56,6 +60,44 @@ APP = load_app()
 def leggi(path):
     with open(path, encoding="utf-8") as fh:
         return fh.read()
+
+
+# ── il runner JavaScript (stesso schema di test_scheda_canzone.py) ───────────
+def _blocco(src, inizio, apri, chiudi, cosa):
+    i = src.index(apri, inizio)
+    liv, j = 0, i
+    while j < len(src):
+        if src[j] == apri:
+            liv += 1
+        elif src[j] == chiudi:
+            liv -= 1
+            if liv == 0:
+                return src[i:j + 1]
+        j += 1
+    raise AssertionError("parentesi non bilanciate in %s" % cosa)
+
+
+def estrai_funzione(src, nome):
+    """Il testo della funzione `nome` preso dal file vero (pagina o app)."""
+    m = re.search(r"(?:async\s+)?function\s+" + re.escape(nome) + r"\s*\(", src)
+    if not m:
+        raise AssertionError("funzione %s assente" % nome)
+    inizio_corpo = src.index("{", m.end() - 1)
+    corpo = _blocco(src, m.end() - 1, "{", "}", nome)
+    return src[m.start(): inizio_corpo + len(corpo)]
+
+
+def esegui_js(codice, nome_file="/tmp/test_verify_cover.js"):
+    """Esegue un frammento di JavaScript con JavaScriptCore e torna il JSON
+    dell'ULTIMA espressione (che deve essere una JSON.stringify(...))."""
+    with open(nome_file, "w", encoding="utf-8") as out:
+        out.write(codice + "\n")
+    r = subprocess.run(["osascript", "-l", "JavaScript", nome_file],
+                       capture_output=True, text=True)
+    righe = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
+    if not righe:
+        raise AssertionError("nessun output da JavaScriptCore: %s" % (r.stderr or "")[:200])
+    return json.loads(righe[-1])
 
 
 def app_is_up(url):
@@ -446,6 +488,130 @@ class TestEndpointVivo(unittest.TestCase):
             pagina = r.read().decode("utf-8", "replace")
         self.assertIn("function coverThumb(f, size){", pagina)
         self.assertIn("/cover/' + encodeURIComponent(f)", pagina)
+
+    def test_le_pagine_servite_hanno_la_cover_nella_nowbar(self):
+        for rotta, atteso in (
+                ("/", "function coverDaBrano(track, brani){"),
+                ("/onyx", 'mostraArtNowbar(document.getElementById("nowArt")')):
+            with self.subTest(rotta=rotta):
+                with urllib.request.urlopen(SAMPLELAB_URL + rotta, timeout=30) as r:
+                    pagina = r.read().decode("utf-8", "replace")
+                self.assertIn(atteso, pagina)
+
+    def test_la_nowbar_del_player_suona_con_la_cover(self):
+        """Catena vera: la funzione della pagina (in JavaScriptCore) + la rotta
+        /cover sull'app viva, su una canzone che la copertina ce l'ha davvero."""
+        with urllib.request.urlopen(SAMPLELAB_URL + "/db/songs", timeout=60) as r:
+            brani = json.load(r)
+        canzone = next((s for s in brani if s.get("cover_art_path")), None)
+        if not canzone:
+            self.skipTest("nessuna canzone ha la copertina nel database")
+        # al runner JS serve solo la parte utile (non tutto il database coi testi)
+        ridotti = [{"id": s.get("id"), "local_file": s.get("local_file"),
+                    "cover_art_path": s.get("cover_art_path")} for s in brani]
+        js = estrai_funzione(leggi(INDEX_PATH), "coverDaBrano")
+        codice = (js + "\nconst brani = " + json.dumps(ridotti) + ";\n"
+                  + "JSON.stringify([coverDaBrano({dbSongId: " + json.dumps(canzone["id"])
+                  + "}, brani)]);")
+        url = esegui_js(codice, "/tmp/test_cover_nowbar_vivo.js")[0]
+        self.assertEqual(url, "/cover/" + urllib.parse.quote(canzone["cover_art_path"]))
+        with urllib.request.urlopen(SAMPLELAB_URL + url, timeout=20) as r:
+            self.assertEqual(r.status, 200)
+            self.assertTrue(str(r.headers.get("Content-Type", "")).startswith("image/"))
+            self.assertGreater(len(r.read()), 1000)
+
+
+# ── casi scritti a mano per la cover della nowbar (brano, lista DB, URL) ─────
+CASI_COVER_NOWBAR = [
+    ({"cover": "song_1.png"}, [], "/cover/song_1.png"),
+    ({"cover_art_path": "song_2.jpg"}, [], "/cover/song_2.jpg"),
+    ({"cover": "nome con spazio.png"}, [], "/cover/nome%20con%20spazio.png"),
+    ({"dbSongId": "song_0770e7f756d0"},
+     [{"id": "song_0770e7f756d0", "cover_art_path": "song_0770e7f756d0.png"}],
+     "/cover/song_0770e7f756d0.png"),
+    ({"song_id": "song_9"}, [{"id": "song_9", "cover_art_path": "song_9.jpg"}], "/cover/song_9.jpg"),
+    ({"local_file": "Eminem - Till I Collapse.mp3"},
+     [{"local_file": "Eminem - Till I Collapse.mp3", "cover_art_path": "song_44.png"}],
+     "/cover/song_44.png"),
+    ({"localFile": "x.m4a"}, [{"local_file": "x.m4a", "cover_art_path": "song_45.png"}],
+     "/cover/song_45.png"),
+    # la copertina scritta sul brano vince sulla ricerca nella lista
+    ({"cover": "mio.png", "dbSongId": "s1"}, [{"id": "s1", "cover_art_path": "altro.png"}],
+     "/cover/mio.png"),
+    # niente copertina: nessun URL, la barra resta con l'icona ♪
+    (None, [], ""),
+    ({}, [], ""),
+    ({"title": "senza id né file"}, [{"id": "s1", "cover_art_path": "c.png"}], ""),
+    ({"dbSongId": "s9"}, [{"id": "s1", "cover_art_path": "c.png"}], ""),
+    ({"dbSongId": "s1"}, None, ""),
+    # una canzone senza copertina non ferma la ricerca (qui non ce n'è nessuna)
+    ({"dbSongId": "s2"}, [{"id": "s2", "cover_art_path": ""}, {"id": "s3"}], ""),
+]
+
+
+@unittest.skipUnless(HA_OSASCRIPT, "JavaScriptCore (osascript) non disponibile")
+class TestCoverNowbarPura(unittest.TestCase):
+    """`coverDaBrano` in JavaScriptCore: è la funzione che decide quale immagine
+    finisce nel riquadro in basso a sinistra. Ne girano DUE copie (il player
+    Onyx e la barra di index (2).html): devono dare lo stesso risultato."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.js_index = estrai_funzione(leggi(INDEX_PATH), "coverDaBrano")
+        cls.js_onyx = estrai_funzione(leggi(ONYX_PATH), "coverDaBrano")
+
+    def _esegui(self, js, casi):
+        codice = (js + "\nconst casi = " + json.dumps(casi) + ";\n"
+                  + "JSON.stringify(casi.map(function(c){ return coverDaBrano(c[0], c[1]); }));")
+        return esegui_js(codice, "/tmp/test_cover_nowbar.js")
+
+    def test_url_attesi_nel_player(self):
+        attesi = [caso[2] for caso in CASI_COVER_NOWBAR]
+        self.assertEqual(self._esegui(self.js_onyx, CASI_COVER_NOWBAR), attesi)
+
+    def test_url_attesi_nella_barra_copiata(self):
+        attesi = [caso[2] for caso in CASI_COVER_NOWBAR]
+        self.assertEqual(self._esegui(self.js_index, CASI_COVER_NOWBAR), attesi)
+
+    def test_le_due_copie_non_divergono(self):
+        # come per il touchpad del player inline: la copia deve restare identica
+        self.assertEqual(self.js_index.strip(), self.js_onyx.strip())
+
+
+class TestCablaggioNowbar(unittest.TestCase):
+    """Il riquadro `#nowArt` delle due barre: agganci, campi dello stato e CSS."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.index = leggi(INDEX_PATH)
+        cls.onyx = leggi(ONYX_PATH)
+
+    def test_riquadro_icona_e_css_in_entrambe_le_pagine(self):
+        for nome, src in (("index (2).html", self.index), ("onyx_whosampled.html", self.onyx)):
+            self.assertIn('id="nowArt"', src, nome)
+            self.assertIn("const ICONA_NOWART = '<svg", src, nome)
+            self.assertIn("function mostraArtNowbar(el, url){", src, nome)
+            self.assertIn(".nowbar-art img{width:100%;height:100%;object-fit:cover", src, nome)
+
+    def test_il_player_disegna_la_cover(self):
+        self.assertIn(
+            'mostraArtNowbar(document.getElementById("nowArt"), coverDaBrano(t, tracks));',
+            self.onyx)
+
+    def test_la_barra_copiata_disegna_la_cover(self):
+        self.assertIn(
+            "mostraArtNowbar(document.getElementById('nowArt'), coverDaBrano(nbState, allDbSongs));",
+            self.index)
+        self.assertIn("if(nbState) renderNowbar(nbState);", self.index)
+
+    def test_la_copertina_viaggia_col_brano(self):
+        # applyDbSync: la copertina entra nel brano nuovo e in quello già presente
+        self.assertIn("cover: s.cover_art_path || ''", self.onyx)
+        self.assertIn("if(s.cover_art_path) t.cover = s.cover_art_path;", self.onyx)
+        self.assertIn("prev.cover!==(t.cover||'')", self.onyx)
+        # ...e lo stato del player la porta con sé, con l'id della canzone
+        self.assertIn("song_id: t ? (t.dbSongId || '') : '',", self.onyx)
+        self.assertIn("cover: t ? (t.cover || '') : '',", self.onyx)
 
 
 if __name__ == "__main__":
