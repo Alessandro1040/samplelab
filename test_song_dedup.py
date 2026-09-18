@@ -38,6 +38,7 @@ Esecuzione (dalla cartella di SampleLab):
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -83,6 +84,14 @@ def funzione_js(src, nome):
                 return src[inizio:j + 1]
         j += 1
     raise AssertionError("funzione non chiusa: " + nome)
+
+
+def costante_js(src, nome):
+    """La riga `const NOME = …;` (per le costanti che non sono oggetti letterali)."""
+    m = re.search(r"const\s+" + re.escape(nome) + r"\s*=\s*[^;]+;", src)
+    if not m:
+        raise AssertionError("costante non trovata: " + nome)
+    return m.group(0)
 
 
 def esegui_js(codice, nome_file="/tmp/test_song_dedup.js"):
@@ -472,6 +481,21 @@ class TestCablaggioDellaPagina(unittest.TestCase):
         # e c'è il pulsante per la riga senza file
         self.assertIn("scaricaInDownload('${s.id}',this)", corpo)
 
+    def test_il_vuoto_del_modale_manda_a_trova_campioni(self):
+        # 18/09/2026 (richiesta di Alessandro): una canzone SENZA campionamenti
+        # deve poterli far cercare da lì, con la STESSA ricerca di 🔍 Trova Campioni
+        corpo = self.pagina[self.pagina.index("function renderConfrontoCampione"):][:2600]
+        self.assertIn('onclick="cercaCampionamentiDaScheda()"', corpo)
+        self.assertIn("Cerca i campionamenti su WhoSampled", corpo)
+        fn = funzione_js(self.pagina, "cercaCampionamentiDaScheda")
+        self.assertIn("switchTab('scraper')", fn, "va nel tab 🔍 Trova Campioni")
+        self.assertIn("startSearch()", fn, "lancia la ricerca che c'è già lì")
+        self.assertIn("'inp-artist'", fn)
+        self.assertIn("'inp-title'", fn)
+        self.assertNotIn("fetch('/scrape'", fn, "la ricerca non si riscrive nel modale")
+        # …ed è davvero la stessa: il pulsante CERCA chiama QUELLA funzione
+        self.assertIn('id="btn-search" onclick="startSearch()"', self.pagina)
+
     def test_il_trim_giallo_riceve_la_fine_dell_intervallo(self):
         self.assertIn("function trimRangeFor(startSec, duration, defaultDur, endSec)", self.pagina)
         self.assertIn("endSec: endSec || 0", self.pagina)
@@ -570,6 +594,136 @@ class TestEndpointVivo(unittest.TestCase):
             html = r.read().decode("utf-8")
         self.assertIn('id="rel-compare-modal"', html)
         self.assertIn("function apriConfrontoCampione", html)
+
+
+# ── i casi per 🔍 «Cerca i campionamenti» dal modale 🎚 ──────────────────────
+CANZONI_MODALE = {
+    "completo": {"id": "song_1", "title": "'Till I Collapse (Official Video) [Explicit].mp3",
+                 "artist": "50 Cent / Nate Dogg"},
+    "senzaArtista": {"id": "song_2", "title": "Senza artista", "artist": "Brano locale"},
+    "senzaTitolo": {"id": "song_3", "title": "", "artist": "AC/DC"},
+    "acdcRemix": {"id": "song_4", "title": "Back in Black (Remix)", "artist": "AC/DC"},
+    "conFeat": {"id": "song_5", "title": "Forgot About Dre (feat. Eminem)", "artist": "Dr. Dre"},
+    "beat": {"id": "song_6", "title": "off the wall remix", "artist": "(beat) eminem, redman"},
+}
+PULIZIE = {
+    "video": "Without Me (Official Video)",
+    "explicit": "'Till I Collapse [Explicit]",
+    "hd_audio": "Mosh (Official Audio) [HD]",
+    "remaster": "Brano (Remastered 2011)",
+    "file": "onyx_t_1786610656293_j9ju3.mp3",
+    "rimasto": "Mosh (Remix)",
+    "feat": "Forgot About Dre (feat. Eminem)",
+    "vuoto": "   ",
+    "spazi": "  Doppio   spazio  ",
+}
+ARTISTI = {"multi": "50 Cent / Nate Dogg", "acdc": "AC/DC", "segna": "Brano locale",
+           "vuoto": "", "uno": "Eminem", "amp": "Sway & King Tech", "spazi": " Eminem ",
+           "beat": "(beat) eminem, redman", "virgola": "Tyler, The Creator",
+           "virgola2": "Earth, Wind & Fire", "hed": "(hed) p.e."}
+
+
+@unittest.skipUnless(HA_OSASCRIPT, "serve osascript (JavaScriptCore)")
+class TestCercaCampionamentiDalModale(unittest.TestCase):
+    """Il pulsante 🔍 del modale: riempie i campi di Trova Campioni e lancia QUELLA ricerca."""
+
+    @classmethod
+    def setUpClass(cls):
+        src = leggi(PAGINA_PATH)
+        js = "\n".join([
+            costante_js(src, "DECORAZIONI_WS"),
+            costante_js(src, "ARTISTI_SEGNAPOSTO"),
+            costante_js(src, "MARCATORI_INIZIALI"),
+            costante_js(src, "NOMI_INTERI_ARTISTA"),
+            funzione_js(src, "pulisciPerRicercaCampioni"),
+            funzione_js(src, "artistaPerRicercaCampioni"),
+            funzione_js(src, "cercaCampionamentiDaScheda"),
+        ])
+        js += """
+// DOM finto: solo i due campi della ricerca, e al posto delle funzioni vere
+// della pagina si registra COSA è stato chiamato (switchTab, startSearch…).
+const chiamate = [];
+const finti = {
+  'inp-artist': {value:'', focus(){chiamate.push('focus:inp-artist');}},
+  'inp-title':  {value:'', focus(){chiamate.push('focus:inp-title');}}
+};
+globalThis.document = { getElementById(id){ return finti[id] || null; } };
+globalThis.toast = (m,t)=>chiamate.push('toast:'+t+':'+m);
+globalThis.switchTab = (n)=>chiamate.push('tab:'+n);
+globalThis.closeConfrontoCampione = ()=>chiamate.push('chiuso');
+let allDbSongs = [];
+let rcmCanzoneId = '';
+let ricerca = null;
+globalThis.startSearch = ()=>{ ricerca = finti['inp-artist'].value+' | '+finti['inp-title'].value; };
+
+const CANZONI = %s;
+const out = {casi:{}, pulizie:{}, artisti:{}};
+for (const chiave in CANZONI) {
+  const c = CANZONI[chiave];
+  allDbSongs = [c]; rcmCanzoneId = c.id; ricerca = null; chiamate.length = 0;
+  finti['inp-artist'].value = ''; finti['inp-title'].value = '';
+  cercaCampionamentiDaScheda();
+  out.casi[chiave] = {artista:finti['inp-artist'].value, titolo:finti['inp-title'].value,
+                      ricerca:ricerca, chiamate:chiamate.slice()};
+}
+const pulizie = %s;
+for (const k in pulizie) { out.pulizie[k] = pulisciPerRicercaCampioni(pulizie[k]); }
+const artisti = %s;
+for (const k in artisti) { out.artisti[k] = artistaPerRicercaCampioni(artisti[k]); }
+JSON.stringify(out);
+""" % (json.dumps(CANZONI_MODALE), json.dumps(PULIZIE), json.dumps(ARTISTI))
+        cls.esito = esegui_js(js)
+
+    def test_senza_decorazioni_ne_estensione(self):
+        attesi = {"video": "Without Me", "explicit": "'Till I Collapse", "hd_audio": "Mosh",
+                  "remaster": "Brano", "file": "onyx_t_1786610656293_j9ju3",
+                  "rimasto": "Mosh (Remix)", "feat": "Forgot About Dre (feat. Eminem)",
+                  "vuoto": "", "spazi": "Doppio spazio"}
+        for chiave, atteso in attesi.items():
+            with self.subTest(caso=chiave):
+                self.assertEqual(self.esito["pulizie"][chiave], atteso)
+
+    def test_un_artista_alla_volta_e_segnaposto_vuoto(self):
+        attesi = {"multi": "50 Cent", "acdc": "AC/DC", "segna": "", "vuoto": "",
+                  "uno": "Eminem", "amp": "Sway & King Tech", "spazi": "Eminem",
+                  # righe vecchie della libreria: il marcatore davanti si toglie e
+                  # la virgola separa, ma i nomi veri con la virgola NON si spezzano
+                  "beat": "eminem", "virgola": "Tyler, The Creator",
+                  "virgola2": "Earth, Wind & Fire", "hed": "(hed) p.e."}
+        for chiave, atteso in attesi.items():
+            with self.subTest(caso=chiave):
+                self.assertEqual(self.esito["artisti"][chiave], atteso)
+
+    def test_la_canzone_completa_fa_partire_la_ricerca(self):
+        caso = self.esito["casi"]["completo"]
+        self.assertEqual(caso["artista"], "50 Cent")
+        self.assertEqual(caso["titolo"], "'Till I Collapse")
+        self.assertEqual(caso["ricerca"], "50 Cent | 'Till I Collapse")
+        # il modale si chiude e si passa al tab della ricerca: lì parte la SUA ricerca
+        self.assertEqual(caso["chiamate"], ["chiuso", "tab:scraper"])
+
+    def test_remix_e_feat_restano(self):
+        # WhoSampled «(Remix)» e «(feat. …)» li usa: non vanno tolti
+        remix = self.esito["casi"]["acdcRemix"]
+        self.assertEqual(remix["artista"], "AC/DC", "AC/DC non è «AC»")
+        self.assertEqual(remix["ricerca"], "AC/DC | Back in Black (Remix)")
+        feat = self.esito["casi"]["conFeat"]
+        self.assertEqual(feat["ricerca"], "Dr. Dre | Forgot About Dre (feat. Eminem)")
+        # riga vera della libreria: «(beat) eminem, redman» → «eminem»
+        beat = self.esito["casi"]["beat"]
+        self.assertEqual(beat["ricerca"], "eminem | off the wall remix")
+
+    def test_senza_artista_o_titolo_non_parte_una_ricerca_a_meta(self):
+        caso = self.esito["casi"]["senzaArtista"]
+        self.assertEqual(caso["artista"], "")
+        self.assertEqual(caso["titolo"], "Senza artista", "quel che c'è resta scritto")
+        self.assertIsNone(caso["ricerca"], "startSearch non si chiama senza artista")
+        self.assertIn("toast:err:Manca artista: completalo e premi CERCA", caso["chiamate"])
+        self.assertIn("focus:inp-artist", caso["chiamate"], "il cursore va dove manca")
+        caso2 = self.esito["casi"]["senzaTitolo"]
+        self.assertIsNone(caso2["ricerca"])
+        self.assertIn("toast:err:Manca titolo: completalo e premi CERCA", caso2["chiamate"])
+        self.assertIn("focus:inp-title", caso2["chiamate"])
 
 
 if __name__ == "__main__":

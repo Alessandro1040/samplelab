@@ -6422,11 +6422,23 @@ function renderConfrontoCampione(){
   const body = document.getElementById('rcm-body');
   if(!body) return;
   if(!rcmRelazioni.length){
+    // La canzone non ha campionamenti salvati: oltre a spiegarlo, si può far
+    // partire la RICERCA di quelli che mancano (artista e titolo di questa
+    // canzone, già scritti in 🔍 Trova Campioni).
+    const s = (allDbSongs||[]).find(x=>x.id===rcmCanzoneId) || {};
+    const artista = artistaPerRicercaCampioni(s.artist);
+    const titolo = pulisciPerRicercaCampioni(s.title || s.local_file || '');
     body.innerHTML = `<div style="text-align:center;color:var(--muted);font-family:'Space Mono',monospace;font-size:12px;padding:28px">
       Nessun campionamento registrato per questa canzone.<br>
       I campionamenti arrivano dal salvataggio delle coppie in 🔍 Trova Campioni
       (tabella <b>sample_relations</b>).<br><br>
-      Stem, remix e cover, analisi audio: 📄 Scheda completa (in alto a destra).
+      <button class="db-stem-btn" style="font-size:11px;padding:8px 14px" onclick="cercaCampionamentiDaScheda()"
+              title="Apre 🔍 Trova Campioni con artista e titolo di questa canzone già scritti e lancia la STESSA ricerca del pulsante CERCA (WhoSampled)">🔍 Cerca i campionamenti su WhoSampled</button>
+      <div style="margin-top:10px;font-size:11px">${
+        (artista&&titolo)
+          ? `si cercherà <b>${esc(artista)}</b> — <b>${esc(titolo)}</b>`
+          : '⚠ questa canzone non ha artista e titolo: scrivili nel tab 🔍 Trova Campioni e premi CERCA'}</div>
+      <br>Stem, remix e cover, analisi audio: 📄 Scheda completa (in alto a destra).
     </div>`;
     return;
   }
@@ -6444,6 +6456,77 @@ function closeConfrontoCampione(){
   if(m) m.classList.remove('visible');
   const body = document.getElementById('rcm-body');
   if(body) body.innerHTML = '';   // gli iframe escono dal DOM: i player si fermano
+}
+
+// ── 🔍 CERCA I CAMPIONAMENTI DI QUESTA CANZONE (dal modale 🎚) ───────────────
+// Dal modale «Confronto campione» di una canzone SENZA campionamenti si va
+// direttamente in 🔍 Trova Campioni coi dati di quella canzone e si lancia LA
+// STESSA ricerca del pulsante CERCA (`startSearch`, che poi chiama /scrape):
+// nessuna logica di ricerca nuova, solo i due campi riempiti.
+// Prima si tolgono le decorazioni che WhoSampled non conosce («(Official
+// Video)», «[Explicit]», «(Lyrics)», «(HD)», «(Remastered 2011)»…) e
+// l'estensione del file: resta il testo buono per cercare. «(Remix)» e
+// «(feat. …)» si tengono: WhoSampled li usa.
+const DECORAZIONI_WS = /\s*[\(\[]\s*(?:official\s+(?:music\s+)?(?:video|audio)|music\s+video|lyrics?(?:\s+video)?|visualizer|audio|video|hd|4k|uhd|explicit|clean|remaster(?:ed)?(?:\s*\d{4})?|official)\s*[\)\]]/gi;
+const ARTISTI_SEGNAPOSTO = ['', 'brano locale', 'sconosciuto', 'unknown', 'artista sconosciuto', 'artista ignoto'];
+// Marcatore di versione scritto PRIMA dell'artista in qualche riga vecchia
+// («(beat) eminem, redman»): si toglie solo se è uno di questi, perché altrove
+// la parentesi fa parte del NOME («(hed) p.e.» è un gruppo vero).
+const MARCATORI_INIZIALI = ['beat', 'instrumental', 'remix', 'acapella', 'a cappella',
+                            'clean', 'dirty', 'explicit', 'prod'];
+// Nomi che la virgola ce l'hanno dentro e che NON si spezzano (stessa lista dello
+// script «ARTISTI: un solo formato» del pannello script personalizzati).
+const NOMI_INTERI_ARTISTA = ['tyler, the creator', 'earth, wind & fire', 'ac/dc',
+                             'kool & the gang', 'simon & garfunkel', 'hall & oates',
+                             'the high & mighty', 'the mamas & the papas',
+                             'sway & king tech', 'royal & the serpent', '(hed) p.e.'];
+
+function pulisciPerRicercaCampioni(testo){
+  let t = String(testo ?? '');
+  t = t.replace(/\.[a-z0-9]{2,5}$/i, ' ');     // un'estensione di file in coda
+  t = t.replace(DECORAZIONI_WS, ' ');
+  t = t.replace(/\s{2,}/g, ' ');
+  // separatori rimasti orfani: in TESTA anche il punto («.Titolo.mp3»), in CODA
+  // no — un punto finale può essere parte del nome («(hed) p.e.»)
+  t = t.replace(/^[\s\-–—_.]+/, '').replace(/[\s\-–—_]+$/, '');
+  return t.trim();
+}
+
+// «50 Cent / Nate Dogg» → «50 Cent», «(beat) eminem, redman» → «eminem»
+// (WhoSampled cerca un artista alla volta). Lo slash è separatore SOLO con gli
+// spazi attorno e la virgola SOLO se il nome non è nella lista dei nomi interi:
+// «AC/DC» e «Tyler, The Creator» restano come sono. I segnaposto («Brano
+// locale») valgono vuoto.
+function artistaPerRicercaCampioni(testo){
+  let t = pulisciPerRicercaCampioni(testo);
+  const m = t.match(/^[\(\[]\s*([^\)\]]{1,14})\s*[\)\]]\s*(.+)$/);
+  if(m && MARCATORI_INIZIALI.includes(m[1].trim().toLowerCase().replace(/\.$/, ''))) t = m[2];
+  if(!NOMI_INTERI_ARTISTA.includes(t.trim().toLowerCase())){
+    t = t.split(/\s+\/\s+/)[0].split(/,\s+/)[0];
+  }
+  const pulito = pulisciPerRicercaCampioni(t);
+  return ARTISTI_SEGNAPOSTO.includes(pulito.toLowerCase()) ? '' : pulito;
+}
+
+function cercaCampionamentiDaScheda(){
+  const s = (allDbSongs||[]).find(x=>x.id===rcmCanzoneId) || {};
+  const artista = artistaPerRicercaCampioni(s.artist);
+  const titolo = pulisciPerRicercaCampioni(s.title || s.local_file || '');
+  closeConfrontoCampione();
+  switchTab('scraper');
+  const inpArtista = document.getElementById('inp-artist');
+  const inpTitolo = document.getElementById('inp-title');
+  if(!inpArtista || !inpTitolo){ toast('Il pannello 🔍 Trova Campioni non è disponibile','err'); return; }
+  inpArtista.value = artista;
+  inpTitolo.value = titolo;
+  if(!artista || !titolo){
+    // manca un pezzo: resta scritto quello che c'è e si dice cosa completare
+    const manca = [!artista?'artista':null, !titolo?'titolo':null].filter(Boolean).join(' e ');
+    toast(`Manca ${manca}: completalo e premi CERCA`,'err');
+    (artista ? inpTitolo : inpArtista).focus();
+    return;
+  }
+  startSearch();
 }
 
 // Il pulsante ⬇ della tabella: una riga senza file locale diventa suonabile.

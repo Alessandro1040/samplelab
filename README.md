@@ -469,6 +469,19 @@ Da tenere presente nelle sessioni di lavoro successive:
   etichette si correggono in blocco **con lo stesso pannello** «✏️ Rinomina in
   massa» del tab Database (voce **🏷 Etichetta stem**), quindi con lo stesso ↩️
   Undo. `DELETE /db/stems/<id>` toglie una sessione e manda i file in `.trash/`.
+- **🔍 Dal modale 🎚 si cercano i campionamenti che mancano (18/09/2026).** Se una
+  canzone non ha righe in `sample_relations`, il modale «Confronto campione» ha il
+  pulsante **🔍 Cerca i campionamenti su WhoSampled** (col testo che dice cosa
+  cercherà): chiude il modale, passa a 🔍 Trova Campioni, scrive artista e titolo di
+  quella canzone nei due campi e lancia **la stessa ricerca del pulsante CERCA**
+  (`startSearch()` → `/scrape`: nessuna logica di ricerca nuova nel modale). I due
+  valori passano prima da `pulisciPerRicercaCampioni` (via estensione, «(Official
+  Video)», «[Explicit]», «(Lyrics)», «(HD)», «(Remastered 2011)»… ma «(Remix)» e
+  «(feat. …)» restano) e da `artistaPerRicercaCampioni` («50 Cent / Nate Dogg» →
+  «50 Cent», «(beat) eminem, redman» → «eminem», mentre «AC/DC», «Tyler, The
+  Creator» e «(hed) p.e.» restano interi). Se manca artista o titolo la ricerca NON
+  parte a metà: quel che c'è resta scritto nei campi e un avviso dice cosa
+  completare.
 - **📄 Scheda = confronto campione (19/09/2026).** Nella tabella del database il
   pulsante apre il modale a due canzoni col trim giallo dell'intervallo salvato in
   `sample_relations`; la pagina `/scheda` (stem, remix, analisi) si raggiunge da
@@ -480,7 +493,12 @@ Da tenere presente nelle sessioni di lavoro successive:
   aggiornato `audio_match_at`/`ws_audio_at` della canzone `song_abf47df2aae9`
   (*21 Questions*): è `test_audio_match.py`, che chiama `/db/songs/<id>/audio_check`
   sull'app viva. Se quel cambio di dati non è voluto, dopo la suite si ripristina il
-  database (`git checkout -- "samplelab (2).db"`).
+  database (`git checkout -- "samplelab (2).db"`). ⚠️ E **se la suite muore a metà
+  senza dire niente** (log troncato, nessun errore, nessun crash report) il colpevole
+  è la **memoria della Mac**: dopo giri di browser headless `top -l 1 | grep PhysMem`
+  può dire *15G usati · 100M liberi · 6G di compressor* e macOS ammazza il processo
+  (18/09/2026: due giri uccisi sempre sullo stesso test, che da solo passava). Si
+  rilancia a memoria libera, non si tocca il codice.
 - **Copertine.** La Verifica (18/09/2026) salva la cover di ogni canzone in
   `covers/` e scrive il **nome del file** in `songs.cover_art_path`; si serve da
   `/cover/<file>`. La cartella **non è versionata** (come `downloads/`: centinaia
@@ -2431,6 +2449,61 @@ Da tenere presente nelle sessioni di lavoro successive:
     nell'anteprima o col pannello 🏷; e le tracce caricate a mano stanno nella
     stessa cartella di quelle di Demucs — se hanno **lo stesso nome file**, l'ultima
     caricata vince (la riga aggiornata è la stessa).
+
+- **🔍 DAL MODALE «CONFRONTO CAMPIONE» SI CERCANO I CAMPIONAMENTI CHE MANCANO
+  (18/09/2026).** Richiesta di Alessandro: «se una canzone non ha campionamenti
+  potresti mettere un pulsante per cercarli? che si collegherebbe a "trova
+  campioni" e farebbe runnare la stessa ricerca che trova lì?».
+  - Il vuoto del modale 🎚 (quello che dice che i campionamenti arrivano dal
+    salvataggio delle coppie in 🔍 Trova Campioni) ora ha il pulsante **🔍 Cerca i
+    campionamenti su WhoSampled** col testo che dice COSA cercherà («si cercerà
+    *50 Cent* — *Window Shopper*») o, se manca un pezzo, cosa completare.
+  - `cercaCampionamentiDaScheda()` **non fa una ricerca sua**: chiude il modale,
+    chiama `switchTab('scraper')`, scrive artista e titolo nei due campi
+    (`#inp-artist`, `#inp-title`) e chiama **`startSearch()`** — la STESSA funzione
+    del pulsante CERCA (`/scrape` + `/status`). Nessun endpoint nuovo, nessuna
+    logica di ricerca duplicata nel modale.
+  - Due funzioni PURE preparano i valori, con le regole già in casa:
+    `pulisciPerRicercaCampioni` (via l'estensione del file, «(Official Video)»,
+    «[Explicit]», «(Lyrics)», «(HD)», «(Remastered 2011)»… ma «(Remix)» e
+    «(feat. …)» restano, che WhoSampled li usa) e `artistaPerRicercaCampioni` (un
+    artista alla volta: «50 Cent / Nate Dogg» → «50 Cent», «(beat) eminem, redman»
+    → «eminem»; restano interi «AC/DC», «Tyler, The Creator», «Sway & King Tech» e
+    «(hed) p.e.» — la lista dei nomi interi è quella dello script «ARTISTI: un solo
+    formato»). Senza artista o senza titolo la ricerca **non parte a metà**: quel
+    che c'è resta scritto nei campi, un avviso dice cosa manca e il cursore va lì.
+  - Verifiche del 18/09/2026: **6 test** nuovi in `test_song_dedup.py`
+    (`TestCercaCampionamentiDalModale` + la guardia di cablaggio) con **DOM finto in
+    JavaScriptCore**: 16 casi di pulizia del testo, 11 di artista, il caso completo
+    («50 Cent / Nate Dogg» + «'Till I Collapse (Official Video) [Explicit].mp3» →
+    campi «50 Cent» e «'Till I Collapse», prima `switchTab` poi `startSearch`), il
+    caso senza artista (nessuna `startSearch`, avviso e cursore sul campo giusto) e
+    le due righe vere della libreria («(beat) eminem, redman», «Tyler, The
+    Creator»). Nel cablaggio si controlla anche che il pulsante CERCA chiami
+    davvero `startSearch()`.
+  - In **Chrome vero** (selenium headless) il percorso completo: tab 🗄️ Database →
+    riga *off the wall remix* → 📄 Scheda → il modale mostra il pulsante (col
+    `title` che spiega) → clic → il modale si chiude, il tab attivo diventa
+    **`tab-scraper`**, i due campi contengono **«eminem»** e **«off the wall
+    remix»** e `startSearch` è stata chiamata (spia al posto della ricerca vera).
+  - La ricerca vera col prefill è stata eseguita davvero: `POST /scrape`
+    *(50 Cent — Window Shopper)* → job `done`, `ws_url`
+    `https://www.whosampled.com/50-Cent/Window-Shopper/`, i campioni trovati (Bob
+    Marley «Burnin' and Lootin'», Pop Smoke «Christopher Walking», Knxwledge, Lily
+    Allen «Nan You're a Window Shopper») e il video principale di YouTube. Nessun
+    salvataggio: è la ricerca, non un salvataggio di coppie.
+  - ⚠️ **Se la suite muore senza dire niente, guardare la memoria.** Le prove di
+    oggi coi browser (selenium + gli headless dello scraper) hanno messo la Mac
+    sotto pressione (`top -l 1 | grep PhysMem` → 15G usati, 100M liberi, 6G di
+    compressor): **due giri di suite sono stati uccisi da macOS a metà**, sempre
+    nello stesso punto e senza nessun errore nel log (è il sistema che ammazza il
+    processo, non un test che fallisce). Rilanciata a memoria libera: `Ran 493
+    tests` · `OK` (il singolo test che sembrava colpevole, da solo, passava già).
+  - Il database è rimasto **identico a `e078a36`**: i verdetti che la suite scrive
+    sul DB vero (`test_audio_match`: *Hit 'Em Up* verificato con 416 hash, *21
+    Questions* ri-controllato) e lo stato del player sono stati **ripristinati** con
+    `git checkout -- "samplelab (2).db"` prima del commit — quindi in questo commit
+    non c'è nessun cambio di dati.
 
 
 
