@@ -480,6 +480,23 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
 .ver-chip.active{border-color:var(--accent);background:var(--accent);color:#080808;font-weight:700}
 .ver-chip:active{transform:scale(.97)}
 
+/* ── 📺 Riquadro YouTube del modale ✏️ Edit (19/09/2026) ─────────────────
+   I dati di un video sono tanti e di lunghezze diverse (descrizioni di migliaia
+   di caratteri, decine di tag): non si buttano in un blocco unico di testo —
+   ognuno ha la sua finestra con dentro il suo scorrimento. */
+.yt-wrap{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.yt-col-sx{flex:0 0 176px;max-width:176px}
+.yt-col-dx{flex:1 1 360px;min-width:250px}
+.yt-thumb{width:176px;height:99px;object-fit:cover;border-radius:8px;border:1px solid var(--border2);background:var(--surface2);display:block}
+.yt-card{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px 10px;margin-bottom:8px}
+.yt-card-tit{display:flex;align-items:center;justify-content:space-between;gap:8px;font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.yt-scroll{max-height:220px;overflow:auto;font-size:11px;line-height:1.6;color:#bbb;white-space:pre-wrap;word-break:break-word}
+.yt-scroll.aperto{max-height:none}
+.yt-mini{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);line-height:1.5}
+.yt-chip{display:inline-block;font-family:'Space Mono',monospace;font-size:10px;padding:2px 7px;margin:0 4px 4px 0;border:1px solid var(--border2);border-radius:12px;color:var(--text3);background:var(--surface2)}
+.yt-btn{font-family:'Space Mono',monospace;font-size:9px;padding:3px 8px;border:1px solid var(--border2);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer}
+.yt-btn:hover{border-color:var(--accent);color:var(--accent)}
+
 </style>
 <!-- I link della tabella (📄 Scheda, 💿 album, i chip artista) si aprono in una
      scheda NUOVA: è questo <base> a dirlo, per tutti i link senza `target` — per
@@ -6337,42 +6354,104 @@ function nbSeek(e){
 // DB EDITOR (schermata Y): tutti gli attributi del database
 // ════════════════════════════════════════════════════════════
 let dbEditSongId=null;
-// I dati che il video YouTube racconta di sé (canale, viste, data, categoria, tag,
-// descrizione) e la miniatura: si GUARDANO e si recuperano da qui, non si scrivono
-// a mano — sono fatti LETTI da YouTube, non dati curati (19/09/2026).
+// I tag del video sono una stringa «a, b, c»: qui diventano una lista pulita
+// (funzione PURA: spazi via, voci vuote fuori). Serve alle pastiglie del riquadro
+// 📺 qui sotto, e la provano i test in JavaScriptCore.
+function tagYoutube(testo){
+  return String(testo==null ? '' : testo)
+    .split(',')
+    .map(t => t.trim())
+    .filter(t => t.length > 0);
+}
+
+// I dati che il video YouTube racconta di sé: dalla richiesta del 19/09/2026 ognuno
+// ha la SUA finestra — «🎬 Sul video» (titolo com'è su YouTube, canale, viste, data,
+// categoria), «🏷 Tag» (a pastiglie, col conto) e «📝 Descrizione» (INTERA, con
+// ⤢ Espandi e 📋 Copia) — con la miniatura a sinistra. Prima era un blocco unico e
+// la descrizione si fermava a 1200 caratteri (`slice`): un muro di testo tagliato.
 function rigaYoutubeHTML(s){
   s = s || {};
   const thumb = coverUrlRiga(s.cover_art_path, s.yt_thumbnail);
-  const ha = !!(s.yt_video_id || s.yt_channel || s.yt_views || s.yt_tags ||
-                s.yt_description || s.yt_upload_date);
-  const bottone = (testo)=>`<button class="db-stem-btn" style="font-size:11px;padding:6px 12px;margin-top:6px" onclick="recuperaYoutube('${s.id}',this)">${testo}</button>`;
-  if(!thumb && !ha){
-    const dove = (s.youtube_url || s.yt_video_id)
+  const tag = tagYoutube(s.yt_tags);
+  const descrizione = String(s.yt_description == null ? '' : s.yt_description);
+  const ha = !!(s.yt_title || s.yt_video_id || s.yt_channel || s.yt_views ||
+                s.yt_tags || descrizione || s.yt_upload_date);
+  const link = s.youtube_url || (s.yt_video_id ? ('https://www.youtube.com/watch?v='+s.yt_video_id) : '');
+  const idVideo = s.yt_video_id || (String(s.youtube_url||'').match(/[?&]v=([\w-]{6,})/)||[])[1] || '';
+  const bottone = (testo)=>`<button class="db-stem-btn" style="font-size:11px;padding:6px 12px;margin-top:6px;width:100%;white-space:normal" onclick="recuperaYoutube('${s.id}',this)">${testo}</button>`;
+  const sinistra = `<div class="yt-col-sx">
+      ${thumb ? `<img class="yt-thumb" src="${escA(thumb)}" alt="" onerror="this.style.visibility='hidden'">`
+              : `<div class="yt-thumb yt-mini" style="display:flex;align-items:center;justify-content:center;text-align:center;padding:6px">nessuna miniatura</div>`}
+      <div class="yt-mini" style="margin-top:5px">${s.cover_art_path ? esc('covers/'+s.cover_art_path) : 'la miniatura non è ancora in covers/'}</div>
+      ${bottone(ha ? '🖼 Rifai dal video' : '🖼 Recupera miniatura e dati dal video')}
+      ${link ? `<a class="yt-btn" style="display:inline-block;margin-top:6px;text-decoration:none" href="${escA(link)}" target="_blank">▶ Apri il video ↗</a>` : ''}
+    </div>`;
+  if(!ha && !thumb){
+    const dove = link
       ? 'La riga ha il link del video: i dati e la miniatura si possono recuperare.'
       : 'La riga non ha nemmeno il link: il video verrà CERCATO per «artista - titolo» (potrebbe essere un video diverso).';
-    return `<div class="dbe-field dbe-full"><span>📺 YouTube</span>
+    return `<div class="dbe-field dbe-full" id="dbe-yt-block"><span>📺 YouTube (letto dal video, non si modifica qui)</span>
       <div style="font-size:11px;color:var(--muted);line-height:1.5">Questa canzone non ha ancora né la miniatura né i dati del video. ${dove}</div>
-      ${bottone('🖼 Recupera miniatura e dati dal video')}</div>`;
+      <div class="yt-wrap" style="margin-top:8px">${sinistra}</div></div>`;
   }
+
   const viste = (s.yt_views!=null && s.yt_views!=='') ? Number(s.yt_views).toLocaleString('it-IT') : '';
-  const pezzi = [];
-  if(s.yt_channel) pezzi.push(`📺 ${esc(s.yt_channel)}`);
-  if(viste) pezzi.push(`👁 ${esc(viste)} viste`);
-  if(s.yt_upload_date) pezzi.push(`📅 caricato il ${esc(s.yt_upload_date)}`);
-  if(s.yt_category) pezzi.push(`🏷 ${esc(s.yt_category)}`);
-  if(s.yt_meta_at) pezzi.push(`🕓 letti il ${esc(s.yt_meta_at)}`);
-  const link = s.youtube_url || (s.yt_video_id ? ('https://www.youtube.com/watch?v='+s.yt_video_id) : '');
-  return `<div class="dbe-field dbe-full"><span>📺 YouTube (letto dal video, non si modifica qui)</span>
-    <div style="display:flex;gap:10px;align-items:flex-start">
-      ${thumb?`<img src="${escA(thumb)}" alt="" style="width:96px;height:54px;object-fit:cover;border-radius:6px;border:1px solid var(--border2)">`:''}
-      <div style="font-size:11px;color:var(--muted);line-height:1.6;min-width:0">
-        ${pezzi.join(' · ')}
-        ${s.yt_tags?`<div style="margin-top:4px;color:#9a9a9a">🏷 tag: ${esc(String(s.yt_tags).slice(0,300))}</div>`:''}
-        ${s.yt_description?`<div style="margin-top:4px;max-height:110px;overflow:auto;white-space:pre-wrap;color:#9a9a9a">${esc(String(s.yt_description).slice(0,1200))}</div>`:''}
-        ${link?`<div style="margin-top:4px"><a href="${escA(link)}" target="_blank" style="color:var(--accent2)">▶ Apri il video su YouTube ↗</a></div>`:''}
-      </div>
-    </div>
-    ${bottone('🖼 Rifai dal video (miniatura e dati)')}</div>`;
+  const dati = [];
+  if(s.yt_channel) dati.push(`📺 <b>${esc(s.yt_channel)}</b>`);
+  if(viste) dati.push(`👁 ${esc(viste)} viste`);
+  if(s.yt_upload_date) dati.push(`📅 caricato il ${esc(s.yt_upload_date)}`);
+  if(s.yt_category) dati.push(`🏷 categoria: ${esc(s.yt_category)}`);
+  if(s.yt_meta_at) dati.push(`🕓 letti il ${esc(s.yt_meta_at)}`);
+  // Il titolo COM'È SU YOUTUBE: è un fatto letto dal video, e può essere diverso dal
+  // titolo della riga (la riga è stata ripulita: «NF Type Beat 2024 "Clown"»).
+  const titoloYt = String(s.yt_title||'').trim();
+  const cardVideo = `<div class="yt-card">
+      <div class="yt-card-tit"><span>🎬 Sul video</span><span class="yt-mini">${idVideo?('id '+esc(idVideo)):''}</span></div>
+      ${titoloYt
+        ? `<div class="yt-scroll" style="max-height:none"><b style="color:var(--text)">${esc(titoloYt)}</b>${(s.title && titoloYt.toLowerCase()!==String(s.title).trim().toLowerCase())?`<div class="yt-mini" style="margin-top:4px">nel database la riga si chiama: ${esc(s.title)}</div>`:''}</div>`
+        : `<div class="yt-mini">il titolo del video non è stato letto: premi 🖼 per leggerlo</div>`}
+      ${dati.length?`<div class="yt-mini" style="margin-top:6px">${dati.join(' · ')}</div>`:''}
+    </div>`;
+  const cardTag = `<div class="yt-card">
+      <div class="yt-card-tit"><span>🏷 Tag</span><span class="yt-mini">${tag.length?(tag.length+' tag'):'nessuno'}</span></div>
+      ${tag.length?`<div class="yt-scroll">${tag.map(t=>`<span class="yt-chip">${esc(t)}</span>`).join('')}</div>`
+                  :`<div class="yt-mini">il video non ha tag</div>`}
+    </div>`;
+  const cardDesc = `<div class="yt-card">
+      <div class="yt-card-tit"><span>📝 Descrizione</span><span>${descrizione?`<button class="yt-btn" onclick="toggleYtDescrizione(this)">⤢ Espandi</button> <button class="yt-btn" onclick="copiaYtTesto(this,'dbe-yt-desc')">📋 Copia</button>`:''}</span></div>
+      ${descrizione
+        ? `<div class="yt-scroll" id="dbe-yt-desc">${esc(descrizione)}</div>
+           <div class="yt-mini" style="margin-top:4px">${descrizione.length} caratteri · ${descrizione.split('\n').length} righe (intera: qui sotto scorre)</div>`
+        : `<div class="yt-mini">il video non ha descrizione</div>`}
+    </div>`;
+  return `<div class="dbe-field dbe-full" id="dbe-yt-block"><span>📺 YouTube (letto dal video, non si modifica qui)</span>
+    <div class="yt-wrap">
+      ${sinistra}
+      <div class="yt-col-dx">${cardVideo}${cardTag}${cardDesc}</div>
+    </div></div>`;
+}
+// ⤢/⤡ la descrizione INTERA: il riquadro si allunga invece di tagliare il testo.
+function toggleYtDescrizione(btn){
+  const box = document.getElementById('dbe-yt-desc');
+  if(!box) return;
+  const aperto = box.classList.toggle('aperto');
+  if(btn) btn.textContent = aperto ? '⤡ Comprimi' : '⤢ Espandi';
+}
+// 📋 Copia il testo di un riquadro (la descrizione del video) negli appunti.
+async function copiaYtTesto(btn, id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const testo = el.innerText;
+  const segna = ()=>{ if(btn){ const t=btn.textContent; btn.textContent='✓ Copiato'; setTimeout(()=>{ btn.textContent=t; },1500); } };
+  try{
+    await navigator.clipboard.writeText(testo);
+    segna();
+  }catch(_){
+    const area=document.createElement('textarea'); area.value=testo;
+    area.style.position='fixed'; area.style.opacity='0'; document.body.appendChild(area);
+    area.select(); try{ document.execCommand('copy'); }catch(__){}
+    area.remove(); segna();
+  }
 }
 function dbEditFormHTML(s){
   const v=(f)=>s[f]!=null && s[f]!=='' ? s[f] : '';
@@ -6697,14 +6776,29 @@ async function recuperaYoutube(id, btn){
       if(res.cercato) pezzi.push('⚠️ video trovato cercando «artista - titolo»: controlla che sia quello giusto');
       toast('✅ '+(pezzi.join(' · ')||'niente da aggiungere'), res.cercato?'info':'ok');
       loadDb();
+      await aggiornaBloccoYoutube(id);   // nel modale ✏️ il riquadro 📺 si rifà coi dati nuovi
     }else{
       toast('✕ '+((res&&res.error)||'recupero non riuscito'),'err');
-      if(btn){ btn.disabled=false; btn.textContent=testo; }
     }
   }catch(e){
     toast('✕ '+e.message,'err');
-    if(btn){ btn.disabled=false; btn.textContent=testo; }
+  }finally{
+    // Il pulsante torna com'era. Dentro il modale ✏️ la riga non si ridisegna da sé:
+    // senza questo restava su «⏳…» per sempre (segnalato da Alessandro il 19/09/2026).
+    if(btn && btn.isConnected){ btn.disabled=false; btn.textContent=testo; }
   }
+}
+
+// Il riquadro 📺 del modale ✏️ si rifà DA SÉ dopo un recupero — e SOLO lui: i campi
+// che si stanno scrivendo a mano nel modale restano come sono.
+async function aggiornaBloccoYoutube(id){
+  if(dbEditSongId !== id) return;
+  const box = document.getElementById('dbe-yt-block');
+  if(!box) return;
+  try{
+    const s = await fetch(`/db/songs/${id}`).then(r=>r.json());
+    if(s && s.id) box.outerHTML = rigaYoutubeHTML(s);
+  }catch(_){}
 }
 
 // ── 🖼 RECUPERO IN BLOCCO (solo righe che hanno già un link/ID YouTube) ──────

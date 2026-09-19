@@ -542,13 +542,14 @@ persi.
 
 ### Cosa fa ora
 
-Ogni voce scaricata passa da `campi_youtube()` e finisce in **14 colonne `yt_*`**
+Ogni voce scaricata passa da `campi_youtube()` e finisce in **15 colonne `yt_*`**
 di `songs` (migrazione automatica in `init_db`, come tutte le altre: le colonne si
 aggiungono da sole a un database che c'è già):
 
 | colonna | cosa contiene |
 |---|---|
 | `yt_video_id` | l'id del video (è l'`[id]` che `DL_OUTTMPL` scrive nel nome) |
+| `yt_title` | il **titolo del video così com'è su YouTube** (19/09/2026): spesso è diverso dal titolo ripulito della riga (`[CINEMATIC] NF Type Beat 2024 ＂Clown”` → `NF Type Beat 2024 "Clown"`) ed è quello che si vedrebbe aprendo il video |
 | `yt_upload_date` | data di **caricamento** su YouTube (`YYYY-MM-DD`) → **dà l'anno** |
 | `yt_release_date` | data di uscita dichiarata dal video, quando c'è |
 | `yt_channel` / `yt_channel_url` | canale (o uploader) che l'ha pubblicato |
@@ -891,12 +892,49 @@ attese). Quelle si fanno a mano, una per volta, guardando il video che il pulsan
 - **Pannello 🖼 Miniatura e dati YouTube** (sotto «✏️ Rinomina in massa»): dice quante
   righe sono da fare e quante restano fuori (senza link), poi parte il blocco col
   progresso (`⏳ 32/156 — Token - Hawk Tuah Freestyle`) e il riepilogo finale.
-- **Modale ✏️ Edit**: un riquadro **📺 YouTube** con canale, viste, data di
-  caricamento, categoria, tag e descrizione (i fatti **letti** dal video: non si
-  modificano a mano) e il pulsante per rifare il recupero.
+- **Modale ✏️ Edit**: un riquadro **📺 YouTube** con i fatti **letti** dal video (si
+  guardano e si recuperano da qui, non si scrivono a mano) e il pulsante per rifare
+  il recupero. Dal 19/09/2026 è fatto a **finestre**: vedi «📺 Il riquadro YouTube a
+  finestre» qui sotto.
 
-**Verifiche (19/09/2026).** File di test nuovo `test_recupera_youtube.py` — **35
-test `OK`**: `fonte_video_riga` (link, id, ricerca — funzione pura), `info_video_riga`
+### 📺 Il riquadro YouTube a finestre — 19/09/2026
+
+Segnalato da Alessandro guardando la scheda del type beat *Clown*: «la descrizione
+compare solo fino a… potresti separare le informazioni e scrivere tutto in un modo
+più chiaro? una finestra per i tag, una per la descrizione…». Aveva trovato **due**
+difetti:
+
+1. **La descrizione era tagliata a 1200 caratteri** (`String(s.yt_description).slice(0,1200)`).
+   Una descrizione di type beat è lunga migliaia di caratteri — quella di *90MIN* di
+   Salmo è **3.082** — e il resto non si vedeva. Ora la descrizione si rende
+   **intera**, dentro una finestra che scorre, col conto (`3.082 caratteri · 96
+   righe`) e i pulsanti **⤢ Espandi** / **📋 Copia**.
+2. **Ogni dato ha la sua finestra** (`rigaYoutubeHTML`, classi CSS `.yt-card` /
+   `.yt-scroll` / `.yt-chip`): la **miniatura** a sinistra (col nome del file in
+   `covers/`, il pulsante 🖼 e `▶ Apri il video`), poi **`🎬 Sul video`** (titolo
+   com'è su YouTube, id, canale, viste, data di caricamento, categoria e quando i
+   dati sono stati letti), **`🏷 Tag`** — ogni tag è una **pastiglia**
+   (`tagYoutube()`, funzione PURA: la stringa `«a, b, c»` diventa una lista di tag
+   puliti) col numero accanto — e **`📝 Descrizione`**. Prima era un blocco unico:
+   i tag si fermavano a 300 caratteri e la descrizione a 1200, in un muro di testo.
+
+E due difetti che si vedevano solo usandolo:
+
+3. **Il pulsante dentro il modale restava su «⏳…» per sempre**: la riga della tabella
+   si ridisegna da sé dopo il recupero, il modale no. Ora il pulsante torna com'era e
+   **solo il riquadro 📺** si rifà da sé (`aggiornaBloccoYoutube`), senza toccare i
+   campi che si stanno scrivendo a mano nel modale.
+4. **Nuovo campo `yt_title`** (15ª colonna `yt_*`, migrazione automatica): il titolo
+   del video **così com'è su YouTube**. Serve a riconoscere a colpo d'occhio a quale
+   video è agganciata la riga, e `righe_da_recuperare` ora considera «incompleta» una
+   riga recuperata prima del 19/09/2026 (che `yt_title` non ce l'ha): rifacendo il
+   blocco la libreria si completa, e niente si calpesta.
+
+**Verifiche (19/09/2026).** File di test nuovo `test_recupera_youtube.py` — **41
+test `OK`** (35 del primo giro + 6 per il riquadro 📺: `tagYoutube` e `coverUrlRiga`
+**eseguite in JavaScriptCore** coi casi veri, `yt_title` in
+`campi_youtube`/`COLUMN_DOCS`/migrazione, le stringhe del riquadro a finestre e la
+guardia che il taglio a 1200 caratteri **non torni**): `fonte_video_riga` (link, id, ricerca — funzione pura), `info_video_riga`
 con un yt-dlp **finto** (con un link la chiamata a YouTube è **una sola** e nessuna
 ricerca, senza link si passa da `ytsearch20:`, un video illeggibile diventa un motivo
 e non un'eccezione, la ricerca senza risultati lo dice), `recupera_dati_video` su un
@@ -907,7 +945,8 @@ la rifà, il link trovato dalla ricerca resta scritto, il video MP4 che parte co
 link** fuori dal blocco, copertina col file sparito da rifare), `avvia_recupero_youtube`
 (2 righe lavorate, progresso e `riepilogo`, secondo avvio respinto) e le rotte vere
 col `test_client` (200/404/502, elenco senza rete, job del blocco fino a `done`).
-Suite completa: **653 → 688 test `OK`** (skipped=1). Quattro test **aggiornati** in
+Suite completa: **653 → 688 → 694 test `OK`** (skipped=1; il secondo salto sono i 6
+test del riquadro 📺). Quattro test **aggiornati** in
 `test_verify_cover.py` (54 `OK`), perché le stringhe che controllavano sono cambiate
 di proposito: `coverThumb` ora ha il terzo parametro (`coverThumb(f, size, yt)`), i
 suoi due punti d'uso passano `yt_thumbnail`, e l'hero di `scheda.html` prova la
@@ -936,6 +975,23 @@ YT**, il pannello del conto («94 righe con link/ID… · 788 righe senza link»
 con il riquadro **📺 YouTube** pieno di dati veri («📺 Prod By Raedius · 👁 1.842
 viste · 📅 caricato il 2021-03-22 · 🏷 People & Blogs», i tag, la descrizione) e il
 pulsante di recupero; **nessun errore JS** (solo il solito 404 di `favicon.ico`).
+
+**Il blocco rifatto per `yt_title` (19/09/2026).** Le righe recuperate prima di oggi non
+avevano il titolo del video: il blocco è stato rifatto (job `4b4ed84f`) su **157 righe**
+— **156 recuperi riusciti**, **0 miniature nuove** (c'erano già tutte: questo giro
+serviva a leggere il titolo) e la solita *Maroon 5 - Animals* non leggibile (restrizione
+d'età). Nel database: **156 righe con `yt_title`** (157 con la miniatura) e la riga di
+Alessandro dice ora `[CINEMATIC] NF Type Beat 2024 "Clown” (Prod. Raedius)` — il titolo
+che si vede aprendo il video. Resta **1 candidata**: proprio *Maroon 5 - Animals*.
+
+**Riquadro 📺 a finestre, in Chrome vero headless** (modale ✏️ di due canzoni vere):
+**3 finestre** (`🎬 Sul video` / `🏷 Tag` / `📝 Descrizione`) più la miniatura a
+sinistra; le **pastiglie** dei tag sono **24** e nel database sono 24 (13 e 13 su
+*Don Medellín*); la descrizione nel DOM è lunga **quanto quella nel database** —
+**3.082 = 3.082** caratteri su *90MIN* (1.119 = 1.119 su *Don Medellín*), la finestra
+scorre, **⤢ Espandi** allarga e **⤡ Comprimi** rimette, c'è **📋 Copia**; il titolo su
+YouTube è mostrato accanto a quello della riga («Salmo - Don Medellín (Videoclip) ft.
+Rose Villain» ↔ «Don Medellín»); **nessun errore JS**.
 
 ⚠️ Nel commit c'è anche il **database**: la modifica dei dati è voluta (le miniature
 in `covers/` e i campi `yt_*` sono il punto della richiesta). Il recupero tocca
@@ -1092,8 +1148,13 @@ Da tenere presente nelle sessioni di lavoro successive:
   «Public Enemy #1» del 18/09). In pagina la miniatura di riserva si vede **senza
   scaricare niente** (`coverUrlRiga` in `index (2).html`, `miniaturaYT` in
   `browse.html`/`scheda.html`); nel modale ✏️ Edit c'è il riquadro **📺 YouTube**
-  (canale, viste, data, categoria, tag, descrizione). ⚠️ La miniatura di YouTube a
-  volte arriva in **`.webp`**: va benissimo, `/cover/<file>` la serve col mime giusto.
+  (canale, viste, data, categoria, tag, descrizione) — dal 19/09/2026 fatto a
+  **finestre** (`.yt-card`: `🎬 Sul video`, `🏷 Tag` a pastiglie, `📝 Descrizione`
+  **intera**, con ⤢ Espandi e 📋 Copia) e con la colonna nuova **`yt_title`** (il
+  titolo del video com'è su YouTube: `righe_da_recuperare` considera «incompleta» una
+  riga senza, così rifacendo il blocco la libreria si completa). ⚠️ La miniatura di
+  YouTube a volte arriva in **`.webp`**: va benissimo, `/cover/<file>` la serve col
+  mime giusto.
 - **Regola di lavoro di ogni sessione.** Dopo **ogni** modifica ai sorgenti:
   riavviare l'app (è l'unica copia: non c'è una copia di lavoro separata dal
   clone), controllare il log di avvio, provare con `curl` le rotte toccate e le

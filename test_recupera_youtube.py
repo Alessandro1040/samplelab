@@ -42,6 +42,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 import types
@@ -55,6 +56,9 @@ BROWSE_PATH = os.path.join(BASE_DIR, "browse.html")
 SCHEDA_PATH = os.path.join(BASE_DIR, "scheda.html")
 README_PATH = os.path.join(BASE_DIR, "README.md")
 SAMPLELAB_URL = os.environ.get("SAMPLELAB_URL", "http://localhost:5070")
+# JavaScriptCore di macOS (`osascript -l JavaScript`): serve a eseguire DAVVERO le
+# funzioni pure della pagina, come fanno gli altri test del sampler.
+HA_OSASCRIPT = shutil.which("osascript") is not None
 
 
 def load_app():
@@ -85,6 +89,36 @@ def http_json(path):
     """Chiama l'app VIVA (sola lettura) e torna il JSON."""
     with urllib.request.urlopen(SAMPLELAB_URL + path, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+def estrai_funzione(src, nome):
+    """Il sorgente di una funzione dichiarata con `function nome(…)` (graffe contate)."""
+    import re
+    m = re.search(r"function\s+" + re.escape(nome) + r"\s*\(", src)
+    if not m:
+        raise AssertionError("funzione %s assente in %s" % (nome, PAGINA_PATH))
+    i = src.index("{", m.end() - 1)
+    liv, j = 0, i
+    while j < len(src):
+        if src[j] == "{":
+            liv += 1
+        elif src[j] == "}":
+            liv -= 1
+            if liv == 0:
+                return src[m.start():j + 1]
+        j += 1
+    raise AssertionError("graffe non bilanciate in %s" % nome)
+
+
+def esegui_js(codice, nome_file="/tmp/test_recupera_youtube.js"):
+    with open(nome_file, "w", encoding="utf-8") as out:
+        out.write(codice + "\n0;\n")
+    r = subprocess.run(["osascript", "-l", "JavaScript", nome_file],
+                       capture_output=True, text=True)
+    righe = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
+    if not righe:
+        raise AssertionError("nessun output da JavaScriptCore: %s" % (r.stderr or "")[:200])
+    return json.loads(righe[-1])
 
 
 # L'info_dict di un video vero, ridotto ai campi che si salvano.
@@ -249,6 +283,92 @@ class TestInfoVideoRiga(unittest.TestCase):
         self.assertIn("né link YouTube né titolo", motivo)
 
 
+class TestTitoloDelVideo(unittest.TestCase):
+    """`yt_title`: il titolo del video COSÌ COM'È su YouTube (19/09/2026).
+
+    Serve a due cose: vedere subito a quale video è agganciata una riga (spesso è
+    diverso dal titolo ripulito della riga) e — domani — modificarlo dall'app.
+    """
+
+    def test_campi_youtube_lo_prende_dal_video(self):
+        campi = APP.campi_youtube(dict(INFO))
+        self.assertEqual(campi["yt_title"], "50 Cent - Window Shopper")
+        self.assertEqual(campi["yt_video_id"], "IX7UWaSoVv0")
+        # Non è un dato curato: la riga continua a usare il SUO titolo (`title`).
+        self.assertNotIn("title", campi)
+
+    def test_colonna_documentata_e_creata_dalla_migrazione(self):
+        self.assertIn(("yt_title", "TEXT"), APP.CAMPI_YOUTUBE)
+        self.assertTrue(APP.COLUMN_DOCS["songs"].get("yt_title", "").strip(),
+                        "yt_title senza descrizione in COLUMN_DOCS (la 📖 Legenda la mostra)")
+        tmp = tempfile.mkdtemp(prefix="recupero_title_prova_")
+        orig = APP.DB_PATH
+        try:
+            APP.DB_PATH = os.path.join(tmp, "samplelab di prova.db")
+            APP.init_db()
+            with APP.get_db() as conn:
+                colonne = [r[1] for r in conn.execute("PRAGMA table_info(songs)")]
+            self.assertIn("yt_title", colonne)
+        finally:
+            APP.DB_PATH = orig
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+@unittest.skipUnless(HA_OSASCRIPT, "JavaScriptCore (osascript) non disponibile")
+class TestFunzioniPagina(unittest.TestCase):
+    """Le funzioni pure della pagina, eseguite DAVVERO in JavaScriptCore."""
+
+    risultati = {}
+
+    @classmethod
+    def setUpClass(cls):
+        src = leggi(PAGINA_PATH)
+        js = "\n".join([
+            estrai_funzione(src, "coverUrl"),
+            estrai_funzione(src, "coverUrlRiga"),
+            estrai_funzione(src, "tagYoutube"),
+        ])
+        js += """
+// I tag del video: una stringa «a, b, c» deve diventare una lista pulita.
+const tagCasi = ['a, b, c', ' uno , due ', '', null, undefined, 'solo', '   ',
+                 'nf type beat 2024, orchestral type beat 2024,,  ,',
+                 'emoji 🎤 tag, secondo'];
+console.log(JSON.stringify({
+  tag: tagCasi.map(t => tagYoutube(t)),
+  copertina: [
+    coverUrlRiga('song_1.jpg', 'https://i.ytimg.com/x.jpg'),
+    coverUrlRiga('', 'https://i.ytimg.com/x.jpg'),
+    coverUrlRiga('', ''),
+    coverUrlRiga(null, null),
+    coverUrlRiga('', 'non-un-url')
+  ]
+}));
+"""
+        cls.risultati = esegui_js(js)
+
+    def test_i_tag_diventano_una_lista(self):
+        tag = self.risultati["tag"]
+        self.assertEqual(tag[0], ["a", "b", "c"])
+        self.assertEqual(tag[1], ["uno", "due"])
+        self.assertEqual(tag[2], [])
+        self.assertEqual(tag[3], [])
+        self.assertEqual(tag[4], [])
+        self.assertEqual(tag[5], ["solo"])
+        self.assertEqual(tag[6], [])
+        self.assertEqual(tag[7], ["nf type beat 2024", "orchestral type beat 2024"])
+        self.assertEqual(tag[8], ["emoji 🎤 tag", "secondo"])
+
+    def test_la_miniatura_ha_il_ripiego_sull_url_del_video(self):
+        # Con il FILE in covers/ vince quello servito da /cover…
+        self.assertEqual(self.risultati["copertina"][0], "/cover/song_1.jpg")
+        # …senza file si usa l'URL della miniatura di YouTube…
+        self.assertEqual(self.risultati["copertina"][1], "https://i.ytimg.com/x.jpg")
+        # …e senza né file né URL non si inventa niente.
+        self.assertEqual(self.risultati["copertina"][2], "")
+        self.assertEqual(self.risultati["copertina"][3], "")
+        self.assertEqual(self.risultati["copertina"][4], "")
+
+
 class BaseRecupero(unittest.TestCase):
     """Database temporaneo + yt-dlp finto + miniatura finta: nessuna rete.
 
@@ -319,6 +439,7 @@ class TestRecuperoRiga(BaseRecupero):
         self.assertFalse(esito["cercato"])
         self.assertEqual(esito["cover"], f"{sid}.jpg")
         r = self.riga(sid)
+        self.assertEqual(r["yt_title"], "50 Cent - Window Shopper")   # com'è su YouTube
         self.assertEqual(r["yt_channel"], "50 Cent")
         self.assertEqual(r["yt_views"], 12345678)
         self.assertEqual(r["yt_upload_date"], "2025-09-15")
@@ -400,7 +521,7 @@ class TestRigheDaRecuperare(BaseRecupero):
         self.crea_riga("song_con_link", youtube_url=self.LINK)
         self.crea_riga("song_completo", youtube_url=self.LINK,
                        cover_art_path="song_completo.jpg",
-                       yt_meta_at="2026-09-19 10:00:00")
+                       yt_title="Il titolo del video", yt_meta_at="2026-09-19 10:00:00")
         with open(os.path.join(APP.COVERS_DIR, "song_completo.jpg"), "wb") as f:
             f.write(b"copertina sua")
         self.crea_riga("song_senza_link")      # artista e titolo, niente link
@@ -418,13 +539,27 @@ class TestRigheDaRecuperare(BaseRecupero):
     def test_una_copertina_col_file_sparito_e_da_rifare(self):
         self.crea_riga("song_file_sparito", youtube_url=self.LINK,
                        cover_art_path="nome-senza-file.jpg",
-                       yt_meta_at="2026-09-19 10:00:00")
+                       yt_title="Il titolo del video", yt_meta_at="2026-09-19 10:00:00")
         righe, _ = APP.righe_da_recuperare()
         per_id = {r["id"]: r["manca"] for r in righe}
         self.assertIn("song_file_sparito", per_id,
                       "se il file non c'è più, la copertina va rifatta")
         self.assertIn("copertina", per_id["song_file_sparito"])
         self.assertNotIn("dati del video", per_id["song_file_sparito"])
+
+    def test_senza_il_titolo_del_video_la_lettura_e_incompleta(self):
+        # Le righe recuperate PRIMA del 19/09/2026 non hanno `yt_title`: rifacendo il
+        # giro il blocco lo riempie (è così che la libreria si è completata).
+        self.crea_riga("song_senza_titolo_video", youtube_url=self.LINK,
+                       cover_art_path="song_senza_titolo_video.jpg",
+                       yt_meta_at="2026-09-19 10:00:00")
+        with open(os.path.join(APP.COVERS_DIR, "song_senza_titolo_video.jpg"), "wb") as f:
+            f.write(b"copertina sua")
+        righe, _ = APP.righe_da_recuperare()
+        per_id = {r["id"]: r["manca"] for r in righe}
+        self.assertIn("song_senza_titolo_video", per_id)
+        self.assertIn("dati del video", per_id["song_senza_titolo_video"])
+        self.assertNotIn("copertina", per_id["song_senza_titolo_video"])
 
 
 class TestAvvioBlocco(BaseRecupero):
@@ -552,10 +687,31 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("miniaturaYT(s); }", browse)
         self.assertIn("miniaturaYT", leggi(SCHEDA_PATH))
 
-    def test_riquadro_youtube_nel_modale_edit(self):
+    def test_riquadro_youtube_a_finestre_nel_modale_edit(self):
         html = leggi(PAGINA_PATH)
         self.assertIn("function rigaYoutubeHTML(", html)
         self.assertIn("${rigaYoutubeHTML(s)}", html)
+        # Un riquadro per tipo di dato (richiesta di Alessandro del 19/09/2026:
+        # «separa le informazioni… una finestra per i tag, una per la descrizione»):
+        # miniatura a sinistra, poi «🎬 Sul video», «🏷 Tag» a pastiglie, «📝 Descrizione».
+        for pezzo in ('id="dbe-yt-block"', 'class="yt-wrap"', 'class="yt-card"',
+                      'class="yt-thumb"', 'class="yt-scroll"', 'class="yt-chip"',
+                      '🎬 Sul video', '🏷 Tag', '📝 Descrizione',
+                      "function tagYoutube(", "function toggleYtDescrizione(",
+                      "function copiaYtTesto(", "function aggiornaBloccoYoutube("):
+            self.assertIn(pezzo, html, "manca nel riquadro 📺: " + pezzo)
+        # La descrizione è INTERA: il taglio a 1200 caratteri che la mozzava a metà
+        # non deve tornare (era il difetto segnalato: «compare solo fino a…»).
+        self.assertNotIn(".slice(0,1200)", html)
+        self.assertIn("${esc(descrizione)}</div>", html)
+        # Il pulsante del modale non resta su «⏳…» per sempre.
+        self.assertIn("if(btn && btn.isConnected)", html)
+
+    def test_il_titolo_del_video_e_nella_riga_e_in_pagina(self):
+        self.assertIn('"yt_title"', leggi(APP_PATH))
+        html = leggi(PAGINA_PATH)
+        self.assertIn("s.yt_title", html)          # il card «🎬 Sul video»
+        self.assertIn("aggiornaBloccoYoutube(id)", html)
 
     def test_le_funzioni_e_le_rotte_nel_backend(self):
         app = leggi(APP_PATH)

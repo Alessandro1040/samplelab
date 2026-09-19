@@ -1046,6 +1046,7 @@ def _year_from_date(value):
 # sole a un database che esiste già) e al filtro di `resolve_or_create_song`.
 CAMPI_YOUTUBE = (
     ("yt_video_id", "TEXT"),        # l'id del video (l'`[id]` nel nome del file)
+    ("yt_title", "TEXT"),           # il titolo del video COSÌ COM'È SU YOUTUBE (19/09/2026)
     ("yt_upload_date", "TEXT"),     # data di CARICAMENTO su YouTube, 'YYYY-MM-DD'
     ("yt_release_date", "TEXT"),    # data di uscita dichiarata dal video (se c'è)
     ("yt_channel", "TEXT"),         # canale (o uploader) che l'ha pubblicato
@@ -1131,7 +1132,8 @@ def campi_youtube(info):
     if uscita:
         campi["yt_release_date"] = uscita
     data_anno = caricamento or uscita
-    for colonna, chiavi in (("yt_channel", ("channel", "uploader")),
+    for colonna, chiavi in (("yt_title", ("title",)),
+                            ("yt_channel", ("channel", "uploader")),
                             ("yt_channel_url", ("channel_url", "uploader_url")),
                             ("yt_description", ("description",)),
                             ("yt_tags", ("tags",)),
@@ -2835,7 +2837,7 @@ def righe_da_recuperare(solo_con_link=True):
     with get_db() as conn:
         righe = rows2list(conn.execute(
             "SELECT id, artist, title, youtube_url, yt_video_id, cover_art_path, "
-            "yt_meta_at FROM songs ORDER BY created_at").fetchall())
+            "yt_meta_at, yt_title FROM songs ORDER BY created_at").fetchall())
     fuori, senza_link = [], 0
     for r in righe:
         query, da_link = fonte_video_riga(r)
@@ -2848,7 +2850,10 @@ def righe_da_recuperare(solo_con_link=True):
         manca = []
         if _cover_mancante(r.get("cover_art_path")):
             manca.append("copertina")
-        if not str(r.get("yt_meta_at") or "").strip():
+        # La lettura è completa solo se c'è `yt_meta_at` E il titolo del video
+        # (`yt_title`, aggiunto il 19/09/2026): le righe recuperate prima non ce
+        # l'hanno, e rifacendo il giro il blocco lo riempie (niente si calpesta).
+        if not str(r.get("yt_meta_at") or "").strip() or not str(r.get("yt_title") or "").strip():
             manca.append("dati del video")
         if manca:
             r["manca"] = manca
@@ -6976,6 +6981,7 @@ COLUMN_DOCS = {"songs": {
     "video_file": "il VIDEO della canzone: nome del file in 'videos/' (MP4 scaricato da YouTube o caricato dal computer); vuoto = la canzone non ha un video",
     "yt_playlist": "la PLAYLIST YouTube da cui è arrivata la canzone (es. 'Remixes Collection Vol. 2'): la ricerca del tab Database cerca anche qui, così le righe di una playlist si ritrovano",
     "yt_video_id": "l'id del video YouTube (è l'`[id]` nel nome del file in downloads/)",
+    "yt_title": "il titolo del video COSÌ COM'È su YouTube (può essere diverso dal titolo della riga: «[CINEMATIC] NF Type Beat…») — è quello che si vedrebbe aprendo il video",
     "yt_upload_date": "data di CARICAMENTO del video su YouTube ('YYYY-MM-DD'; è quella che dà l'anno della riga)",
     "yt_release_date": "data di uscita dichiarata dal video, quando c'è ('YYYY-MM-DD'; non è l'anno del brano: «Who Knew» è caricato nel 2018 ma è del 2000)",
     "yt_channel": "canale che ha pubblicato il video (o l'uploader)",
