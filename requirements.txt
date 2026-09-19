@@ -18,3 +18,12 @@ numpy==2.4.6
 # verificabile". Pesa ~1,5 GB fra dipendenze (ctranslate2, onnxruntime…) e modello
 # (145-480 MB, scaricato la prima volta in `modelli/`, non versionata).
 faster-whisper==1.2.1
+
+# 🔗 Modifica dei video YouTube dall'app (19/09/2026): API ufficiale YouTube Data v3
+# col consenso OAuth. Servono a «🔗 Collega YouTube» e ai pulsanti «✍️ Modifica sul
+# video» (titolo, descrizione, tag). Richiedono un «client OAuth» creato una volta in
+# Google Cloud (vedi il pannello nel tab 🗄️ Database). Senza queste librerie l'app
+# funziona come prima e il pannello dice cosa installare.
+google-api-python-client==2.200.0
+google-auth-oauthlib==1.4.1
+

@@ -2923,6 +2923,336 @@ def avvia_recupero_youtube(limite=0, forzato=False, pausa=1.5):
     return jid, f"recupero avviato su {len(righe)} righe con link/ID"
 
 
+# ── 🔗 COLLEGAMENTO A YOUTUBE: MODIFICARE I VIDEO (19/09/2026) ────────────────
+# Richiesta di Alessandro: «aggiungi la possibilità di connettere a youtube e
+# modificare la descrizione dei video, oppure modificare i tag, o il titolo, ecc…
+# direttamente dall'applicazione». Strada scelta: l'API ufficiale **YouTube Data v3**
+# con OAuth (stabile e documentata), col ripiego sull'automazione del browser se il
+# collegamento non si fa.
+#
+# Cosa serve per collegarsi, una volta sola:
+# 1) un «client OAuth» creato da Alessandro in Google Cloud (ID + secret): i due
+#    valori si incollano nel pannello 🔗 e finiscono in `youtube_client.json`
+#    (NON versionato, permessi 600);
+# 2) il consenso dato nel browser: il token resta in `youtube_token.json` (anche
+#    questo NON versionato) e si rinnova da solo.
+# Se le librerie o il client mancano l'app lo DICE col motivo, invece di provare e
+# fallire con un errore oscuro. La password di Google NON passa da qui: si digita
+# nella pagina di Google, come per qualunque «Accedi con Google».
+YT_CLIENT_PATH = os.path.join(BASE_DIR, "youtube_client.json")
+YT_TOKEN_PATH = os.path.join(BASE_DIR, "youtube_token.json")
+YT_SCOPES = ("https://www.googleapis.com/auth/youtube.force-ssl",)
+YT_CLIENT_AIUTO = ("Ti servono l'ID client e il secret di un «client OAuth» di tipo "
+                   "App desktop: console.cloud.google.com → nuovo progetto → abilita "
+                   "«YouTube Data API v3» → Schermata di consenso (Esterno, con te come "
+                   "utente di test) → Credenziali → Crea credenziali → ID client OAuth → "
+                   "App desktop. Incollali qui e salva.")
+
+
+def yt_librerie():
+    """Le librerie Google ci sono? `(ok, motivo)`: l'app funziona lo stesso senza."""
+    try:
+        import google_auth_oauthlib.flow  # noqa: F401
+        import googleapiclient.discovery  # noqa: F401
+        return True, ""
+    except Exception as e:
+        return False, ("mancano le librerie Google per l'API YouTube (" + str(e)[:60] +
+                       "): python3 -m pip install google-api-python-client google-auth-oauthlib")
+
+
+def yt_leggi_client():
+    """L'ID e il secret del «client OAuth» (dal file locale, `{}` se non c'è)."""
+    try:
+        with open(YT_CLIENT_PATH, encoding="utf-8") as f:
+            d = json.load(f) or {}
+    except (OSError, ValueError):
+        return {}
+    cid = str(d.get("client_id") or "").strip()
+    sec = str(d.get("client_secret") or "").strip()
+    return {"client_id": cid, "client_secret": sec} if cid and sec else {}
+
+
+def yt_salva_client(client_id, client_secret):
+    """Salva ID+secret del client OAuth nel file locale (600, non versionato).
+
+    Ritorna '' se è andata, altrimenti il motivo. Il file NON va in repo: è come
+    `cookies.txt` (dati privati dell'account).
+    """
+    cid, sec = str(client_id or "").strip(), str(client_secret or "").strip()
+    if not cid or not sec:
+        return "servono sia l'ID client sia il secret"
+    try:
+        with open(YT_CLIENT_PATH, "w", encoding="utf-8") as f:
+            json.dump({"client_id": cid, "client_secret": sec}, f, indent=2)
+        os.chmod(YT_CLIENT_PATH, 0o600)
+    except OSError as e:
+        return f"non riesco a salvare il client ({str(e)[:60]})"
+    return ""
+
+
+def yt_credenziali(salva=True):
+    """Le credenziali dell'utente dal token salvato. `(creds|None, motivo)`.
+
+    Il token si rinnova da sé quando è scaduto (YouTube Data v3: il refresh token
+    dura finché non si scollega l'app dal proprio account Google).
+    """
+    ok, motivo = yt_librerie()
+    if not ok:
+        return None, motivo
+    if not yt_leggi_client():
+        return None, ("manca il client OAuth: apri 🔗 Collega YouTube (tab 🗄️ Database) "
+                      "e incolla ID e secret. " + YT_CLIENT_AIUTO)
+    if not os.path.exists(YT_TOKEN_PATH):
+        return None, "YouTube non è collegato: premi 🔗 Collega adesso nel pannello"
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+    except Exception as e:
+        return None, f"librerie Google incomplete ({str(e)[:60]})"
+    try:
+        with open(YT_TOKEN_PATH, encoding="utf-8") as f:
+            info = json.load(f)
+        creds = Credentials.from_authorized_user_info(info, list(YT_SCOPES))
+    except Exception as e:
+        return None, f"token illeggibile ({str(e)[:60]}): rifai il collegamento"
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            if salva:
+                with open(YT_TOKEN_PATH, "w", encoding="utf-8") as f:
+                    f.write(creds.to_json())
+                os.chmod(YT_TOKEN_PATH, 0o600)
+        except Exception as e:
+            return None, f"il token non si rinnova ({str(e)[:80]}): rifai il collegamento"
+    return creds, ""
+
+
+def yt_servizio():
+    """Il client dell'API YouTube v3. `(servizio|None, motivo)`."""
+    creds, motivo = yt_credenziali()
+    if creds is None:
+        return None, motivo
+    try:
+        from googleapiclient.discovery import build
+        return build("youtube", "v3", credentials=creds, cache_discovery=False), ""
+    except Exception as e:
+        return None, f"API YouTube non disponibile ({str(e)[:80]})"
+
+
+def yt_collega():
+    """Apre il browser per il consenso Google e salva il token. `(ok, messaggio)`.
+
+    È BLOCCANTE: aspetta che l'utente autorizzi nel browser — la rotta la chiama
+    dentro un job, così la pagina racconta che è in attesa del consenso.
+    """
+    ok, motivo = yt_librerie()
+    if not ok:
+        return False, motivo
+    client = yt_leggi_client()
+    if not client:
+        return False, "manca il client OAuth: incolla ID e secret e premi «💾 Salva». " + YT_CLIENT_AIUTO
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except Exception as e:
+        return False, f"librerie Google incomplete ({str(e)[:60]})"
+    config = {"installed": {
+        "client_id": client["client_id"], "client_secret": client["client_secret"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "redirect_uris": ["http://localhost"]}}
+    try:
+        flow = InstalledAppFlow.from_client_config(config, list(YT_SCOPES))
+        creds = flow.run_local_server(
+            port=0, open_browser=True, prompt="consent", timeout_seconds=300,
+            authorization_prompt_message=("Autorizza SampleLab nella pagina del browser "
+                                          "che si è aperta: {url}"))
+    except Exception as e:
+        return False, f"collegamento non riuscito ({str(e)[:140]})"
+    try:
+        with open(YT_TOKEN_PATH, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
+        os.chmod(YT_TOKEN_PATH, 0o600)
+    except OSError as e:
+        return False, f"non riesco a salvare il token ({str(e)[:60]})"
+    return True, "collegato a YouTube"
+
+
+def yt_stato(leggi_canale=True):
+    """Come sta il collegamento (lo mostrano il pannello 🔗 e i test dell'app viva)."""
+    librerie, motivo = yt_librerie()
+    client = yt_leggi_client()
+    stato = {"librerie": librerie, "client": bool(client),
+             "client_id": (client.get("client_id") or "")[:24],
+             "token": os.path.exists(YT_TOKEN_PATH), "collegato": False,
+             "canale": "", "aiuto": YT_CLIENT_AIUTO, "motivo": motivo}
+    if not librerie or not client:
+        if librerie:
+            stato["motivo"] = "client OAuth non configurato"
+        return stato
+    if not stato["token"]:
+        stato["motivo"] = "client salvato: premi «🔗 Collega adesso» per dare il consenso nel browser"
+        return stato
+    if not leggi_canale:
+        stato["collegato"] = True
+        stato["motivo"] = "token salvato"
+        return stato
+    yt, motivo_yt = yt_servizio()
+    if yt is None:
+        stato["motivo"] = motivo_yt
+        return stato
+    try:
+        r = yt.channels().list(part="snippet", mine=True).execute()
+        sn = ((r.get("items") or [{}])[0]).get("snippet") or {}
+        stato["collegato"] = True
+        stato["canale"] = sn.get("title", "")
+        stato["motivo"] = f"collegato al canale «{stato['canale']}»"
+    except Exception as e:
+        stato["motivo"] = f"il token non funziona più ({str(e)[:110]}): rifai il collegamento"
+    return stato
+
+
+def tag_da_testo(testo):
+    """«a, b, c» → `['a', 'b', 'c']` (stessa regola di `tagYoutube` in pagina). PURA."""
+    return [t.strip() for t in str(testo or "").split(",") if t.strip()]
+
+
+def testo_da_tag(tag):
+    """`['a', 'b']` → «a, b». PURA."""
+    return ", ".join(str(t).strip() for t in (tag or []) if str(t).strip())
+
+
+def yt_id_video_riga(riga):
+    """L'id del video di una riga: dal campo `yt_video_id` o dal link. PURA.
+
+    Il link può essere `youtube.com/watch?v=…` oppure `youtu.be/…` (le stesse due
+    forme che riconosce `is_youtube_url`).
+    """
+    vid = str((riga or {}).get("yt_video_id") or "").strip()
+    if vid:
+        return vid
+    link = str((riga or {}).get("youtube_url") or "")
+    m = (re.search(r"[?&]v=([A-Za-z0-9_-]{6,})", link)
+         or re.search(r"youtu\.be/([A-Za-z0-9_-]{6,})", link))
+    return m.group(1) if m else ""
+
+
+def snippet_da_modificare(attuale, titolo=None, descrizione=None, tag=None):
+    """Il `snippet` da mandare a `videos.update`: i campi che NON si toccano restano.
+
+    Funzione PURA. L'API **sostituisce** il blocco `snippet` con quello che riceve,
+    quindi si riportano indietro categoria e lingue dichiarate del video: senza,
+    YouTube le azzererebbe. I campi di sola lettura (`channelId`, `thumbnails`,
+    `publishedAt`…) NON si mandano, l'API li rifiuterebbe.
+    """
+    attuale = attuale or {}
+    nuovo = {}
+    for k in ("categoryId", "defaultLanguage", "defaultAudioLanguage"):
+        v = str(attuale.get(k) or "").strip()
+        if v:
+            nuovo[k] = v
+    if titolo is not None:
+        nuovo["title"] = str(titolo).strip()
+    elif attuale.get("title"):
+        nuovo["title"] = str(attuale["title"]).strip()
+    if descrizione is not None:
+        nuovo["description"] = str(descrizione)
+    elif attuale.get("description") is not None:
+        # ⚠️ SENZA questo ramo, cambiando SOLO i tag la descrizione non si
+        # rimanderebbe indietro e l'API la CANCELLEREBBE (lo snippet si sostituisce
+        # in blocco): trovato dai test del 19/09/2026, con un video che ha una
+        # descrizione lunga sarebbe stato un danno serio.
+        nuovo["description"] = str(attuale.get("description") or "")
+    if tag is not None:
+        nuovo["tags"] = (tag_da_testo(tag) if isinstance(tag, str)
+                         else [str(t).strip() for t in (tag or []) if str(t).strip()])
+    elif attuale.get("tags"):
+        nuovo["tags"] = [str(t).strip() for t in attuale["tags"] if str(t).strip()]
+    return nuovo
+
+
+def yt_video_attuale(song_id):
+    """I dati del video COSÌ SONO SU YOUTUBE: `{ok, video_id, snippet, error}`.
+
+    La pagina li mette nei campi da modificare, così si vede COSA cambia prima di
+    salvare (`prima`/`dopo` nel resoconto).
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return {"ok": False, "error": "riga non trovata"}
+    vid = yt_id_video_riga(s)
+    if not vid:
+        return {"ok": False, "error": ("questa riga non ha né l'id del video né un link "
+                                       "YouTube: aggancialo con ✏️ → URL YouTube o col "
+                                       "pulsante 🖼 YT")}
+    yt, motivo = yt_servizio()
+    if yt is None:
+        return {"ok": False, "error": motivo, "video_id": vid}
+    try:
+        r = yt.videos().list(part="snippet", id=vid).execute()
+    except Exception as e:
+        return {"ok": False, "error": f"YouTube non ha risposto ({str(e)[:140]})", "video_id": vid}
+    items = r.get("items") or []
+    if not items:
+        return {"ok": False, "video_id": vid,
+                "error": f"il video {vid} non è visibile col canale collegato"}
+    sn = items[0].get("snippet") or {}
+    return {"ok": True, "video_id": vid, "snippet": {
+        "title": sn.get("title", ""), "description": sn.get("description", ""),
+        "tags": [str(t) for t in (sn.get("tags") or [])],
+        "categoryId": sn.get("categoryId", ""), "channelTitle": sn.get("channelTitle", ""),
+        "publishedAt": sn.get("publishedAt", ""),
+        "defaultLanguage": sn.get("defaultLanguage", ""),
+        "defaultAudioLanguage": sn.get("defaultAudioLanguage", "")}}
+
+
+def yt_modifica_video(song_id, titolo=None, descrizione=None, tag=None):
+    """Scrive titolo, descrizione e/o tag SUL VIDEO YouTube (API ufficiale).
+
+    Ritorna `{ok, video_id, prima, dopo, modifiche, messaggio}`: `prima` è com'era su
+    YouTube, `dopo` com'è diventato, `modifiche` l'elenco dei campi toccati (la pagina
+    lo mostra nel messaggio di conferma). Dopo il salvataggio la riga si riallinea a
+    quello che c'è DAVVERO sul video (`yt_title`, `yt_description`, `yt_tags`): così il
+    riquadro 📺 e il database non raccontano una storia vecchia.
+    """
+    lettura = yt_video_attuale(song_id)
+    if not lettura.get("ok"):
+        return lettura
+    vid, attuale = lettura["video_id"], lettura["snippet"]
+    nuovo = snippet_da_modificare(attuale, titolo=titolo, descrizione=descrizione, tag=tag)
+    if not nuovo.get("title"):
+        return {"ok": False, "video_id": vid,
+                "error": "il titolo non può restare vuoto (YouTube lo rifiuterebbe)"}
+    modifiche = []
+    if titolo is not None and str(titolo).strip() != str(attuale.get("title", "")).strip():
+        modifiche.append("titolo")
+    if descrizione is not None and str(descrizione) != str(attuale.get("description", "")):
+        modifiche.append("descrizione")
+    tag_attuali = [str(t).strip() for t in (attuale.get("tags") or [])]
+    if tag is not None and (nuovo.get("tags") or []) != tag_attuali:
+        modifiche.append("tag")
+    if not modifiche:
+        return {"ok": True, "video_id": vid, "prima": attuale, "dopo": attuale,
+                "modifiche": [], "messaggio": "niente da cambiare: sul video è già così"}
+    yt, motivo = yt_servizio()
+    if yt is None:
+        return {"ok": False, "error": motivo, "video_id": vid}
+    try:
+        r = yt.videos().update(part="snippet", body={"id": vid, "snippet": nuovo}).execute()
+    except Exception as e:
+        return {"ok": False, "video_id": vid,
+                "error": f"YouTube ha rifiutato la modifica ({str(e)[:180]})"}
+    dopo = r.get("snippet") or {}
+    with get_db() as conn:
+        conn.execute("UPDATE songs SET yt_title=?, yt_description=?, yt_tags=?, "
+                     "updated_at=datetime('now') WHERE id=?",
+                     (dopo.get("title", ""), dopo.get("description", ""),
+                      testo_da_tag(dopo.get("tags") or []), song_id))
+    print(f"[db {song_id}] video YouTube {vid} modificato: {', '.join(modifiche)}")
+    return {"ok": True, "video_id": vid, "prima": attuale, "dopo": dopo,
+            "modifiche": modifiche}
+
+
 def do_download_playlist(job_id, url, fmt="mp3", video=False):
     """Scarica TUTTA la playlist. Con `video=True` (18/09/2026) scarica l'MP4 del
     video, lo archivia in `videos/` e ne ricava l'mp3 da ascoltare in libreria:
@@ -4781,6 +5111,103 @@ def db_recupera_youtube_avvia():
     job, motivo = avvia_recupero_youtube(limite=dati.get("limite") or 0,
                                          forzato=bool(dati.get("forzato")))
     return jsonify({"avviato": bool(job), "job_id": job, "motivo": motivo})
+
+
+# ── 🔗 YOUTUBE: COLLEGAMENTO E MODIFICA DEI VIDEO (19/09/2026) ────────────────
+# Il pannello 🔗 del tab 🗄️ Database usa `/youtube/stato` (come sta il collegamento),
+# `/youtube/client` (ID+secret del client OAuth), `/youtube/collega` (il consenso nel
+# browser, dentro un job) e `/youtube/scollega`. La modifica di un video sta in
+# `/db/songs/<id>/youtube_video` (GET = com'è su YouTube, POST = scrivi).
+@app.route("/youtube/stato", methods=["GET"])
+def youtube_stato():
+    """Come sta il collegamento a YouTube (il pannello 🔗 lo mostra)."""
+    return jsonify(yt_stato())
+
+
+@app.route("/youtube/client", methods=["POST"])
+def youtube_client():
+    """Salva l'ID e il secret del «client OAuth» creato in Google Cloud (file locale)."""
+    dati = request.json or {}
+    errore = yt_salva_client(dati.get("client_id"), dati.get("client_secret"))
+    if errore:
+        return jsonify({"ok": False, "error": errore}), 400
+    print("[youtube] client OAuth salvato in youtube_client.json")
+    return jsonify({"ok": True, "stato": yt_stato(leggi_canale=False)})
+
+
+@app.route("/youtube/collega", methods=["POST"])
+def youtube_collega():
+    """Collega YouTube: apre il browser per il consenso Google.
+
+    È lenta a rispondere di proposito: il lavoro va in un job (`/status/<job_id>`),
+    così la pagina può dire «⏳ in attesa che tu autorizzi nel browser» invece di
+    restare appesa. Il token si salva in `youtube_token.json` (non versionato).
+    """
+    librerie, motivo = yt_librerie()
+    if not librerie:
+        return jsonify({"avviato": False, "motivo": motivo}), 400
+    if not yt_leggi_client():
+        return jsonify({"avviato": False,
+                        "motivo": "manca il client OAuth: incolla ID e secret e premi «💾 Salva». "
+                                  + YT_CLIENT_AIUTO}), 400
+    jid = str(uuid.uuid4())[:8]
+    jobs[jid] = {"status": "working", "progress": {"percent": 0, "speed": "", "eta": ""},
+                 "files": [], "filename": "", "yt_title": "", "error": "",
+                 "risultati": [], "brano": "in attesa che tu autorizzi SampleLab nel browser"}
+
+    def run():
+        try:
+            ok, messaggio = yt_collega()
+            if ok:
+                stato = yt_stato()
+                jobs[jid]["status"] = "done"
+                jobs[jid]["riepilogo"] = stato.get("motivo") or "collegato a YouTube"
+                jobs[jid]["brano"] = ""
+            else:
+                jobs[jid]["status"] = "error"
+                jobs[jid]["error"] = messaggio
+        except Exception as e:
+            jobs[jid]["status"] = "error"
+            jobs[jid]["error"] = str(e)[:200]
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"avviato": True, "job_id": jid,
+                    "motivo": "consenti l'accesso nella finestra del browser che si è aperta"})
+
+
+@app.route("/youtube/scollega", methods=["POST"])
+def youtube_scollega():
+    """Toglie il token salvato (il client resta: ci si può ricollegare)."""
+    try:
+        os.remove(YT_TOKEN_PATH)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"non riesco a togliere il token ({str(e)[:80]})"}), 500
+    print("[youtube] token rimosso: YouTube scollegato")
+    return jsonify({"ok": True, "stato": yt_stato(leggi_canale=False)})
+
+
+@app.route("/db/songs/<song_id>/youtube_video", methods=["GET"])
+def db_song_youtube_video(song_id):
+    """I dati del video COSÌ SONO SU YOUTUBE (per i campi «✍️ Modifica sul video»)."""
+    res = yt_video_attuale(song_id)
+    return jsonify(res), (200 if res.get("ok") else 502)
+
+
+@app.route("/db/songs/<song_id>/youtube_video", methods=["POST"])
+def db_song_youtube_video_salva(song_id):
+    """Scrive SUL VIDEO YouTube i campi passati: `title`, `description`, `tags`.
+
+    I campi che non si mandano non si toccano (il resto dello `snippet` si riporta
+    indietro com'è: vedi `snippet_da_modificare`). La riga si riallinea da sé.
+    """
+    dati = request.json or {}
+    if not any(k in dati for k in ("title", "description", "tags")):
+        return jsonify({"ok": False, "error": "niente da modificare: servono title, description o tags"}), 400
+    res = yt_modifica_video(song_id, titolo=dati.get("title"),
+                            descrizione=dati.get("description"), tag=dati.get("tags"))
+    return jsonify(res), (200 if res.get("ok") else 502)
 
 
 @app.route("/covers")

@@ -30,6 +30,13 @@ __pycache__/
 # (anti-403, senza dati di account). Non caricare mai il file completo.
 cookies.txt
 
+# ── 🔗 Credenziali YouTube (modifica dei video, 19/09/2026) ──────────────
+# `youtube_client.json` = ID+secret del client OAuth, `youtube_token.json` = il
+# consenso dato da Alessandro: sono dati SUOI, come cookies.txt. Restano solo sul
+# Mac (permessi 600) e non entrano mai nella repo.
+youtube_client.json
+youtube_token.json
+
 # ── MIDI Studio: file generati e log restano solo in locale ──────────────
 midi_studio/files/
 midi_studio/logs/

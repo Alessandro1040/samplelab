@@ -166,6 +166,18 @@ con `(2)` nella cartella locale:
   tocca), le rotte su un database temporaneo, il blocco col progresso nel job e il
   cablaggio in pagina:
   `python3 -m unittest -v test_recupera_youtube`
+- `test_youtube_edit.py` — test del **collegamento a YouTube** e della **modifica dei
+  video** dall'app (`youtube_client.json` + `youtube_token.json`, non versionati): le
+  funzioni pure dei tag e dello `snippet` da rimandare indietro (la descrizione che non
+  si deve perdere cambiando solo i tag!), la lettura e il salvataggio con un'**API
+  finta** (nessuna rete, nessun token vero), i tre passaggi dello stato del
+  collegamento, le rotte (200/400/502) e il cablaggio:
+  `python3 -m unittest -v test_youtube_edit`
+- `test_errori_rete.py` — test dei **messaggi d'errore di rete** detti in chiaro
+  (`messaggioReteOnyx` nel player e `messaggioRete` nella pagina, eseguiti in
+  JavaScriptCore: «Failed to fetch» diventa «il server non risponde… ricarica la
+  pagina (⌘R)»), col cablaggio che li fa arrivare a schermo:
+  `python3 -m unittest -v test_errori_rete`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -999,7 +1011,121 @@ in `covers/` e i campi `yt_*` sono il punto della richiesta). Il recupero tocca
 righe che non avevano né link né id: titolo, artista, album, BPM e testi non si
 toccano.
 
-## Un solo audio per volta nella Verifica — e il player dell'app da qui si zittisce — 18/09/2026
+## 🔗 Modificare i video su YouTube da SampleLab — 19/09/2026
+
+Richiesta di Alessandro: «aggiungi la possibilità di connettere a youtube e modificare
+la descrizione dei video, oppure modificare i tag, o il titolo, ecc… direttamente
+dall'applicazione, decidi tu come implementarlo questo, magari l'app può chiedere email
+e password del canale youtube all'utente oppure può chiedere altre cose però se riesci
+sarebbe veramente tanta roba».
+
+**Strada scelta: l'API ufficiale YouTube Data v3 con OAuth** (la più stabile e
+documentata). Due cose da dire subito, perché contano più del codice:
+
+- **Email e password del canale NO.** Google blocca gli accessi automatici con
+  password («Questo browser o app potrebbe non essere sicuro») e chiedere le
+  credenziali a un'app locale è il modo peggiore di custodirle. Il consenso si dà
+  **nella pagina di Google** (`accounts.google.com`), come per qualunque «Accedi con
+  Google»: SampleLab riceve solo un **token** con il permesso di gestire i video, e la
+  password non passa mai da qui.
+- **Serve un «client OAuth» creato una volta** in Google Cloud (ID + secret): è la
+  chiave che autorizza *questa* app a chiedere il permesso. Il pannello 🔗 ha i cinque
+  passi con i link diretti (`console.cloud.google.com`): nuovo progetto → abilita
+  **YouTube Data API v3** → schermata di consenso **Esterno** con te fra gli **utenti
+  di test** → credenziali → **ID client OAuth** di tipo **App desktop** → incolla ID e
+  secret nel pannello. ~2 minuti, una volta sola.
+
+### I due file privati (come `cookies.txt`)
+
+| file | cosa contiene | in repo? |
+|---|---|---|
+| `youtube_client.json` | ID client + secret del client OAuth | **no** (in `.gitignore`, permessi 600) |
+| `youtube_token.json` | il consenso dato da Alessandro (token + refresh token) | **no** (in `.gitignore`, permessi 600) |
+
+Dalla riga di comando, se serve: `POST /youtube/client` salva il client,
+`POST /youtube/collega` apre il browser per il consenso (dentro un job: la pagina dice
+«⏳ in attesa che tu autorizzi nel browser»), `POST /youtube/scollega` butta il token
+(il client resta, ci si ricollega). `GET /youtube/stato` racconta in quale dei
+passaggi siamo: *mancano le librerie* → *client non configurato* → *token salvato* →
+*collegato al canale «…»*.
+
+⚠️ **Quota dell'API**: leggere un video costa **1** punto, **salvarlo 50** (10.000 al
+giorno per progetto ≈ **200 salvataggi**). Se la quota finisce, l'API risponde con
+l'errore e l'app lo mostra: non c'è niente di "misterioso" che si rompe in silenzio.
+
+### Come si modifica un video, in pagina
+
+Nel modale ✏️ Edit, il riquadro 📺 ha una finestra in più: **✍️ Modifica sul video**.
+
+- **📥 Leggi da YouTube** riempie i tre campi (titolo, tag, descrizione) con quello che
+  c'è **ora** sul video: è la chiamata `videos.list`, e sotto i campi scrive il conto
+  («letto dal video …: titolo 46 caratteri · 24 tag · descrizione 3.082 caratteri»).
+- Si corregge ciò che serve e si preme **💾 Salva sul video**: la conferma mostra cosa
+  si sta per scrivere (titolo, numero di tag, caratteri della descrizione) e il
+  risultato dice quali campi sono cambiati davvero (`modifiche: titolo, descrizione`).
+  **Se non hai cambiato niente, l'API non si chiama nemmeno**: risponde «niente da
+  cambiare: sul video è già così».
+- **Quello che non tocchi non cambia.** L'API *sostituisce* in blocco il blocco
+  `snippet`, quindi il resto si riporta indietro com'è (`snippet_da_modificare`,
+  funzione PURA): categoria (`categoryId`) e lingue dichiarate comprese. I campi di
+  sola lettura (`channelTitle`, `publishedAt`, `thumbnails`…) **non** si mandano,
+  l'API li rifiuterebbe. Il titolo vuoto si ferma **prima** di chiamare YouTube.
+- **Se YouTube rifiuta** (permessi, quota, video non tuo) il messaggio dice cosa ha
+  risposto e **la riga del database non si tocca**.
+- Dopo un salvataggio riuscito la riga si **riallinea a quello che c'è davvero sul
+  video** (`yt_title`, `yt_description`, `yt_tags`): il riquadro 📺 e il database non
+  raccontano una storia vecchia.
+
+Rotte: `GET /db/songs/<id>/youtube_video` (com'è sul video) e
+`POST /db/songs/<id>/youtube_video` con `{"title":…, "description":…, "tags":…}`
+(i campi assenti non si toccano; `{"title": ""}` si rifiuta; 400 se non c'è nessun
+campo, 502 se la lettura o la modifica non riesce, col motivo dentro).
+
+⚠️ **Il ripiego (strada B) non è ancora scritto.** S'era deciso: si prova l'API e, se
+il client OAuth non c'è o non funziona, si passa all'**automazione del browser** (una
+finestra Chrome vera dove il login lo fai tu, e le modifiche fatte dalle pagine di
+YouTube Studio). Serve solo se la strada A si blocca.
+
+**Verifiche (19/09/2026).** File nuovo `test_youtube_edit.py` — **35 test `OK`**: le
+funzioni pure (`tag_da_testo`/`testo_da_tag`, `yt_id_video_riga` — anche `youtu.be/…` —,
+`snippet_da_modificare`), la lettura e la modifica con un'**API FINTA** (nessuna rete:
+solo i campi cambiati finiscono nel `body`, i campi di sola lettura non si mandano,
+«niente da cambiare» **non** chiama l'API — misurato contando le chiamate finte —, un
+titolo vuoto si ferma prima, un rifiuto di YouTube non tocca la riga, e dopo un
+salvataggio la riga si riallinea a quello che c'è sul video), i **tre passaggi dello
+stato** (client mancante → client salvato → collegato al canale), le rotte col
+`test_client` (200/400/502) e il cablaggio (pannello, finestra ✍️, i due file privati
+in `.gitignore`, le librerie nei `requirements.txt`, `timeout_seconds=300` perché il
+consenso non resti appeso all'infinito). Suite completa **694 → 729 `OK`** (skipped=1).
+
+⚠️ **Il bug che i test hanno trovato subito**: cambiando **solo i tag**, la descrizione
+non veniva rimandata indietro e `videos.update` l'avrebbe **cancellata** (lo `snippet`
+si sostituisce in blocco). Su un video con una descrizione lunga sarebbe stato un danno
+serio. Ora c'è il ramo che la riporta com'è, con un test dedicato
+(`test_la_descrizione_non_si_perde_cambiando_solo_i_tag`).
+
+**Verifiche sull'app viva (19/09/2026).** App riavviata (log pulito, migrazione ok).
+`/youtube/stato` → `{"librerie": true, "client": false, "collegato": false,
+"motivo": "client OAuth non configurato"}`; `POST /youtube/collega` senza client →
+**400** con l'aiuto dentro (e **non** apre nessun browser); `POST /youtube/client` con
+valori **finti** → 200, file scritto con permessi **600** e stato che passa a «client
+salvato: premi 🔗 Collega adesso», poi il file finto **rimosso** (l'ambiente resta
+pulito, com'era); `GET /db/songs/<id>/youtube_video` → **502** con «manca il client
+OAuth: …» e l'id del video giusto; `POST …/youtube_video` senza campi → **400**. In
+**Chrome vero headless**: il pannello 🔗 dice «librerie Google ✓ · client OAuth da
+configurare · non collegato — client OAuth non configurato», ci sono i **cinque link**
+ai passi di Google Cloud e i campi ID/secret; nel modale ✏️ il riquadro 📺 ha
+**quattro** finestre (`🎬 Sul video` / `🏷 Tag` / `📝 Descrizione` / `✍️ Modifica sul
+video`) coi tre campi e i due pulsanti, e premendo **📥 Leggi da YouTube** senza
+collegamento esce **il motivo per esteso**; nessun errore JS (l'unico "errore" nel log
+è il 502 di quella richiesta, cioè il messaggio onesto che arriva all'utente).
+
+⚠️ **Cosa NON ho potuto verificare io**: il consenso vero e un salvataggio vero su un
+video. Servono il client OAuth di Alessandro e il suo account: è l'unico pezzo che deve
+provare lui (i cinque passi sono nel pannello). Tutto il resto — lettura, fusione dei
+campi, errori, stato, rotte, pagina — è coperto dai test e dalle prove qui sopra.
+
+
 
 Segnalato da Alessandro aprendo la scheda di *Control*: «l'audio principale può
 essere messo in background senza possibilità di toglierlo e questo è il primo
@@ -1118,7 +1244,71 @@ riempire dai metadati YouTube che sono già nel database (53 dei 58 hanno
 `yt_channel` e `yt_playlist`): sarebbe un raggruppamento per canale/produttore,
 non un album vero, quindi è una scelta da fare a mano e non l'ho fatta.
 
-## Note operative e stato corrente (11/09/2026, aggiornate al 19/09/2026)
+## ❌ «Failed to fetch»: cosa era e cosa dice ora l'app — 19/09/2026
+
+Segnalato da Alessandro con una riga della libreria: «❌ Failed to fetch
+onyx_t_1786610656293_ads8r.COM] 3ree6ix5ive».
+
+**Il file era a posto.** Verificato sul database vero: quella riga ha il file in
+`downloads/` (6.812.365 byte, inizia con `ID3`), e il server lo serve:
+`GET /stream/onyx_t_1786610656293_ads8r.COM%5D%203ree6ix5ive` → **HTTP 200 ·
+6.812.365 byte · `audio/mpeg`**. Nessun dato perso, nessun file mancante.
+
+**Allora era un problema di RETE, non di dato.** «Failed to fetch» è il messaggio
+grezzo che il browser dà a `fetch()` quando la richiesta **non arriva proprio al
+server** (connessione rifiutata, riavvio dell'app, rete caduta). E la causa concreta
+di oggi è nota: in questa sessione l'app è stata **riavviata molte volte** (ogni
+modifica al backend), e una richiesta in corso in quel momento fallisce esattamente
+così — anche la riproduzione dell'`audio` (che è quello che il player usa leggendo il
+file dall'URL `/stream/…`).
+
+Il problema vero però era **il messaggio**: «Failed to fetch» non dice a chi legge cosa
+è successo né cosa fare. Ora l'app lo traduce — nei DUE lati, con le stesse parole:
+
+- **player** (`onyx_whosampled.html`): `messaggioReteOnyx()` (PURA) trasforma i testi
+  del browser (`Failed to fetch`, `NetworkError…`, `Load failed`, `Network request
+  failed`, `fetch failed`) in *«il server non risponde: se l'app è stata riavviata,
+  ricarica la pagina (⌘R) e riprova»*. L'avviso parte con `avvisaOnyx()`, che lo manda
+  alla pagina principale (`postMessage` `playerError`) con **un messaggio ogni 3
+  secondi** (l'errore arriva sia dall'`audio` sia dalla `fetch`: non si ripete in
+  raffica);
+- **pagina principale** (`index (2).html`): il nuovo ramo `playerError` del listener
+  dei messaggi lo mostra **dove l'utente ha cliccato** (`toast('🎧 ' + testo, 'err')`),
+  e `messaggioRete()` (PURA, con il nome del brano dentro) fa la stessa traduzione per
+  le sue richieste — per esempio l'**onda** che non si carica: prima spariva in
+  silenzio, ora lo dice una volta per player.
+
+Tre casi che prima erano muti (o quasi) e ora parlano:
+
+1. **▶ su una riga del database** con l'app giù: `playTrack` faceva solo
+   `console.error`; ora c'è un ascoltatore su `error` dell'`<audio>` che dice *«non
+   riesco a leggere l'audio dal server — se l'app è stata riavviata, ricarica la
+   pagina (⌘R)»*, col nome del brano;
+2. **brano del database importato nel player** (`importDbTrackToOnyx`): la `fetch` era
+   **nuda** (nessun `try/catch`, nessun controllo dell'URL). Ora: se manca l'URL lo
+   dice subito (*«questa canzone non ha un file locale da suonare: scaricalo con
+   ⬇ Scarica»*), se la `fetch` fallisce riporta il motivo tradotto, e se il file non è
+   raggiungibile (HTTP 4xx/5xx) lo dice con il codice;
+3. **l'onda del sampler/player** che non si carica: `messaggioRete` + un avviso per
+   player (`p.reteAvvisata`), invece del silenzio.
+
+**Verifica vera (19/09/2026).** In **Chrome vero headless**, senza spegnere l'app: si
+porta la sorgente dell'audio di *«3ree6ix5ive»* su una **porta morta**
+(`http://127.0.0.1:9/stream/morto.mp3`) e si preme ▶. Risultato a schermo nella pagina
+principale:
+
+```
+🎧 «onyx_t_1786610656293_ads8r.COM] 3ree6ix5ive»: non riesco a leggere l'audio dal
+   server — se l'app è stata riavviata, ricarica la pagina (⌘R)
+```
+
+e lo stesso testo nella console del player (`[player] …`). Prima lì non c'era **niente**.
+Test: file nuovo `test_errori_rete.py` — **7 test `OK`** (le due funzioni pure eseguite
+in **JavaScriptCore** su tutti i testi del browser, gli altri errori che passano com'è,
+lo stesso messaggio senza nome del brano, e il cablaggio: niente `fetch(track.url)`
+nuda, `playerError` gestito, ascoltatore `error` sull'`audio`, `p.reteAvvisata`).
+
+
 
 Da tenere presente nelle sessioni di lavoro successive:
 
@@ -1155,6 +1345,26 @@ Da tenere presente nelle sessioni di lavoro successive:
   riga senza, così rifacendo il blocco la libreria si completa). ⚠️ La miniatura di
   YouTube a volte arriva in **`.webp`**: va benissimo, `/cover/<file>` la serve col
   mime giusto.
+- **🔗 Modificare i video su YouTube (19/09/2026).** Si può modificare **titolo,
+  descrizione e tag di un video** dalla finestra ✍️ del modale ✏️, con l'**API ufficiale
+  YouTube Data v3** (OAuth). Serve, una volta sola: un **client OAuth** creato da
+  Alessandro in Google Cloud (ID+secret → `youtube_client.json`) e il **consenso** dato
+  nel browser (→ `youtube_token.json`): **due file NON versionati, permessi 600**, come
+  `cookies.txt` (sono dati suoi: mai in repo). La **password di Google non passa mai
+  dall'app** (si digita nella pagina di Google). Se il client manca, o le librerie
+  (`google-api-python-client`, `google-auth-oauthlib`) non sono installate, l'app **lo
+  dice col motivo** invece di fallire in modo oscuro: `GET /youtube/stato` racconta in
+  che passaggio siamo. ⚠️ Quota: leggere un video costa 1 punto, **salvarlo 50**
+  (10.000/giorno ≈ 200 salvataggi). ⚠️ **Il ripiego «automazione del browser» non è
+  ancora scritto**: si fa solo se la strada dell'API si blocca.
+- **❌ «Failed to fetch» non si vede più (19/09/2026).** Quel messaggio è del **browser**
+  e vuol dire «la richiesta non è arrivata al server» (tipico quando l'app viene
+  riavviata mentre una pagina è aperta): il file può essere perfettamente a posto. Ora
+  l'app lo **traduce** in «il server non risponde: se l'app è stata riavviata, ricarica
+  la pagina (⌘R)» e lo mostra **dove si è cliccato** — nel player (`messaggioReteOnyx` +
+  `avvisaOnyx` → `postMessage` `playerError`) e nella pagina principale
+  (`messaggioRete`), compreso il caso dell'`<audio>` che non parte e dell'onda che non
+  si carica (vedi la sezione «❌ "Failed to fetch": cosa era e cosa dice ora l'app»).
 - **Regola di lavoro di ogni sessione.** Dopo **ogni** modifica ai sorgenti:
   riavviare l'app (è l'unica copia: non c'è una copia di lavoro separata dal
   clone), controllare il log di avvio, provare con `curl` le rotte toccate e le

@@ -3045,7 +3045,13 @@ function playTrack(idx) {
     renderNowBar(t);
     if (lyricsOpen) renderLyrics();
     pushPlaybackState(true);
-  }).catch(err => { console.error(err); pushPlaybackState(true); });
+  }).catch(err => {
+    console.error(err);
+    // La riproduzione non parte: si dice il motivo (e non si lascia il tasto ▶ come
+    // se niente fosse successo). 19/09/2026.
+    avvisaOnyx('«' + (t.name || 'questo brano') + '»: ' + messaggioReteOnyx(err));
+    isPlaying = false; updatePlayUI(); renderTracks(); pushPlaybackState(true);
+  });
 }
 
 function togglePlay() {
@@ -3303,6 +3309,15 @@ function nowbarOpenArtist(){
 
 audio.addEventListener("play",  () => pushPlaybackState(true));
 audio.addEventListener("pause", () => pushPlaybackState(true));
+// Il file non si riesce a leggere (server spento o riavviato, file spostato): si dice
+// PERCHÉ invece di lasciare un pulsante che non fa niente (19/09/2026: prima l'errore
+// restava solo nella console del browser).
+audio.addEventListener("error", () => {
+  if(!currentTrackId) return;
+  const t = visibleTracks().find(x => x.id === currentTrackId) || {};
+  avvisaOnyx('«' + (t.name || 'questo brano') + '»: non riesco a leggere l\'audio dal server' +
+             ' — se l\'app è stata riavviata, ricarica la pagina (⌘R)');
+});
 audio.addEventListener("timeupdate", () => {
   if (!audio.duration) return;
   const pct = (audio.currentTime / audio.duration) * 100;
@@ -3612,6 +3627,32 @@ async function syncOnyxTracksToDb(nBefore){
   }
 }
 
+// ── Errori di rete detti in modo comprensibile (19/09/2026) ──────────────────
+// «Failed to fetch» è il messaggio grezzo del browser quando la richiesta non arriva
+// proprio al server (app riavviata, rete caduta): da solo non dice cosa è successo né
+// cosa fare. Questa funzione (PURA: la provano i test in JavaScriptCore) lo traduce in
+// una frase che si può seguire.
+function messaggioReteOnyx(err){
+  const m = String((err && err.message) || err || '');
+  if(/failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(m)){
+    return 'il server non risponde: se l\'app è stata riavviata, ricarica la pagina (⌘R) e riprova';
+  }
+  return m || 'errore di rete';
+}
+// L'avviso si vede anche nella pagina principale (i suoi messaggi in alto a destra)
+// quando il player è dentro SampleLab; altrimenti resta nella console. Uno ogni 3
+// secondi: l'errore di rete arriva sia dall'`audio` sia dalla `fetch`, non si ripete.
+let _ultimoAvvisoOnyx = 0;
+function avvisaOnyx(testo){
+  const adesso = Date.now();
+  if(adesso - _ultimoAvvisoOnyx < 3000) return;
+  _ultimoAvvisoOnyx = adesso;
+  try{
+    if(window.self !== window.top) window.parent.postMessage({action:'playerError', text:testo}, '*');
+  }catch(_){}
+  console.warn('[player]', testo);
+}
+
 async function importDbTrackToOnyx(track, doPlay){
   await whenReady();
   const dup = tracks.find(t =>
@@ -3623,10 +3664,29 @@ async function importDbTrackToOnyx(track, doPlay){
     if(doPlay){ const i=visibleTracks().findIndex(t=>t.id===dup.id); if(i>=0) playTrack(i); }
     return;
   }
-  const id = 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
-  const res = await fetch(track.url);
-  if(!res.ok) throw new Error('URL non valido: '+track.url);
+  // ⚠️ Prima di chiedere il file si controlla che ci sia qualcosa da chiedere: senza
+  // URL la `fetch` falliva con un messaggio incomprensibile (19/09/2026).
+  if(!track.url){
+    avvisaOnyx('questa canzone non ha un file locale da suonare: scaricalo con «⬇ Scarica» nel tab 🗄️ Database');
+    return;
+  }
+  const nomeCanzone = track.title || track.local_file || 'audio';
+  let res;
+  try{
+    res = await fetch(track.url);
+  }catch(err){
+    // Il caso vero del 19/09/2026: «❌ Failed to fetch» mentre l'app veniva
+    // riavviata. Ora si dice cosa è successo e cosa fare.
+    avvisaOnyx(nomeCanzone + ': ' + messaggioReteOnyx(err));
+    return;
+  }
+  if(!res.ok){
+    avvisaOnyx(nomeCanzone + ': il file non è raggiungibile dal server (HTTP ' + res.status +
+               '): se l\'hai spostato o rinominato, riprendilo con «⬇ Scarica»');
+    return;
+  }
   const blob = await res.blob();
+  const id = 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
   await dbPut('blobs', {id, blob});
   const objUrl = URL.createObjectURL(blob);
   audioBlobs[id] = objUrl;

@@ -674,7 +674,9 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn('id="ry-esito"', html)
         self.assertIn("function aggiornaRecuperoYoutube(", html)
         self.assertIn("function avviaRecuperoYoutube(", html)
-        self.assertIn("aggiornaRecuperoYoutube(); }", html)   # al cambio tab 🗄️ Database
+        # al cambio tab 🗄️ Database: il conto del recupero 🖼 e (dal 19/09/2026) lo stato
+        # del collegamento 🔗 a YouTube
+        self.assertIn("aggiornaRecuperoYoutube(); ytStato(); }", html)
         self.assertIn("/db/recupera_youtube", html)
 
     def test_miniatura_di_riserva_dove_serve(self):

@@ -616,6 +616,32 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
     <div id="ry-esito" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-top:8px"></div>
   </div>
 
+  <div class="mass-rename-panel" id="youtube-panel">
+    <h3>🔗 Collega YouTube (per modificare i video)</h3>
+    <div class="mass-rename-row">
+      <button class="btn-mass-rename" onclick="ytCollega(this)">🔗 Collega adesso</button>
+      <button class="db-stem-btn" style="font-size:11px;padding:8px 12px" onclick="ytScollega(this)">⏏ Scollega</button>
+      <span id="yt-stato" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)">Controllo…</span>
+    </div>
+    <details class="db-legend" id="yt-aiuto" style="margin-top:8px">
+      <summary>ℹ️ Come si crea il «client OAuth» (una volta sola, ~2 minuti) — e cosa si può fare</summary>
+      <div class="db-legend-body" style="font-size:11px;line-height:1.7">
+        <b>1)</b> <a href="https://console.cloud.google.com/projectcreate" target="_blank" style="color:var(--accent2)">Crea un progetto</a> in Google Cloud (nome a piacere).<br>
+        <b>2)</b> Abilita <b>YouTube Data API v3</b>: <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" style="color:var(--accent2)">libreria delle API ↗</a> → «Abilita».<br>
+        <b>3)</b> <b>Schermata di consenso OAuth</b> (<a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" style="color:var(--accent2)">consent ↗</a>): tipo <b>Esterno</b>, nome «SampleLab», e fra gli <b>utenti di test</b> aggiungi <b>il tuo indirizzo Google</b> (l'app resta «in prova»: non serve la verifica di Google).<br>
+        <b>4)</b> <b>Credenziali</b> (<a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--accent2)">credenziali ↗</a>) → <b>Crea credenziali → ID client OAuth</b> → tipo <b>App desktop</b>: copia <b>ID client</b> e <b>Secret</b> qui sotto e premi <b>💾 Salva</b>.<br>
+        <b>5)</b> Premi <b>🔗 Collega adesso</b>: si apre il browser, scegli il tuo account e autorizza. La password di Google si digita <b>nella pagina di Google</b>, mai qui: SampleLab riceve solo il permesso di modificare i tuoi video.<br>
+        ⚠️ Quota dell'API: leggere un video costa 1 punto, <b>salvarlo 50</b> (su 10.000 al giorno ≈ 200 salvataggi). Il token sta in <code>youtube_token.json</code> e il client in <code>youtube_client.json</code>: file <b>non versionati</b> (permessi 600), come <code>cookies.txt</code>.
+      </div>
+      <div class="mass-rename-row" style="margin-top:8px">
+        <input class="mass-rename-input" id="yt-client-id" placeholder="ID client OAuth (…apps.googleusercontent.com)">
+        <input class="mass-rename-input" id="yt-client-secret" type="password" placeholder="Secret del client">
+        <button class="btn-mass-rename" onclick="ytSalvaClient(this)">💾 Salva</button>
+      </div>
+    </details>
+    <div id="yt-esito" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-top:8px"></div>
+  </div>
+
   <div class="db-script-panel">
     <h3>⚙️ Esegui query / script personalizzati</h3>
 
@@ -3601,7 +3627,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   document.body.classList.toggle('player-tab-active', name==='player');
-  if(name==='database'){ loadDb(); ensureCampiSposta(); aggiornaRecuperoYoutube(); } // riempie anche i menu dello strumento ➡️ Sposta e il conto del recupero 🖼 YT
+  if(name==='database'){ loadDb(); ensureCampiSposta(); aggiornaRecuperoYoutube(); ytStato(); } // riempie anche i menu dello strumento ➡️ Sposta, il conto del recupero 🖼 YT e lo stato di 🔗 YouTube
 }
 // Adatta l'altezza del wrapper del Player all'altezza REALE della barra tab:
 // così la nowbar interna del Player arriva esattamente a 8px dal bordo
@@ -3657,6 +3683,9 @@ window.addEventListener('message', e => {
   // La pagina /verifica (aperta in un'altra scheda con window.open) chiede di
   // zittire l'audio: qui non c'è nessuna eccezione, si ferma tutto.
   else if(d.action === 'fermaAudioApp'){ pauseAllScraperAudio(null); }
+  // Il player non riesce a procurarsi un audio: il motivo arriva QUI, dove l'utente ha
+  // cliccato (19/09/2026: prima si vedeva solo «Failed to fetch» nella console/player).
+  else if(d.action === 'playerError' && d.text){ toast('🎧 ' + d.text, 'err'); }
 });
 
 // Un brano è stato rimosso dal player → lo elimina anche dal database (e dal file).
@@ -3866,6 +3895,18 @@ const VOL_ICON=`<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0
 const SCISSORS=`<svg viewBox="0 0 24 24"><path d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3z"/></svg>`;
 
 function fmtTime(sec){if(sec==null||isNaN(sec))return"—";const s=Math.floor(sec),m=Math.floor(s/60);return`${m}:${String(s%60).padStart(2,"0")}`}
+// «Failed to fetch» è il messaggio grezzo del browser quando la richiesta non arriva
+// al server (app riavviata, rete caduta) e da solo non dice cosa fare: qui diventa una
+// frase che si può seguire (19/09/2026). Nel player c'è la stessa traduzione
+// (`messaggioReteOnyx`), così i due lati parlano allo stesso modo.
+function messaggioRete(e, cosa){
+  const m = String((e && e.message) || e || '');
+  const nome = cosa ? (' «' + cosa + '»') : '';
+  if(/failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(m)){
+    return 'il server non risponde' + nome + ': se l\'app è stata riavviata, ricarica la pagina (⌘R)';
+  }
+  return m || 'errore di rete';
+}
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
 function escA(s){return String(s||"").replace(/'/g,"\\'").replace(/"/g,"&quot;")}
 // Per i testi che finiscono DENTRO un onclick (titoli, artisti, URL): il browser
@@ -4469,7 +4510,15 @@ function loadWaveformData(key,filename){
   }).then(buffer=>{
     const ch=buffer.getChannelData(0); const W=Math.min(4000,Math.max(800,Math.floor(ch.length/256)));
     p.waveformData=extractPeaks(ch,W); p.waveformLoading=false; drawWaveform(key);
-  }).catch(()=>{p.waveformLoading=false});
+  }).catch(e=>{
+    p.waveformLoading=false;
+    // Una volta per player: se l'app è stata riavviata, il messaggio dice cosa fare
+    // invece di sparire in silenzio (19/09/2026).
+    if(!p.reteAvvisata){
+      p.reteAvvisata=true;
+      toast('✕ ' + messaggioRete(e, filename), 'err');
+    }
+  });
 }
 function extractPeaks(ch,W){const peaks=new Float32Array(W),step=Math.floor(ch.length/W);for(let i=0;i<W;i++){let max=0;const s=i*step,e=Math.min(s+step,ch.length);for(let j=s;j<e;j++){const v=Math.abs(ch[j]);if(v>max)max=v}peaks[i]=max}return peaks}
 function drawWaveform(key){
@@ -6424,10 +6473,23 @@ function rigaYoutubeHTML(s){
            <div class="yt-mini" style="margin-top:4px">${descrizione.length} caratteri · ${descrizione.split('\n').length} righe (intera: qui sotto scorre)</div>`
         : `<div class="yt-mini">il video non ha descrizione</div>`}
     </div>`;
+  const cardModifica = `<div class="yt-card">
+      <div class="yt-card-tit"><span>✍️ Modifica sul video</span>
+        <span class="yt-mini"><a href="#" style="color:var(--accent2);text-decoration:none" onclick="ytApriPannello();return false">🔗 Collega YouTube</a></span></div>
+      <div class="yt-mini">«📥 Leggi da YouTube» riempie i campi con quello che c'è <b>ora</b> sul video; poi correggi e premi «💾 Salva sul video» (i campi identici non si toccano). Serve il collegamento 🔗 (una volta sola).</div>
+      <label class="dbe-field" style="margin-top:6px"><span>Titolo sul video</span><input id="yt-edit-titolo" value=""></label>
+      <label class="dbe-field"><span>Tag (separati da virgola)</span><input id="yt-edit-tag" value=""></label>
+      <label class="dbe-field dbe-full"><span>Descrizione sul video</span><textarea id="yt-edit-desc" rows="6"></textarea></label>
+      <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <button class="db-stem-btn" onclick="ytLeggiVideo('${s.id}',this)">📥 Leggi da YouTube</button>
+        <button class="db-stem-btn" onclick="ytSalvaVideo('${s.id}',this)">💾 Salva sul video</button>
+      </div>
+      <div class="yt-mini" id="yt-edit-esito" style="margin-top:6px"></div>
+    </div>`;
   return `<div class="dbe-field dbe-full" id="dbe-yt-block"><span>📺 YouTube (letto dal video, non si modifica qui)</span>
     <div class="yt-wrap">
       ${sinistra}
-      <div class="yt-col-dx">${cardVideo}${cardTag}${cardDesc}</div>
+      <div class="yt-col-dx">${cardVideo}${cardTag}${cardDesc}${cardModifica}</div>
     </div></div>`;
 }
 // ⤢/⤡ la descrizione INTERA: il riquadro si allunga invece di tagliare il testo.
@@ -6452,6 +6514,67 @@ async function copiaYtTesto(btn, id){
     area.select(); try{ document.execCommand('copy'); }catch(__){}
     area.remove(); segna();
   }
+}
+// 📥 Legge dal video YouTube (API ufficiale) quello che c'è ORA: titolo, tag e
+// descrizione finiscono nei campi da modificare, così si vede cosa si sta cambiando.
+async function ytLeggiVideo(id, btn){
+  const esito=document.getElementById('yt-edit-esito');
+  if(btn) btn.disabled=true;
+  try{
+    const res=await fetch(`/db/songs/${id}/youtube_video`).then(r=>r.json());
+    if(!res.ok){
+      if(esito) esito.textContent='✕ '+(res.error||'lettura non riuscita');
+    }else{
+      const sn=res.snippet||{};
+      const t=document.getElementById('yt-edit-titolo'), g=document.getElementById('yt-edit-tag'),
+            d=document.getElementById('yt-edit-desc');
+      if(t) t.value=sn.title||'';
+      if(g) g.value=(sn.tags||[]).join(', ');
+      if(d) d.value=sn.description||'';
+      if(esito) esito.textContent=`✅ letto dal video ${res.video_id}${sn.channelTitle?(' — '+sn.channelTitle):''}: titolo ${(sn.title||'').length} caratteri · ${(sn.tags||[]).length} tag · descrizione ${(sn.description||'').length} caratteri`;
+    }
+  }catch(e){ if(esito) esito.textContent='✕ '+e.message; }
+  if(btn) btn.disabled=false;
+}
+// 💾 Scrive titolo/descrizione/tag SUL VIDEO. Il server confronta prima e dopo: se
+// sono identici non chiama nemmeno l'API («niente da cambiare»).
+async function ytSalvaVideo(id, btn){
+  const esito=document.getElementById('yt-edit-esito');
+  const titolo=(document.getElementById('yt-edit-titolo')||{}).value||'';
+  const tag=(document.getElementById('yt-edit-tag')||{}).value||'';
+  const desc=(document.getElementById('yt-edit-desc')||{}).value||'';
+  if(!titolo.trim()){ if(esito) esito.textContent='✕ il titolo non può restare vuoto (YouTube lo rifiuta)'; return; }
+  const nTag=tag.split(',').filter(t=>t.trim()).length;
+  if(!confirm('Scrivere sul VIDEO YouTube?\n\nTitolo ('+titolo.trim().length+' caratteri): '+titolo.trim()+
+              '\nTag ('+nTag+'): '+tag+'\nDescrizione: '+desc.length+' caratteri\n\n'+
+              'Quello che è già così non si tocca.')) return;
+  if(btn) btn.disabled=true;
+  try{
+    const res=await fetch(`/db/songs/${id}/youtube_video`,{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title:titolo,description:desc,tags:tag})}).then(r=>r.json());
+    if(res.ok){
+      const fatte=(res.modifiche||[]);
+      toast(fatte.length?('📺 Video aggiornato: '+fatte.join(', ')):'📺 Niente da cambiare: sul video è già così','ok');
+      loadDb();
+      await aggiornaBloccoYoutube(id);            // il riquadro 📺 si rifà coi dati nuovi
+      const dopo=res.dopo||{};
+      const t=document.getElementById('yt-edit-titolo'), g=document.getElementById('yt-edit-tag'),
+            d=document.getElementById('yt-edit-desc'), e2=document.getElementById('yt-edit-esito');
+      if(t) t.value=dopo.title||titolo;
+      if(g) g.value=(dopo.tags||[]).join(', ');
+      if(d) d.value=dopo.description||desc;
+      if(e2) e2.textContent='✅ '+(fatte.length?('modificati sul video: '+fatte.join(', ')):(res.messaggio||'niente da cambiare'));
+    }else if(esito) esito.textContent='✕ '+(res.error||'modifica non riuscita');
+  }catch(e){ if(esito) esito.textContent='✕ '+e.message; }
+  if(btn) btn.disabled=false;
+}
+// Il collegamento si fa dal pannello 🔗 del tab 🗄️ Database: da qui ci si arriva.
+function ytApriPannello(){
+  closeDbEditor();
+  switchTab('database');
+  const p=document.getElementById('youtube-panel');
+  if(p) p.scrollIntoView({block:'center',behavior:'smooth'});
 }
 function dbEditFormHTML(s){
   const v=(f)=>s[f]!=null && s[f]!=='' ? s[f] : '';
@@ -6799,6 +6922,91 @@ async function aggiornaBloccoYoutube(id){
     const s = await fetch(`/db/songs/${id}`).then(r=>r.json());
     if(s && s.id) box.outerHTML = rigaYoutubeHTML(s);
   }catch(_){}
+}
+
+// ── 🔗 COLLEGAMENTO A YOUTUBE (modifica dei video) — 19/09/2026 ────────────────
+// L'API ufficiale YouTube Data v3, col consenso OAuth. Il pannello dice SEMPRE in
+// che stato siamo (librerie? client? collegato a quale canale?) e non prova a
+// indovinare: se manca qualcosa lo scrive, col motivo che arriva dal server.
+let ytPoll=null;
+async function ytStato(){
+  const stato=document.getElementById('yt-stato');
+  if(!stato) return {};
+  try{
+    const s=await fetch('/youtube/stato').then(r=>r.json());
+    const pezzi=[s.librerie?'librerie Google ✓':'mancano le librerie Google',
+                 s.client?'client OAuth ✓':'client OAuth da configurare',
+                 s.collegato?('collegato'+(s.canale?(': '+s.canale):'')):'non collegato'];
+    stato.textContent=pezzi.join(' · ')+(s.motivo?(' — '+s.motivo):'');
+    const id=document.getElementById('yt-client-id');
+    if(id && s.client_id) id.placeholder='ID client salvato: '+s.client_id+'…';
+    return s;
+  }catch(_){ stato.textContent='stato non disponibile'; return {}; }
+}
+async function ytSalvaClient(btn){
+  const esito=document.getElementById('yt-esito');
+  const cid=(document.getElementById('yt-client-id')||{}).value||'';
+  const sec=(document.getElementById('yt-client-secret')||{}).value||'';
+  if(btn) btn.disabled=true;
+  try{
+    const res=await fetch('/youtube/client',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({client_id:cid,client_secret:sec})}).then(r=>r.json());
+    if(res.ok){
+      if(esito) esito.textContent='✅ client salvato: ora premi «🔗 Collega adesso»';
+      toast('🔗 Client OAuth salvato','ok');
+      const s=document.getElementById('yt-client-secret'); if(s) s.value='';
+    }else if(esito) esito.textContent='✕ '+(res.error||'non salvato');
+  }catch(e){ if(esito) esito.textContent='✕ '+e.message; }
+  if(btn) btn.disabled=false;
+  ytStato();
+}
+async function ytCollega(btn){
+  const esito=document.getElementById('yt-esito');
+  if(ytPoll){ toast('⏳ Il collegamento è già in corso','info'); return; }
+  const s=await ytStato();
+  if(!s.client){
+    if(esito) esito.textContent='✕ prima incolla ID client e secret (e premi «💾 Salva»)';
+    return;
+  }
+  if(!confirm('Collegare YouTube?\n\nSi apre il browser: scegli il tuo account e autorizza SampleLab.\nLa password di Google la digiti nella pagina di Google, non qui.\nServe per modificare titolo, descrizione e tag dei tuoi video.')) return;
+  if(btn) btn.disabled=true;
+  try{
+    const res=await fetch('/youtube/collega',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json());
+    if(!res.job_id){
+      if(esito) esito.textContent='✕ '+(res.motivo||'collegamento non partito');
+      if(btn) btn.disabled=false;
+      return;
+    }
+    const job=res.job_id;
+    if(esito) esito.textContent='⏳ '+(res.motivo||'in attesa del consenso nel browser…');
+    ytPoll=setInterval(async()=>{
+      try{
+        const j=await fetch(`/status/${job}`).then(r=>r.json());
+        if(j.status==='done'){
+          clearInterval(ytPoll); ytPoll=null; if(btn) btn.disabled=false;
+          if(esito) esito.textContent='✅ '+(j.riepilogo||'collegato a YouTube');
+          toast('🔗 '+(j.riepilogo||'YouTube collegato'),'ok');
+          await ytStato();
+          if(dbEditSongId) openDbEditor(dbEditSongId);   // il riquadro 📺 ora può modificare
+        }else if(j.status==='error'){
+          clearInterval(ytPoll); ytPoll=null; if(btn) btn.disabled=false;
+          if(esito) esito.textContent='✕ '+(j.error||'collegamento non riuscito');
+        }else if(esito) esito.textContent='⏳ in attesa del consenso nel browser…';
+      }catch(_){}
+    },1500);
+  }catch(e){ if(esito) esito.textContent='✕ '+e.message; if(btn) btn.disabled=false; }
+}
+async function ytScollega(btn){
+  if(!confirm('Scollegare YouTube?\nIl token salvato viene tolto: per ricollegarti dovrai autorizzare di nuovo (il client OAuth resta).')) return;
+  const esito=document.getElementById('yt-esito');
+  if(btn) btn.disabled=true;
+  try{
+    const res=await fetch('/youtube/scollega',{method:'POST'}).then(r=>r.json());
+    if(esito) esito.textContent=res.ok?'⏏ scollegato (il client OAuth resta: puoi ricollegarti)':'✕ '+(res.error||'non riuscito');
+    toast(res.ok?'⏏ YouTube scollegato':'✕ scollegamento non riuscito', res.ok?'info':'err');
+  }catch(e){ if(esito) esito.textContent='✕ '+e.message; }
+  if(btn) btn.disabled=false;
+  ytStato();
 }
 
 // ── 🖼 RECUPERO IN BLOCCO (solo righe che hanno già un link/ID YouTube) ──────
