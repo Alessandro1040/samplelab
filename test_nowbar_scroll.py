@@ -23,7 +23,9 @@ Questo file prova due cose:
 2. `TestCablaggioBarraInBasso` — controlli Python: la riga porta il suo id
    (`data-track-id`), `evidenziaBrano` scorre la lista giusta e lampeggia, lo
    stile `.trovato` esiste (lime nella scheda artista, teal in quella album) e i
-   due clic chiamano il filtro **e** l'evidenziazione nell'ordine giusto.
+   due clic chiamano il filtro **e** l'evidenziazione nell'ordine giusto. Un
+   brano senza album non esce più in silenzio: il clic lo dice e non scorre
+   niente (`apriAlbumPerNome` → `avvisoOnyx`, vedi `test_album_clic.py`).
 
 Esecuzione (dalla cartella di SampleLab):
     python3 -m unittest -v test_nowbar_scroll
@@ -188,7 +190,7 @@ class TestCablaggioBarraInBasso(unittest.TestCase):
         self.assertIn("animation:branoTrovato 1.6s ease-out;", self.src)
 
     def test_i_due_clic_aprono_e_evidenziano(self):
-        for funzione, filtro, cosa in (("nowbarOpenAlbum", "setAlbumFilter(t.album);", "album"),
+        for funzione, filtro, cosa in (("nowbarOpenAlbum", "apriAlbumPerNome(t.album)", "album"),
                                        ("nowbarOpenArtist", "setArtistFilter(t.artist);", "artista")):
             with self.subTest(click=funzione):
                 corpo = estrai_funzione(self.src, funzione)
@@ -197,8 +199,16 @@ class TestCablaggioBarraInBasso(unittest.TestCase):
                               "%s deve portare la canzone in vista" % funzione)
                 self.assertLess(corpo.index(filtro), corpo.index("evidenziaBrano(t.id);"),
                                 "prima si apre la scheda (che rifà la lista), poi si scorre")
-                campo = "album" if cosa == "album" else "artist"
-                self.assertIn("if(!t || !t.%s) return;" % campo, corpo)
+                # l'artista senza nome esce in silenzio; per l'album la guardia è
+                # solo sul brano, perché se l'album manca si avvisa (vedi sotto)
+                atteso = "if(!t) return;" if cosa == "album" else "if(!t || !t.artist) return;"
+                self.assertIn(atteso, corpo)
+        # L'artista senza nome esce in silenzio; l'album no: se non c'è un album da
+        # aprire lo deve DIRE (`apriAlbumPerNome` avvisa e ritorna false), e in quel
+        # caso non si scorre niente.
+        self.assertIn("if(apriAlbumPerNome(t.album)) evidenziaBrano(t.id);",
+                      estrai_funzione(self.src, "nowbarOpenAlbum"))
+        self.assertIn("avvisoOnyx(", estrai_funzione(self.src, "apriAlbumPerNome"))
 
     def test_barra_in_basso_collegata(self):
         self.assertIn('id="nowTrack" onclick="nowbarOpenAlbum()"', self.src)

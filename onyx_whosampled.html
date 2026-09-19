@@ -289,6 +289,11 @@ body.album-view .track-row.trovato{--flash:45,212,191;}
 .track-artist-sep{font-size:12px;color:var(--text3);margin-right:4px;}
 .track-album{font-size:12px;color:var(--text3);margin-top:2px;cursor:pointer;transition:color .2s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .track-album:hover{color:var(--text);text-decoration:underline;}
+/* Brano senza album: la cella resta cliccabile (dice perché non si apre) ma
+   non deve sembrare un album vero — prima si sottolineava al passaggio del
+   mouse e il clic non faceva nulla. */
+.track-album.senza-album{cursor:help;color:var(--text3);opacity:.7;font-style:italic;}
+.track-album.senza-album:hover{text-decoration:none;color:var(--text3);}
 .track-dur{font-size:12px;color:var(--text3);text-align:right;}
 .track-year{font-size:12px;color:var(--text3);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .track-opts-col{display:flex;justify-content:center;}
@@ -1920,16 +1925,47 @@ function heroShuffle(){
 // («Stan's Tape», «Knoc-Turn'al») lo schema inline generava JavaScript non
 // valido e il clic non apriva nulla.
 function heroApriAlbum(el){
-  const nome = el && el.getAttribute ? el.getAttribute("data-album") : "";
-  if(nome) setAlbumFilter(nome);
+  apriAlbumPerNome(el && el.getAttribute ? el.getAttribute("data-album") : "");
 }
 
 // Apre la scheda dell'album partendo dal nome in data-album della riga
 // (titolo o nome album). Stessa ragione di heroApriAlbum: l'apostrofo
 // («Stan's Tape») dentro un onclick inline romperebbe il JavaScript.
 function apriAlbumDa(el){
-  const nome = el && el.getAttribute ? el.getAttribute("data-album") : "";
-  if(nome) setAlbumFilter(nome);
+  apriAlbumPerNome(el && el.getAttribute ? el.getAttribute("data-album") : "");
+}
+
+// Il clic sull'album di un brano SENZA album usciva in silenzio: con `if(nome)`
+// non succedeva proprio niente (nessun filtro, nessun messaggio) e il clic
+// sembrava rotto. Succede ai brani importati da file locali / YouTube che non
+// hanno il campo album (58 su 945 il 19/09/2026, fra cui i type beat «[HARD]
+// Night Lovell … Extermination»). Ora l'utente lo legge e sa dove riempirlo.
+function apriAlbumPerNome(nome){
+  if(nome){ setAlbumFilter(nome); return true; }
+  avvisoOnyx("Questo brano non ha un album salvato: non c'è nessun album da aprire. " +
+             "Si aggiunge con «✏️ Modifica info avanzata» (tasto destro sul brano).");
+  return false;
+}
+
+// Avviso breve in basso: la pagina non aveva un modo per dire «questo non si può
+// fare», quindi i clic senza effetto restavano muti.
+let avvisoTimer = null;
+function avvisoOnyx(testo, durata){
+  let el = document.getElementById("avvisoOnyx");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "avvisoOnyx";
+    el.style.cssText = "position:fixed;left:50%;bottom:110px;transform:translateX(-50%);" +
+      "background:var(--surface2);color:var(--text);border:1px solid var(--border2);" +
+      "border-radius:10px;padding:10px 16px;font-size:13px;line-height:1.45;max-width:70vw;" +
+      "text-align:center;z-index:9999;box-shadow:0 10px 30px rgba(0,0,0,.5);" +
+      "opacity:0;transition:opacity .25s;pointer-events:none;";
+    document.body.appendChild(el);
+  }
+  el.textContent = testo;
+  requestAnimationFrame(() => { el.style.opacity = "1"; });
+  clearTimeout(avvisoTimer);
+  avvisoTimer = setTimeout(() => { el.style.opacity = "0"; }, durata || 6000);
 }
 
 // Apre la scheda dell'artista da una chip della riga: il nome sta in
@@ -2933,9 +2969,9 @@ function renderTracks() {
         <div class="track-main">
           <div class="track-art">${artRigaBrano(t, tracks)}</div>
           <div class="track-text">
-            <div class="track-name" data-album="${escHtml(t.album)}" onclick="event.stopPropagation(); apriAlbumDa(this)" title="Apri l'album di questa canzone">${escHtml(t.name)}</div>
+            <div class="track-name" data-album="${escHtml(t.album)}" onclick="event.stopPropagation(); apriAlbumDa(this)" title="${t.album ? "Apri l'album di questa canzone" : "Questo brano non ha un album salvato"}">${escHtml(t.name)}</div>
             <div class="track-artist-chips">${renderArtistChips(t.artist)}</div>
-            <div class="track-album" data-album="${escHtml(t.album)}" onclick="event.stopPropagation(); apriAlbumDa(this)">${escHtml(t.album)}</div>
+            <div class="track-album${t.album ? "" : " senza-album"}" data-album="${escHtml(t.album)}" onclick="event.stopPropagation(); apriAlbumDa(this)">${t.album ? escHtml(t.album) : "nessun album"}</div>
           </div>
         </div>
         <div class="track-year" title="${escHtml(t.release_date||'')}">${formatReleaseDate(t.release_date)}</div>
@@ -3251,9 +3287,10 @@ function evidenziaBrano(id){
 // apriva la lista e basta: si atterrava in un punto qualsiasi dell'album).
 function nowbarOpenAlbum(){
   const t = currentTrackId ? tracks.find(x => x.id === currentTrackId) : null;
-  if(!t || !t.album) return;
-  setAlbumFilter(t.album);
-  evidenziaBrano(t.id);
+  if(!t) return;
+  // Senza album la barra in basso usciva in silenzio (`if(!t.album) return;`):
+  // il titolo sembrava cliccabile e non succedeva niente. Ora lo dice.
+  if(apriAlbumPerNome(t.album)) evidenziaBrano(t.id);
 }
 // Click sull'artista nella barra in basso del player → tutte le canzoni
 // dell'artista, con la canzone in ascolto portata in vista allo stesso modo.

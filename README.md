@@ -865,6 +865,69 @@ visibile; con la verifica aperta **da** `/?tab=database` la pagina principale ha
 fermato l'audio **due volte** (una per il ⏹, una perché qui è partito un audio) e
 nessun errore JS.
 
+## Il clic sull'album di un brano che non ha un album — 19/09/2026
+
+Domanda di Alessandro: «ci sono alcuni brani tipo `[HARD] Night Lovell x Dope
+D.O.D. Type Beat 2022 ＂Extermination” (Prod. Raedius)` - *Brano locale* che se li
+clicchi NON aprono l'album… che succede?»
+
+**Che succedeva.** Quei brani hanno il campo `album` **vuoto** nel database (58 su
+945 il 19/09/2026, fra cui i type beat scaricati con yt-dlp: `album` NULL, e anche
+`artist` vuoto — che il player mostra come «Brano locale» perché il ponte
+`applyDbSync` fa `artist: s.artist || 'Brano locale'` e `album: s.album || ''`).
+Nella riga il nome dell'album finiva in `data-album=""` e il gestore faceva:
+
+    function apriAlbumDa(el){
+      const nome = el && el.getAttribute ? el.getAttribute("data-album") : "";
+      if(nome) setAlbumFilter(nome);     // ← con l'album vuoto: NIENTE
+    }
+
+Quindi il clic non apriva niente, **in silenzio**: nessun filtro, nessun messaggio,
+nessun errore in console. E il titolo, che ha `cursor:pointer` e si sottolinea al
+passaggio del mouse, prometteva un'azione che non arrivava (il tooltip diceva
+perfino «Apri l'album di questa canzone»). Stesso silenzio nella barra in basso:
+`nowbarOpenAlbum()` faceva `if(!t || !t.album) return;` — mentre nella pagina
+principale, per lo stesso caso, c'era già un avviso (`toast('Album non disponibile
+per questo brano','err')` nel clic sul titolo della nowbar, `index (2).html`).
+
+**Cosa fa adesso.** Un'unica funzione decide, e non esce mai in silenzio:
+
+- `apriAlbumPerNome(nome)` — con l'album chiama `setAlbumFilter()` e ritorna
+  `true` (come prima); senza album mostra un avviso in basso (`avvisoOnyx`: un
+  `#avvisoOnyx` creato al volo, con lo stile delle altre superfici della pagina)
+  che dice cosa manca e **dove si riempie**: «Si aggiunge con ✏️ Modifica info
+  avanzata (tasto destro sul brano)»;
+- `apriAlbumDa()` e `heroApriAlbum()` passano da lì (il clic continua a viaggiare
+  negli attributi `data-album`: l'apostrofo dentro un `onclick` inline rompeva il
+  JavaScript — è il motivo per cui esistono quelle funzioni);
+- `nowbarOpenAlbum()` usa lo stesso avviso e scorre fino alla canzone solo se la
+  scheda si è aperta davvero;
+- nella lista la cella dell'album di questi brani dice **«nessun album»** in
+  grigio corsivo con `cursor:help` (niente più finta sottolineatura) e il tooltip
+  del titolo diventa «Questo brano non ha un album salvato».
+
+**Verifiche (19/09/2026).** `test_album_clic.py` → **10 test nuovi**: le funzioni
+eseguite davvero in JavaScriptCore con `setAlbumFilter` / `avvisoOnyx` /
+`evidenziaBrano` / `tracks` / `currentTrackId` finti (album pieno → filtro e
+nessun avviso; vuoto, nullo, assente → avviso, nessun filtro e `false`; nowbar con
+album → filtro e poi scorrimento; nowbar senza album → solo l'avviso; nessun brano
+corrente → non fa nulla) più i controlli sul documento (delega a
+`apriAlbumPerNome`, `data-album` intatto, cella marcata, tooltip onesto, avviso in
+basso che sostituisce il precedente). `test_nowbar_scroll.py` aggiornato: la
+guardia muta non c'è più per l'album (l'album mancante si dice, l'artista mancante
+tace come prima). In **Chrome vero headless** sulla pagina `/onyx` (945 brani
+importati dal database vero): **58 righe** con `data-album=""` — esattamente i 58
+brani senza album — e il clic su una di quelle mostra l'avviso, **non** cambia il
+filtro e non lascia errori in console; il clic su un brano **con** album filtra
+ancora (da 944 righe a 1). Suite:
+`python3 -m unittest test_album_clic test_nowbar_scroll test_player_hero test_search_field test_onyx_modifica_db`
+→ **64 OK**.
+
+**Resta aperto (se serve).** Il campo `album` di quei 58 brani si potrebbe
+riempire dai metadati YouTube che sono già nel database (53 dei 58 hanno
+`yt_channel` e `yt_playlist`): sarebbe un raggruppamento per canale/produttore,
+non un album vero, quindi è una scelta da fare a mano e non l'ho fatta.
+
 ## Note operative e stato corrente (11/09/2026, aggiornate al 19/09/2026)
 
 Da tenere presente nelle sessioni di lavoro successive:
