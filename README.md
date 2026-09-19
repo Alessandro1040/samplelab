@@ -157,6 +157,15 @@ con `(2)` nella cartella locale:
   su database e `covers/` temporanei (📂 upload, 🎬 miniatura del video, 📁 copertina
   già presente, 🗑 che non tocca il file di un'altra canzone) e l'app viva:
   `python3 -m unittest -v test_cover_canzone`
+- `test_recupera_youtube.py` — test del **recupero di miniatura e dati YouTube sulle
+  canzoni già in libreria** (`POST /db/songs/<id>/recupera_youtube`, elenco dei
+  candidati e recupero in blocco): la funzione pura `fonte_video_riga` (link → id →
+  ricerca), la lettura dei dati del video con un yt-dlp finto (con un link non si
+  cerca **mai**, senza link si passa da `yt_search_first`), la miniatura salvata in
+  `covers/` con `cover_art_path` scritto (e la copertina che c'è già che non si
+  tocca), le rotte su un database temporaneo, il blocco col progresso nel job e il
+  cablaggio in pagina:
+  `python3 -m unittest -v test_recupera_youtube`
 - `midi_studio/` — **app separata (porta 5080)**: estrae MIDI da un audio e
   confronta due MIDI (vedi la sezione *MIDI Studio* qui sotto)
 - `cookies.txt` — 🔒 versione **snellita**: solo i cookie anti-403 di YouTube
@@ -809,6 +818,131 @@ copertina dalla miniatura e `copertina_da_miniatura` non scrive file quando non
 c'è niente da scaricare; `test_cover_canzone.py` + `test_video_canzone.py` 56 `OK`
 (le strade a mano restano quelle di prima); suite completa **616 → 627 `OK`**.
 
+## 🖼 Miniatura e dati YouTube sulle canzoni già in libreria — 19/09/2026
+
+Segnalato da Alessandro: «le canzoni che scarichi da youtube, tipo *[CINEMATIC] NF
+Type Beat 2024 ＂Clown” (Prod. Raedius)* non contengono miniatura video e
+informazioni che stanno su youtube come tag, descrizione, ecc… puoi sistemare?»
+
+Aveva ragione, e la causa era **doppia**:
+
+1. **Il recupero automatico c'è solo per le righe NUOVE.** `arricchisci_riga_dal_video`
+   (19/09/2026) completa la riga appena nata da un download — playlist, ⬇ Scarica,
+   «➕ Aggiungi». Le righe già in libreria non si toccavano di proposito, e i numeri
+   lo dicono: su **945 canzoni**, **921 senza miniatura** in `covers/`, **897 senza
+   nemmeno un campo `yt_*`**, 888 senza MP4. Anche le righe che i dati li avevano
+   (le playlist del 18/09: `yt_channel`, `yt_tags`, `yt_description`, `yt_views` e
+   `yt_thumbnail` scritti) erano **senza copertina**: `yt_thumbnail` è un URL, il
+   FILE in `covers/` non era mai stato scaricato.
+2. **In pagina la miniatura si cercava solo in `covers/`.** `coverThumb`/`coverUrl`
+   di `index (2).html`, `coverBrano` di `browse.html` e l'hero di `scheda.html`
+   leggevano **solo** `cover_art_path`: con l'URL della miniatura in tabella e il
+   file assente, la riga restava **senza immagine**. E i campi `yt_*` non si
+   vedevano da nessuna parte: nemmeno il modale ✏️ Edit li mostrava.
+
+### Cosa fa ora l'app
+
+**1) La miniatura di riserva (subito, senza scaricare niente).** Se `cover_art_path`
+è vuoto e la riga ha `yt_thumbnail`, l'immagine si vede lo stesso, presa dall'URL
+(`coverUrlRiga(f, yt)` in `index (2).html`, `miniaturaYT(s)` in `browse.html`,
+l'hero di `scheda.html`). Le righe che l'URL ce l'avevano si sono viste **senza
+scaricare nulla**.
+
+**2) Il pulsante 🖼 YT su ogni riga** (`POST /db/songs/<id>/recupera_youtube`):
+prende i dati del video, li scrive nella riga (`aggancia_metadati_youtube`, solo i
+campi vuoti: niente si calpesta) e salva la **miniatura vera in `covers/`**
+(`copertina_da_miniatura` → `cover_art_path`), così l'immagine non dipende più da un
+URL della CDN di YouTube. Con `{"video": true}` scarica anche l'MP4, con
+`{"forzato": true}` rifà la copertina anche se c'è (una copertina **scelta a mano**
+non si tocca mai, se non forzando).
+
+**3) Da dove viene il video: la stessa regola del 🎬** (`fonte_video_riga`, PURA):
+prima il **link** della riga (`youtube_url`), poi l'**id** salvato col download
+(`yt_video_id`), e **solo se non c'è né l'uno né l'altro** una ricerca per «artista -
+titolo» (`yt_search_first`, quello col punteggio) — e in quel caso la risposta dice
+`cercato: true`, il messaggio in pagina avvisa e **il link trovato resta scritto
+nella riga** (solo se era vuoto: senza, il 🎬 Video lo cercherebbe una seconda volta,
+magari su un video diverso). Con un link o un id **non si cerca mai**: il caso
+«Public Enemy #1» del 18/09 non si ripete.
+
+**4) Il recupero in blocco, SOLO per le righe che hanno già un link/id**
+(`POST /db/recupera_youtube`): un job come gli altri (`/status/<job_id>`), con
+`progress.fatti/totale/brano`, l'esito riga per riga in `risultati` e il conto finale
+in `riepilogo`. Fra una riga e l'altra c'è una **pausa** (1,5 s): sono chiamate a
+YouTube, e cento di fila senza respiro si fanno bloccare. Le righe **senza** link
+restano fuori di proposito (lì servirebbe una ricerca per artista+titolo: 788 righe,
+col rischio di prendere il video sbagliato) — si fanno una per volta col pulsante.
+L'elenco dei candidati è una **lettura** che non tocca la rete
+(`GET /db/recupera_youtube` → `{totale, righe, senza_link}`): il numero si vede
+**prima** di far partire qualcosa.
+
+### ⚠️ Perché il blocco NON fa la ricerca per «artista - titolo»
+
+Perché è la stessa storia del 18/09/2026: la riga di *Public Enemy* (Eminem) riceveva
+il video di **«Public Enemy #1»** proprio così. Su 945 righe, 788 non hanno né link
+né id: una ricerca a testa sono 788 occasioni di prendere il video sbagliato (e 788
+attese). Quelle si fanno a mano, una per volta, guardando il video che il pulsante
+🖼 YT restituisce.
+
+### Dove si usa, in pagina
+
+- **Riga del tab 🗄️ Database**: pulsante **🖼 YT** accanto a 🎬 Video (✓ quando la
+  miniatura è in `covers/`, in azzurro quando manca). Un clic = una riga.
+- **Pannello 🖼 Miniatura e dati YouTube** (sotto «✏️ Rinomina in massa»): dice quante
+  righe sono da fare e quante restano fuori (senza link), poi parte il blocco col
+  progresso (`⏳ 32/156 — Token - Hawk Tuah Freestyle`) e il riepilogo finale.
+- **Modale ✏️ Edit**: un riquadro **📺 YouTube** con canale, viste, data di
+  caricamento, categoria, tag e descrizione (i fatti **letti** dal video: non si
+  modificano a mano) e il pulsante per rifare il recupero.
+
+**Verifiche (19/09/2026).** File di test nuovo `test_recupera_youtube.py` — **35
+test `OK`**: `fonte_video_riga` (link, id, ricerca — funzione pura), `info_video_riga`
+con un yt-dlp **finto** (con un link la chiamata a YouTube è **una sola** e nessuna
+ricerca, senza link si passa da `ytsearch20:`, un video illeggibile diventa un motivo
+e non un'eccezione, la ricerca senza risultati lo dice), `recupera_dati_video` su un
+database/`covers/`/`videos/` temporanei (campi `yt_*` scritti, miniatura in `covers/`
+col nome in `cover_art_path`, **copertina che c'è già non si tocca**, `forzato=True`
+la rifà, il link trovato dalla ricerca resta scritto, il video MP4 che parte con
+`video=True`), `righe_da_recuperare` (candidati, riga completa esclusa, riga **senza
+link** fuori dal blocco, copertina col file sparito da rifare), `avvia_recupero_youtube`
+(2 righe lavorate, progresso e `riepilogo`, secondo avvio respinto) e le rotte vere
+col `test_client` (200/404/502, elenco senza rete, job del blocco fino a `done`).
+Suite completa: **653 → 688 test `OK`** (skipped=1). Quattro test **aggiornati** in
+`test_verify_cover.py` (54 `OK`), perché le stringhe che controllavano sono cambiate
+di proposito: `coverThumb` ora ha il terzo parametro (`coverThumb(f, size, yt)`), i
+suoi due punti d'uso passano `yt_thumbnail`, e l'hero di `scheda.html` prova la
+miniatura del video — i controlli ora verificano la forma **nuova**, non sono stati
+cancellati.
+
+**Prova sui dati veri.** `GET /db/recupera_youtube` sull'app viva: **157 righe** con
+link/ID da completare e **788 senza link**. Pulsante 🖼 YT su *[CINEMATIC] NF Type
+Beat 2024 ＂Clown” (Prod. Raedius)*: risposta `{"ok": true, "metadati": true,
+"cover": "song_c44983d01d7b.jpg", "cercato": false}` e miniatura vera da **79 KB** in
+`covers/` (`/cover/song_c44983d01d7b.jpg` → **200** `image/jpeg`). Poi il **blocco**
+sulle 156 righe rimaste (job `b281d7a1`, ~9 minuti con la pausa di 1,5 s): **132
+miniature salvate** su 156 righe, **24 righe avevano già una copertina** (i dati del
+video sono stati scritti lo stesso) e **1 sola non leggibile** — *Maroon 5 -
+Animals*, YouTube risponde «Sign in to confirm your age» (video con **restrizione
+d'età**: serve il login, i cookie presenti non bastano: si può agganciare la
+copertina a mano da 🖼). `covers/` è passata da 25 a **158 file** (13 MB, non
+versionata). Dopo il blocco restano **788 righe senza miniatura**: **787** non hanno
+né link né id (quelle si fanno una per volta col pulsante 🖼 YT) e **1** è proprio
+*Maroon 5 - Animals*, che resta candidata (il video è a restrizione d'età) e si può
+sistemare a mano.
+
+**Chrome vero headless** sul tab 🗄️ Database: **945/945** righe col pulsante **🖼
+YT**, il pannello del conto («94 righe con link/ID… · 788 righe senza link»: erano
+**157** prima del blocco, il numero scende mentre il lavoro procede), il modale ✏️
+con il riquadro **📺 YouTube** pieno di dati veri («📺 Prod By Raedius · 👁 1.842
+viste · 📅 caricato il 2021-03-22 · 🏷 People & Blogs», i tag, la descrizione) e il
+pulsante di recupero; **nessun errore JS** (solo il solito 404 di `favicon.ico`).
+
+⚠️ Nel commit c'è anche il **database**: la modifica dei dati è voluta (le miniature
+in `covers/` e i campi `yt_*` sono il punto della richiesta). Il recupero tocca
+**solo** `yt_*`, `cover_art_path` e `updated_at` — e `youtube_url` unicamente sulle
+righe che non avevano né link né id: titolo, artista, album, BPM e testi non si
+toccano.
+
 ## Un solo audio per volta nella Verifica — e il player dell'app da qui si zittisce — 18/09/2026
 
 Segnalato da Alessandro aprendo la scheda di *Control*: «l'audio principale può
@@ -938,11 +1072,28 @@ Da tenere presente nelle sessioni di lavoro successive:
   **VIDEO MP4** che parte da solo (vedi la sezione *Metadati, copertina e VIDEO:
   dal download alla riga completa*). Vale per il download dal modale «➕ Aggiungi»
   (`/db/add_local` con `yt_meta`), per ⬇ Scarica di una riga
-  (`avvia_download_canzone`) e per la playlist. Le righe **già** in libreria non si
-  toccano: niente recupero in blocco (sarebbero centinaia di MP4).
+  (`avvia_download_canzone`) e per la playlist. Per le righe **già** in libreria il
+  recupero si fa **a richiesta** (pulsante 🖼 YT o blocco per le righe con link: vedi
+  il bullet qui sotto).
   ⚠️ Un download adesso **scarica due file** (audio + MP4): è voluto, ma su una
   playlist lunga si sente — e se il video non è scaricabile il file audio c'è
   comunque (l'errore del video resta scritto nel suo job).
+- **🖼 Miniatura e dati YouTube sulle righe già in libreria (19/09/2026).** Il
+  recupero non è più solo per le righe appena scaricate: il pulsante **🖼 YT** di ogni
+  riga (`POST /db/songs/<id>/recupera_youtube`) e il pannello **🖼 Miniatura e dati
+  YouTube** del tab 🗄️ Database (`POST /db/recupera_youtube`, un job come gli altri,
+  con `progress.fatti/totale/brano`) prendono dal video i campi `yt_*` e salvano la
+  **miniatura vera in `covers/`** (prima `yt_thumbnail` era solo un URL e la copertina
+  non si vedeva: le pagine leggevano solo `cover_art_path`). Il blocco fa **solo** le
+  righe che hanno già un link/id — `GET /db/recupera_youtube` (sola lettura, nessuna
+  chiamata a YouTube) dice quante sono e quante restano fuori: le righe **senza** link
+  (nel DB vero **788**) richiederebbero una ricerca per «artista - titolo» e si fanno
+  **una per volta** col pulsante, perché lì il video può uscire sbagliato (il caso
+  «Public Enemy #1» del 18/09). In pagina la miniatura di riserva si vede **senza
+  scaricare niente** (`coverUrlRiga` in `index (2).html`, `miniaturaYT` in
+  `browse.html`/`scheda.html`); nel modale ✏️ Edit c'è il riquadro **📺 YouTube**
+  (canale, viste, data, categoria, tag, descrizione). ⚠️ La miniatura di YouTube a
+  volte arriva in **`.webp`**: va benissimo, `/cover/<file>` la serve col mime giusto.
 - **Regola di lavoro di ogni sessione.** Dopo **ogni** modifica ai sorgenti:
   riavviare l'app (è l'unica copia: non c'è una copia di lavoro separata dal
   clone), controllare il log di avvio, provare con `curl` le rotte toccate e le

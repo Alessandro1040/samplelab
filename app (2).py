@@ -2679,6 +2679,245 @@ def arricchisci_riga_dal_video(song_id, campi=None, video=True):
     return res
 
 
+# ── MINIATURA E DATI DEL VIDEO PER LE RIGHE GIÀ IN LIBRERIA (19/09/2026) ──────
+# `arricchisci_riga_dal_video` completa la riga APPENA nata da un download. Le
+# righe che erano già in libreria sono rimaste spoglie: su 945 canzoni 921 non
+# hanno la miniatura in `covers/` e 897 non hanno nemmeno un campo `yt_*`. Alcune
+# (per esempio le playlist del 18/09) hanno invece l'URL della miniatura e i dati,
+# ma il FILE non è mai stato scaricato — e in pagina non si vedeva niente, perché
+# tutte le pagine (index, browse, scheda) leggono solo `cover_art_path`.
+# Qui si recupera SU RICHIESTA: una riga per volta (pulsante 🖼 YT della riga) o
+# in blocco **solo** per le righe che hanno già un link/id YouTube — niente
+# ricerca a caso sui 788 brani senza link, che riporterebbe il caso «Public
+# Enemy #1» (un video trovato per artista+titolo al posto di quello vero).
+def fonte_video_riga(riga):
+    """Da dove si prende il video di una riga: `(query, da_link)` (funzione PURA).
+
+    Stessa regola di `avvia_download_video_canzone`, in quest'ordine:
+    1) il LINK YouTube della riga (`youtube_url`); 2) l'id salvato col download
+    (`yt_video_id`); 3) solo se non c'è né l'uno né l'altro, «artista - titolo»
+    con `da_link=False` — cioè una RICERCA, che può pescare un altro video.
+    """
+    riga = riga or {}
+    link = str(riga.get("youtube_url") or "").strip()
+    if link and is_youtube_url(link):
+        return link, True
+    vid = str(riga.get("yt_video_id") or "").strip()
+    if vid:
+        return f"https://www.youtube.com/watch?v={vid}", True
+    query = " ".join(x for x in [str(riga.get("artist") or "").strip(),
+                                 str(riga.get("title") or "").strip()] if x)
+    return query, False
+
+
+def info_video_riga(riga, timeout=60):
+    """I dati che il video della riga racconta di sé, SENZA scaricare niente.
+
+    yt-dlp con `skip_download` legge solo l'`info_dict` (canale, tag, descrizione,
+    viste, data, miniatura) e non crea nessun file in `downloads/`. Con un
+    link/ID **non si cerca niente**: se quel video non è leggibile lo si dice,
+    invece di prendere un altro video. Senza link né ID si passa da
+    `yt_search_first` (quello col punteggio su titolo e artista).
+
+    Ritorna `(info|None, url_usata, cercato, motivo)`: `cercato=True` quando il
+    video è stato TROVATO con una ricerca, e la pagina lo deve dire.
+    """
+    riga = riga or {}
+    query, da_link = fonte_video_riga(riga)
+    if not query:
+        return None, "", False, "la riga non ha né link YouTube né titolo"
+    url = query
+    if not da_link:
+        trovato, _titolo = yt_search_first(query, riga.get("title") or "",
+                                           riga.get("artist") or "")
+        if not trovato:
+            return None, "", True, f"nessun video trovato cercando «{query}»"
+        url = trovato
+    ydl_opts = {
+        "quiet": True, "no_warnings": True, "skip_download": True,
+        "noplaylist": True, "socket_timeout": 20,
+        # cookie esportati da Chrome: senza, YouTube risponde 403 (come nel download)
+        "cookiefile": os.path.join(BASE_DIR, "cookies.txt"),
+    }
+    info_box, exc_box = [None], [None]
+
+    def _leggi():
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_box[0] = ydl.extract_info(url, download=False)
+        except Exception as e:
+            exc_box[0] = e
+
+    t = threading.Thread(target=_leggi, daemon=True)
+    t.start()
+    t.join(max(5, int(timeout or 60)))
+    if t.is_alive():
+        return None, url, not da_link, f"YouTube non ha risposto in {timeout}s"
+    if exc_box[0]:
+        return None, url, not da_link, f"video non leggibile ({str(exc_box[0])[:80]})"
+    info = info_box[0] or {}
+    if isinstance(info.get("entries"), list) and info["entries"]:
+        info = info["entries"][0] or {}
+    if not isinstance(info, dict) or not info:
+        return None, url, not da_link, "il video non racconta niente"
+    return info, url, not da_link, ""
+
+
+def recupera_dati_video(song_id, forzato=False, video=False, timeout=60):
+    """Riempie una riga già in libreria coi dati del video e la MINIATURA.
+
+    Tre passi, gli stessi di `arricchisci_riga_dal_video` (che li fa per la riga
+    appena scaricata): i campi `yt_*` (`aggancia_metadati_youtube`), la miniatura
+    in `covers/` col suo nome in `cover_art_path` (`copertina_da_miniatura`) e —
+    solo con `video=True` — l'MP4 (`avvia_download_video_canzone`). Niente si
+    calpesta: un campo vuoto non spegne quello che c'era, una copertina già
+    presente resta (a meno di `forzato=True`), un video agganciato non si riscarica.
+
+    Quando il video è stato TROVATO con una ricerca, il link resta scritto nella
+    riga (solo se `youtube_url` era vuoto): senza, il 🎬 Video lo cercherebbe una
+    seconda volta, magari su un video diverso.
+
+    Ritorna `{"ok":…, "fonte":…, "cercato":…, "cover":…, "messaggi":[…], …}`.
+    """
+    with get_db() as conn:
+        s = row2dict(conn.execute("SELECT * FROM songs WHERE id=?", (song_id,)).fetchone())
+    if not s:
+        return {"ok": False, "error": "riga non trovata"}
+    info, url, cercato, motivo = info_video_riga(s, timeout=timeout)
+    if info is None:
+        return {"ok": False, "error": motivo, "fonte": url, "cercato": cercato}
+    campi = campi_youtube(info)
+    messaggi = []
+    if aggancia_metadati_youtube(song_id, campi):
+        messaggi.append("📺 dati del video YouTube scritti nella riga")
+    if cercato and url:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE songs SET youtube_url=CASE WHEN youtube_url IS NULL OR youtube_url='' "
+                "THEN ? ELSE youtube_url END, updated_at=datetime('now') WHERE id=?",
+                (url, song_id))
+        messaggi.append(f"⚠️ video trovato CERCANDO «{s.get('artist') or ''} - "
+                        f"{s.get('title') or ''}»: {url} — se non è quello giusto, "
+                        "correggi il link con ✏️ Edit → URL YouTube")
+    nome, motivo_cover = copertina_da_miniatura(song_id, campi.get("yt_thumbnail"),
+                                                forzato=forzato)
+    if nome:
+        messaggi.append(f"🖼 miniatura salvata in covers/: {nome}")
+    elif motivo_cover:
+        messaggi.append(f"🖼 copertina: {motivo_cover}")
+    res = {"ok": True, "fonte": url, "cercato": cercato, "metadati": bool(campi),
+           "cover": nome or "", "cover_motivo": motivo_cover,
+           "messaggi": messaggi, "video_job": "", "video_motivo": ""}
+    if video:
+        res["video_job"], res["video_motivo"] = avvia_download_video_canzone(
+            song_id, forzato=forzato)
+    with get_db() as conn:
+        res["song"] = row2dict(conn.execute("SELECT * FROM songs WHERE id=?",
+                                            (song_id,)).fetchone())
+    print(f"[db {song_id}] recupero dal video: " +
+          ("; ".join(messaggi) if messaggi else "niente da aggiungere"))
+    return res
+
+
+def righe_da_recuperare(solo_con_link=True):
+    """I candidati al recupero: `(righe, senza_link)`.
+
+    Una riga è candidata se ha una FONTE per il video (link o id) e le manca
+    qualcosa: la miniatura (`cover_art_path` vuoto o file non più in `covers/`,
+    vedi `_cover_mancante`) o i dati del video (`yt_meta_at` vuoto). Ogni riga
+    porta `manca` con l'elenco (serve al pannello della pagina per dirlo).
+
+    Con `solo_con_link=True` (il blocco) restano fuori le righe senza link/id:
+    per quelle servirebbe una ricerca YouTube per «artista - titolo», che può
+    pescare un video sbagliato — si fanno una per volta, col pulsante 🖼 YT.
+    Il secondo valore conta proprio quelle righe lì (la pagina le mostra).
+    """
+    with get_db() as conn:
+        righe = rows2list(conn.execute(
+            "SELECT id, artist, title, youtube_url, yt_video_id, cover_art_path, "
+            "yt_meta_at FROM songs ORDER BY created_at").fetchall())
+    fuori, senza_link = [], 0
+    for r in righe:
+        query, da_link = fonte_video_riga(r)
+        if not query:
+            continue
+        if not da_link:
+            senza_link += 1
+            if solo_con_link:
+                continue
+        manca = []
+        if _cover_mancante(r.get("cover_art_path")):
+            manca.append("copertina")
+        if not str(r.get("yt_meta_at") or "").strip():
+            manca.append("dati del video")
+        if manca:
+            r["manca"] = manca
+            fuori.append(r)
+    return fuori, senza_link
+
+
+_ry_lock = threading.Lock()
+_ry_bulk = {"job": ""}
+
+def avvia_recupero_youtube(limite=0, forzato=False, pausa=1.5):
+    """Avvia il recupero in blocco (solo righe con link/id). Ritorna `(job_id, motivo)`.
+
+    Un job come gli altri (`/status/<job_id>` lo racconta passo passo): `progress`
+    ha `fatti`/`totale`/`brano`, `risultati` l'esito riga per riga e `riepilogo`
+    il conto finale. Fra una riga e l'altra si aspetta un momento (`pausa`): sono
+    chiamate a YouTube, e cento di fila senza respiro si fanno bloccare (403).
+    """
+    with _ry_lock:
+        attivo = _ry_bulk.get("job") or ""
+        if attivo and jobs.get(attivo, {}).get("status") in _STATI_DOWNLOAD_ATTIVI + ("working",):
+            return attivo, "recupero già in corso"
+        righe, senza_link = righe_da_recuperare(solo_con_link=True)
+        if limite:
+            righe = righe[:int(limite)]
+        if not righe:
+            return "", ("niente da recuperare: le righe con un link YouTube hanno già "
+                        "miniatura e dati del video")
+        jid = str(uuid.uuid4())[:8]
+        jobs[jid] = {"status": "pending",
+                     "progress": {"percent": 0, "fatti": 0, "totale": len(righe), "brano": ""},
+                     "files": [], "filename": "", "yt_title": "", "error": "",
+                     "bulk": True, "senza_link": senza_link, "risultati": []}
+        _ry_bulk["job"] = jid
+
+    def run():
+        risultati = jobs[jid]["risultati"]
+        totale = len(righe)
+        for n, r in enumerate(righe, start=1):
+            brano = " - ".join(x for x in [str(r.get("artist") or "").strip(),
+                                           str(r.get("title") or "").strip()] if x) or str(r.get("id"))
+            jobs[jid]["status"] = "working"
+            jobs[jid]["progress"] = {"percent": int((n - 1) / totale * 100), "fatti": n - 1,
+                                     "totale": totale, "brano": brano}
+            try:
+                esito = recupera_dati_video(r["id"], forzato=forzato)
+            except Exception as e:
+                esito = {"ok": False, "error": str(e)[:120]}
+            risultati.append({"id": r["id"], "brano": brano, "ok": bool(esito.get("ok")),
+                              "cover": esito.get("cover") or "",
+                              "motivo": esito.get("error") or (esito.get("cover_motivo") or "")})
+            jobs[jid]["progress"] = {"percent": int(n / totale * 100), "fatti": n,
+                                     "totale": totale, "brano": brano}
+            if pausa and n < totale:
+                time.sleep(float(pausa))
+        con_cover = sum(1 for x in risultati if x.get("cover"))
+        riuscite = sum(1 for x in risultati if x.get("ok"))
+        jobs[jid]["status"] = "done"
+        jobs[jid]["filename"] = ""
+        jobs[jid]["riepilogo"] = (f"{con_cover} miniature salvate su {totale} righe "
+                                  f"({riuscite} recuperi riusciti)")
+        print(f"[recupero youtube {jid}] {jobs[jid]['riepilogo']}")
+        with _ry_lock:
+            _ry_bulk["job"] = ""
+
+    threading.Thread(target=run, daemon=True).start()
+    return jid, f"recupero avviato su {len(righe)} righe con link/ID"
+
+
 def do_download_playlist(job_id, url, fmt="mp3", video=False):
     """Scarica TUTTA la playlist. Con `video=True` (18/09/2026) scarica l'MP4 del
     video, lo archivia in `videos/` e ne ricava l'mp3 da ascoltare in libreria:
@@ -4487,6 +4726,56 @@ def db_song_delete_video(song_id):
                      "WHERE id=?", (song_id,))
     print(f"[db {song_id}] video tolto dalla riga ({nome}) → {spostato or 'file già assente'}")
     return jsonify({"ok": True, "video_file": None, "spostato_in": spostato})
+
+
+# ── MINIATURA E DATI DEL VIDEO PER LE RIGHE GIÀ IN LIBRERIA (19/09/2026) ──────
+# Il pulsante 🖼 YT di ogni riga usa `POST /db/songs/<id>/recupera_youtube`; il
+# pannello del tab 🗄️ Database usa `GET /db/recupera_youtube` (l'elenco dei
+# candidati, che NON tocca la rete) e `POST /db/recupera_youtube` (il blocco).
+@app.route("/db/songs/<song_id>/recupera_youtube", methods=["POST"])
+def db_song_recupera_youtube(song_id):
+    """Dati del video + miniatura su UNA riga già in libreria (pulsante 🖼 YT).
+
+    JSON opzionale: `{"forzato": true}` rifà anche la copertina se c'è già,
+    `{"video": true}` scarica ANCHE l'MP4. Il video si prende dal link della riga
+    o dal suo id; solo se non c'è né l'uno né l'altro si cerca per «artista -
+    titolo», e la risposta lo dice (`cercato: true`).
+    """
+    dati = request.json or {}
+    with get_db() as conn:
+        esiste = conn.execute("SELECT 1 FROM songs WHERE id=?", (song_id,)).fetchone()
+    if not esiste:
+        return jsonify({"ok": False, "error": "Canzone non trovata"}), 404
+    res = recupera_dati_video(song_id, forzato=bool(dati.get("forzato")),
+                              video=bool(dati.get("video")))
+    return jsonify(res), (200 if res.get("ok") else 502)
+
+
+@app.route("/db/recupera_youtube", methods=["GET"])
+def db_recupera_youtube_elenco():
+    """I candidati al recupero (sola lettura: NESSUNA chiamata a YouTube).
+
+    `{"totale": N, "righe": […], "senza_link": M}`: le righe con un link/id a cui
+    manca la miniatura o i dati del video (ogni riga porta `manca`), e quante
+    righe in più si potrebbero fare SOLO col pulsante — quelle senza link, dove
+    il video andrebbe CERCATO per «artista - titolo» (e può uscire quello
+    sbagliato: il caso «Public Enemy #1» del 18/09/2026).
+    """
+    righe, senza_link = righe_da_recuperare(solo_con_link=True)
+    return jsonify({"totale": len(righe), "righe": righe[:200], "senza_link": senza_link})
+
+
+@app.route("/db/recupera_youtube", methods=["POST"])
+def db_recupera_youtube_avvia():
+    """Recupero in blocco. JSON: `{"limite": N}` (0 = tutte), `{"forzato": true}`.
+
+    Risponde subito col job da seguire (`/status/<job_id>`): il lavoro è in
+    un thread, e fra una riga e l'altra c'è una pausa per non farsi bloccare.
+    """
+    dati = request.json or {}
+    job, motivo = avvia_recupero_youtube(limite=dati.get("limite") or 0,
+                                         forzato=bool(dati.get("forzato")))
+    return jsonify({"avviato": bool(job), "job_id": job, "motivo": motivo})
 
 
 @app.route("/covers")

@@ -130,7 +130,16 @@ function albumHref(a){return a?'/browse?album='+encodeURIComponent(a):''}
 // Il database tiene il NOME del file della copertina (`cover_art_path`, quello
 // che salva la Verifica): qui diventa l'URL servito da /cover/<file>. L'album non
 // ha una copertina propria, quindi si usa quella del primo suo brano che ce l'ha.
-function coverBrano(s){ return (s && s.cover_art_path) ? '/cover/'+encodeURIComponent(s.cover_art_path) : ''; }
+// La MINIATURA DEL VIDEO è il ripiego (19/09/2026): una riga può avere l'URL
+// della miniatura (`yt_thumbnail`, lo scrive il download) senza il FILE in
+// covers/ — prima restava senza immagine, perché qui si guardava solo
+// `cover_art_path`. Col pulsante 🖼 YT del tab 🗄️ Database l'immagine viene
+// salvata in covers/ e non dipende più da un URL della CDN di YouTube.
+function miniaturaYT(s){
+  const u = (s && s.yt_thumbnail) ? String(s.yt_thumbnail) : '';
+  return /^https?:\/\//i.test(u) ? u : '';
+}
+function coverBrano(s){ return (s && s.cover_art_path) ? '/cover/'+encodeURIComponent(s.cover_art_path) : miniaturaYT(s); }
 function coverAlbumDi(songs,nomeAlbum){
   const al=String(nomeAlbum||'').trim().toLowerCase();
   if(!al) return '';

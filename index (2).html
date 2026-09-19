@@ -590,6 +590,15 @@ a.db-stem-btn{display:inline-block;text-decoration:none}
     <div id="mr-result" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-top:8px"></div>
   </div>
 
+  <div class="mass-rename-panel">
+    <h3>🖼 Miniatura e dati YouTube (canzoni già in libreria)</h3>
+    <div class="mass-rename-row">
+      <button class="btn-mass-rename" onclick="avviaRecuperoYoutube(this)">▶ Recupera per le righe con link/ID</button>
+      <span id="ry-stato" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)">Controllo…</span>
+    </div>
+    <div id="ry-esito" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-top:8px"></div>
+  </div>
+
   <div class="db-script-panel">
     <h3>⚙️ Esegui query / script personalizzati</h3>
 
@@ -3575,7 +3584,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   document.body.classList.toggle('player-tab-active', name==='player');
-  if(name==='database'){ loadDb(); ensureCampiSposta(); } // riempie anche i menu dello strumento ➡️ Sposta
+  if(name==='database'){ loadDb(); ensureCampiSposta(); aggiornaRecuperoYoutube(); } // riempie anche i menu dello strumento ➡️ Sposta e il conto del recupero 🖼 YT
 }
 // Adatta l'altezza del wrapper del Player all'altezza REALE della barra tab:
 // così la nowbar interna del Player arriva esattamente a 8px dal bordo
@@ -5085,11 +5094,24 @@ function filterDb(q){
 // Se il file non c'è (la cartella covers/ non è versionata) la miniatura sparisce
 // da sola invece di lasciare l'icona di immagine rotta.
 function coverUrl(f){ return f ? '/cover/' + encodeURIComponent(f) : ''; }
-function coverThumb(f, size){
-  if(!f) return '';
+// La MINIATURA DI RISERVA (19/09/2026): una riga può avere l'URL della miniatura
+// del video (`yt_thumbnail`, lo scrive il download) senza il FILE in covers/ —
+// 102 canzoni erano così e in pagina non si vedeva nessuna immagine, perché qui
+// si guardava solo `cover_art_path`. Con l'URL come ripiego la miniatura si vede
+// subito; il pulsante 🖼 YT della riga la salva in covers/ (e non dipende più da
+// un URL della CDN di YouTube, che può scadere).
+function coverUrlRiga(f, yt){
+  if(f) return coverUrl(f);
+  return /^https?:\/\//i.test(String(yt||'')) ? String(yt) : '';
+}
+function coverThumb(f, size, yt){
+  const src = coverUrlRiga(f, yt);
+  if(!src) return '';
   const px = size || 26;
-  return `<a href="${coverUrl(f)}" target="_blank" title="Apri la copertina (covers/${esc(f)})">`+
-         `<img class="db-cover" style="width:${px}px;height:${px}px" src="${coverUrl(f)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></a>`;
+  const tito = f ? `Apri la copertina (covers/${esc(f)})`
+                 : 'Miniatura del video YouTube (non è ancora in covers/: col pulsante 🖼 YT della riga si salva nel database)';
+  return `<a href="${escA(src)}" target="_blank" title="${tito}">`+
+         `<img class="db-cover" style="width:${px}px;height:${px}px" src="${escA(src)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></a>`;
 }
 
 // ─── CONFERMA AUDIO (🔊) ─────────────────────────────────────────────────────
@@ -5162,7 +5184,7 @@ function renderDbTable(songs){
       </td>
       <td><div class="db-cell-stack">
         <div class="db-cell-flex">
-          ${coverThumb(s.cover_art_path, 26)}
+          ${coverThumb(s.cover_art_path, 26, s.yt_thumbnail)}
           <input class="db-cell-edit ${v('title',s.title)}" value="${esc(s.title||s.local_file||'')}" onchange="updateSongField('${s.id}','title',this.value)" title="Clicca per modificare">
           ${s.album?`<a class="db-browse-link" href="/browse?album=${encodeURIComponent(s.album)}" title="Vai all'album di questa canzone">💿</a>`:''}
         </div>
@@ -5188,6 +5210,7 @@ function renderDbTable(songs){
   ${s.local_file?`<button class="db-stem-btn" onclick="openInSampler('${s.id}')" title="Apri nel sampler FL-Studio: griglia/metronomo/TAP per controllare il BPM vero">🎛 Sampler</button>`:''}
   ${s.local_file?'':`<button class="db-stem-btn" onclick="scaricaInDownload('${s.id}',this)" title="Scarica il brano in downloads/ e aggancia il file a QUESTA riga del database (senza creare un doppione): la riga diventa suonabile e si apre nel sampler">⬇ Scarica</button>`}
   <button class="db-stem-btn" onclick="apriVideoModal('${s.id}')" ${s.video_file?'style="color:var(--accent2)"':''} title="${s.video_file?'Video già agganciato: '+escA(s.video_file):'Aggiungi un video a questa canzone: dal computer o da YouTube (va in videos/ e resta agganciato alla riga)'}">🎬 Video${s.video_file?' ✓':''}</button>
+  <button class="db-stem-btn" onclick="recuperaYoutube('${s.id}',this)" ${s.cover_art_path?'':'style="color:var(--accent2)"'} title="${(s.youtube_url||s.yt_video_id)?'Miniatura e dati del video YouTube su QUESTA riga: la miniatura va in covers/ (così non dipende più da un URL che scade) e tag, descrizione, canale e viste restano nella riga':'⚠️ Questa canzone non ha né link né id YouTube: il video verrà CERCATO per «artista - titolo» e potrebbe essere un video diverso (per sicurezza aggiungi il link con ✏️ Edit → URL YouTube)'}">🖼 YT${s.cover_art_path?' ✓':''}</button>
   <button class="db-stem-btn" onclick="apriConfrontoCampione('${s.id}')" title="Confronto campione: chi campiona e il campionato affiancati, col trim giallo dell'intervallo salvato nel database (se la canzone non ha campionamenti si apre lo stesso, con il collegamento alla scheda completa)">📄 Scheda</button>
 </td>
       <td>${s.relation_count>0?`<span class="db-rel-badge" style="cursor:pointer" onclick="apriConfrontoCampione('${s.id}')" title="Apri il confronto: chi campiona e il campionato, affiancati col trim giallo dell'intervallo salvato">🔗 ${s.relation_count}</span>`:`<span style="color:var(--muted);font-size:10px">—</span>`}</td>
@@ -5331,7 +5354,7 @@ async function verifySong(id) {
         // Copertina appena trovata: si vede subito accanto ai messaggi, senza
         // dover scorrere fino alla miniatura della riga.
         if (song.cover_art_path) {
-          feedbackHtml += `<div style="margin-top:6px;display:flex;gap:8px;align-items:center">${coverThumb(song.cover_art_path, 54)}`+
+          feedbackHtml += `<div style="margin-top:6px;display:flex;gap:8px;align-items:center">${coverThumb(song.cover_art_path, 54, song.yt_thumbnail)}`+
             `<span style="font-size:9px;color:#aaa;font-family:'Space Mono',monospace">covers/${esc(song.cover_art_path)}</span></div>`;
         }
         // Mostra subito il testo trovato su Genius (già filtrato dal server),
@@ -6314,6 +6337,43 @@ function nbSeek(e){
 // DB EDITOR (schermata Y): tutti gli attributi del database
 // ════════════════════════════════════════════════════════════
 let dbEditSongId=null;
+// I dati che il video YouTube racconta di sé (canale, viste, data, categoria, tag,
+// descrizione) e la miniatura: si GUARDANO e si recuperano da qui, non si scrivono
+// a mano — sono fatti LETTI da YouTube, non dati curati (19/09/2026).
+function rigaYoutubeHTML(s){
+  s = s || {};
+  const thumb = coverUrlRiga(s.cover_art_path, s.yt_thumbnail);
+  const ha = !!(s.yt_video_id || s.yt_channel || s.yt_views || s.yt_tags ||
+                s.yt_description || s.yt_upload_date);
+  const bottone = (testo)=>`<button class="db-stem-btn" style="font-size:11px;padding:6px 12px;margin-top:6px" onclick="recuperaYoutube('${s.id}',this)">${testo}</button>`;
+  if(!thumb && !ha){
+    const dove = (s.youtube_url || s.yt_video_id)
+      ? 'La riga ha il link del video: i dati e la miniatura si possono recuperare.'
+      : 'La riga non ha nemmeno il link: il video verrà CERCATO per «artista - titolo» (potrebbe essere un video diverso).';
+    return `<div class="dbe-field dbe-full"><span>📺 YouTube</span>
+      <div style="font-size:11px;color:var(--muted);line-height:1.5">Questa canzone non ha ancora né la miniatura né i dati del video. ${dove}</div>
+      ${bottone('🖼 Recupera miniatura e dati dal video')}</div>`;
+  }
+  const viste = (s.yt_views!=null && s.yt_views!=='') ? Number(s.yt_views).toLocaleString('it-IT') : '';
+  const pezzi = [];
+  if(s.yt_channel) pezzi.push(`📺 ${esc(s.yt_channel)}`);
+  if(viste) pezzi.push(`👁 ${esc(viste)} viste`);
+  if(s.yt_upload_date) pezzi.push(`📅 caricato il ${esc(s.yt_upload_date)}`);
+  if(s.yt_category) pezzi.push(`🏷 ${esc(s.yt_category)}`);
+  if(s.yt_meta_at) pezzi.push(`🕓 letti il ${esc(s.yt_meta_at)}`);
+  const link = s.youtube_url || (s.yt_video_id ? ('https://www.youtube.com/watch?v='+s.yt_video_id) : '');
+  return `<div class="dbe-field dbe-full"><span>📺 YouTube (letto dal video, non si modifica qui)</span>
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      ${thumb?`<img src="${escA(thumb)}" alt="" style="width:96px;height:54px;object-fit:cover;border-radius:6px;border:1px solid var(--border2)">`:''}
+      <div style="font-size:11px;color:var(--muted);line-height:1.6;min-width:0">
+        ${pezzi.join(' · ')}
+        ${s.yt_tags?`<div style="margin-top:4px;color:#9a9a9a">🏷 tag: ${esc(String(s.yt_tags).slice(0,300))}</div>`:''}
+        ${s.yt_description?`<div style="margin-top:4px;max-height:110px;overflow:auto;white-space:pre-wrap;color:#9a9a9a">${esc(String(s.yt_description).slice(0,1200))}</div>`:''}
+        ${link?`<div style="margin-top:4px"><a href="${escA(link)}" target="_blank" style="color:var(--accent2)">▶ Apri il video su YouTube ↗</a></div>`:''}
+      </div>
+    </div>
+    ${bottone('🖼 Rifai dal video (miniatura e dati)')}</div>`;
+}
 function dbEditFormHTML(s){
   const v=(f)=>s[f]!=null && s[f]!=='' ? s[f] : '';
   // Produttori: nel DB sono salvati come JSON (["A", "B"]) → mostra lista leggibile
@@ -6334,6 +6394,7 @@ function dbEditFormHTML(s){
     ${inp('rating','Rating','number')}${inp('bpm','BPM','number')}${inp('musical_key','Chiave')}${inp('play_count','Play count','number')}
     ${inp('duration','Durata (s)','number')}${sel('analyzed_status','Stato analisi',[['none','none'],['analyzing','analyzing'],['done','done'],['error','error']])}
     ${inp('youtube_url','URL YouTube')}${inp('genius_url','URL Genius')}${inp('whosampled_url','URL WhoSampled')}${inp('tunebat_url','URL Tunebat')}${inp('cover_art_path','Cover path')}
+    ${rigaYoutubeHTML(s)}
     ${coverControlsHTML(s)}
     ${inp('local_file','File locale')}
     ${inp('video_file','Video (in videos/)')}
@@ -6612,6 +6673,94 @@ function closeConfrontoCampione(){
   if(m) m.classList.remove('visible');
   const body = document.getElementById('rcm-body');
   if(body) body.innerHTML = '';   // gli iframe escono dal DOM: i player si fermano
+}
+
+// ── 🖼 MINIATURA E DATI YOUTUBE DI UNA RIGA GIÀ IN LIBRERIA (19/09/2026) ────
+// Richiesta di Alessandro: «le canzoni che scarichi da youtube, tipo [CINEMATIC]
+// NF Type Beat 2024 "Clown" (Prod. Raedius) non contengono miniatura video e
+// informazioni che stanno su youtube come tag, descrizione, ecc… puoi
+// sistemare?». Quelle righe hanno l'URL della miniatura in `yt_thumbnail` ma il
+// FILE non è mai stato scaricato (e i campi `yt_*` non si vedono da nessuna
+// parte): qui si chiede al server di riempire la riga DAL video — la miniatura
+// va in `covers/` come per tutte le altre canzoni, così non dipende più da un
+// URL della CDN di YouTube (che cambia e scade).
+async function recuperaYoutube(id, btn){
+  const testo = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='⏳…'; }
+  try{
+    const res=await fetch(`/db/songs/${id}/recupera_youtube`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json());
+    if(res && res.ok){
+      const pezzi=[];
+      if(res.cover) pezzi.push('🖼 '+res.cover);
+      if(res.metadati) pezzi.push('📺 dati del video');
+      if(res.cercato) pezzi.push('⚠️ video trovato cercando «artista - titolo»: controlla che sia quello giusto');
+      toast('✅ '+(pezzi.join(' · ')||'niente da aggiungere'), res.cercato?'info':'ok');
+      loadDb();
+    }else{
+      toast('✕ '+((res&&res.error)||'recupero non riuscito'),'err');
+      if(btn){ btn.disabled=false; btn.textContent=testo; }
+    }
+  }catch(e){
+    toast('✕ '+e.message,'err');
+    if(btn){ btn.disabled=false; btn.textContent=testo; }
+  }
+}
+
+// ── 🖼 RECUPERO IN BLOCCO (solo righe che hanno già un link/ID YouTube) ──────
+// L'elenco dei candidati è una semplice lettura (NESSUN contatto con YouTube):
+// il numero si vede PRIMA di far partire qualcosa. Le righe senza link restano
+// fuori di proposito (lì il video andrebbe cercato per artista+titolo e può
+// uscire quello sbagliato): si fanno una per volta col pulsante 🖼 YT.
+let ryPoll=null;
+async function aggiornaRecuperoYoutube(){
+  const stato=document.getElementById('ry-stato');
+  if(!stato) return;
+  try{
+    const res=await fetch('/db/recupera_youtube').then(r=>r.json());
+    stato.textContent=`${res.totale} righe con link/ID a cui manca la miniatura o i dati del video`;
+    if(res.senza_link){
+      stato.textContent+=` · ${res.senza_link} righe senza link (col pulsante 🖼 YT della riga, una per volta)`;
+    }
+  }catch(_){ stato.textContent='elenco non disponibile'; }
+}
+async function avviaRecuperoYoutube(btn){
+  if(ryPoll){ toast('⏳ Il recupero è già in corso','info'); return; }
+  if(!confirm('Recuperare miniatura e dati YouTube per le righe che hanno già un link o un id?\n\nRestano fuori le righe senza link (lì il video andrebbe CERCATO: si fanno una per volta col pulsante 🖼 YT).\nSi va una riga per volta, con una pausa fra una e l\'altra: ci vuole qualche minuto.')) return;
+  const stato=document.getElementById('ry-stato'), esito=document.getElementById('ry-esito');
+  if(btn) btn.disabled=true;
+  try{
+    const res=await fetch('/db/recupera_youtube',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json());
+    if(!res.job_id){
+      if(esito) esito.textContent='✕ '+(res.motivo||'recupero non partito');
+      if(btn) btn.disabled=false;
+      return;
+    }
+    const job=res.job_id;
+    if(esito) esito.textContent='⏳ avviato…';
+    ryPoll=setInterval(async()=>{
+      try{
+        const j=await fetch(`/status/${job}`).then(r=>r.json());
+        const p=j.progress||{};
+        if(stato) stato.textContent=`⏳ ${p.fatti||0}/${p.totale||0} — ${p.brano||''}`;
+        if(j.status==='done'){
+          clearInterval(ryPoll); ryPoll=null;
+          if(btn) btn.disabled=false;
+          if(esito) esito.textContent='✅ '+(j.riepilogo||'fatto');
+          toast('🖼 '+(j.riepilogo||'recupero completato'),'ok');
+          await aggiornaRecuperoYoutube(); loadDb();
+        }else if(j.status==='error'){
+          clearInterval(ryPoll); ryPoll=null;
+          if(btn) btn.disabled=false;
+          if(esito) esito.textContent='✕ '+(j.error||'errore');
+        }
+      }catch(_){}
+    },2000);
+  }catch(e){
+    if(esito) esito.textContent='✕ '+e.message;
+    if(btn) btn.disabled=false;
+  }
 }
 
 // ── 🎬 VIDEO DELLA CANZONE (dal computer o da YouTube) ─────────────────────

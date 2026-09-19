@@ -427,14 +427,18 @@ class TestCablaggio(unittest.TestCase):
 
     def test_helper_della_pagina(self):
         self.assertIn("function coverUrl(f){ return f ? '/cover/' + encodeURIComponent(f) : ''; }", self.index)
-        self.assertIn("function coverThumb(f, size){", self.index)
+        # Dal 19/09/2026 `coverThumb` ha un terzo parametro: l'URL della miniatura
+        # del video (`yt_thumbnail`), che si usa quando il FILE in `covers/` non c'è
+        # ancora (`coverUrlRiga`); la firma senza il terzo parametro non esiste più.
+        self.assertIn("function coverUrlRiga(f, yt){", self.index)
+        self.assertIn("function coverThumb(f, size, yt){", self.index)
         self.assertIn(".db-cover{width:26px;height:26px", self.index)
 
     def test_miniatura_nella_tabella_e_nelleditor(self):
-        # riga della tabella: miniatura accanto al titolo
-        self.assertIn("${coverThumb(s.cover_art_path, 26)}", self.index)
+        # riga della tabella: miniatura accanto al titolo (col ripiego sul video)
+        self.assertIn("${coverThumb(s.cover_art_path, 26, s.yt_thumbnail)}", self.index)
         # feedback della Verifica: la cover appena trovata si vede subito
-        self.assertIn("${coverThumb(song.cover_art_path, 54)}", self.index)
+        self.assertIn("${coverThumb(song.cover_art_path, 54, song.yt_thumbnail)}", self.index)
         # editor ✏️: anteprima accanto al campo «Cover path». Dal 18/09/2026
         # l'anteprima è nel blocco `coverControlsHTML`, che porta anche i comandi
         # per CAMBIARE la copertina (📂 carica · 🎬 dal video · 📁 in covers/ · 🗑):
@@ -443,7 +447,15 @@ class TestCablaggio(unittest.TestCase):
         self.assertIn("${coverControlsHTML(s)}", self.index)
 
     def test_scheda_usa_la_copertina_nellhero(self):
-        self.assertIn("const arte = s.cover_art_path ? '/cover/' + encodeURIComponent(s.cover_art_path) : '';", self.scheda)
+        # Dal 19/09/2026, se il FILE della copertina non c'è, l'hero prova la
+        # MINIATURA DEL VIDEO (`yt_thumbnail`): molte righe hanno l'URL salvato ma
+        # non il file in `covers/`, e prima l'hero restava sulla lettera.
+        self.assertIn(
+            "const miniaturaYT = /^https?:\\/\\//i.test(String(s.yt_thumbnail||'')) ? String(s.yt_thumbnail) : '';",
+            self.scheda)
+        self.assertIn(
+            "const arte = s.cover_art_path ? '/cover/' + encodeURIComponent(s.cover_art_path) : miniaturaYT;",
+            self.scheda)
         self.assertIn("${artoHTML}", self.scheda)
 
     def test_backend(self):
@@ -565,7 +577,7 @@ class TestEndpointVivo(unittest.TestCase):
     def test_pagina_con_gli_agganci_delle_copertine(self):
         with urllib.request.urlopen(SAMPLELAB_URL + "/", timeout=30) as r:
             pagina = r.read().decode("utf-8", "replace")
-        self.assertIn("function coverThumb(f, size){", pagina)
+        self.assertIn("function coverThumb(f, size, yt){", pagina)
         self.assertIn("/cover/' + encodeURIComponent(f)", pagina)
 
     def test_le_pagine_servite_hanno_la_cover_nella_nowbar(self):
